@@ -34,7 +34,10 @@ interface ImportSummary {
   employees: { imported: number; skipped: number }
   salaryPayments: { imported: number; skipped: number }
   expenses: { imported: number; skipped: number }
-  sheets: string[]
+  sheetsProcessed: string[]
+  sheetsIgnored: string[]
+  year: number
+  rowErrors: number
 }
 
 function formatBytes(bytes: number): string {
@@ -271,7 +274,10 @@ export default function StorageManager() {
 
           {importResult && (
             <div className="bg-emerald-50 rounded-xl p-3 space-y-1.5 text-xs">
-              <p className="font-bold text-emerald-700">{isAr ? '✅ نتائج الاستيراد:' : '✅ Import Results:'}</p>
+              <p className="font-bold text-emerald-700">
+                {isAr ? '✅ نتائج الاستيراد' : '✅ Import Results'}
+                <span className="text-slate-400 font-normal"> — {isAr ? 'سنة' : 'year'} {importResult.year}</span>
+              </p>
               {[
                 ['children', isAr ? 'أطفال' : 'children'],
                 ['payments', isAr ? 'دفعات' : 'payments'],
@@ -286,11 +292,23 @@ export default function StorageManager() {
                     <span>{label}</span>
                     <span>
                       <span className="text-emerald-600 font-semibold">+{stat.imported}</span>
-                      {stat.skipped > 0 && <span className="text-slate-400"> ({stat.skipped} skipped)</span>}
+                      {stat.skipped > 0 && <span className="text-slate-400"> ({stat.skipped} {isAr ? 'تخطّي' : 'skipped'})</span>}
                     </span>
                   </div>
                 )
               })}
+              {importResult.rowErrors > 0 && (
+                <div className="flex justify-between text-amber-600 pt-1 border-t border-emerald-100">
+                  <span>{isAr ? 'صفوف متجاهَلة' : 'rows skipped (errors)'}</span>
+                  <span className="font-semibold">{importResult.rowErrors}</span>
+                </div>
+              )}
+              {importResult.sheetsIgnored?.length > 0 && (
+                <p className="text-slate-400 pt-1 border-t border-emerald-100">
+                  {isAr ? 'شيتات متجاهَلة: ' : 'Ignored sheets: '}
+                  {importResult.sheetsIgnored.join('، ')}
+                </p>
+              )}
             </div>
           )}
         </Card>

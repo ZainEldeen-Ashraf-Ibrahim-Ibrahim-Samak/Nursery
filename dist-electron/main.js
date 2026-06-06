@@ -1,10 +1,10 @@
-import { n as getDb, r as initDb, t as closeDb } from "./connection-BgU_q3q-.js";
+import { n as getDb, r as initDb, t as closeDb } from "./connection-87fvLz8b.js";
 import { createRequire } from "node:module";
-import { BrowserWindow, app, dialog, ipcMain, net, protocol } from "electron";
 import path from "node:path";
+import nodeCrypto from "crypto";
+import { BrowserWindow, app, dialog, ipcMain, net, protocol } from "electron";
 import fs from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import nodeCrypto from "crypto";
 import ExcelJS from "exceljs";
 import PdfPrinter from "pdfmake";
 import mongoose, { Schema } from "mongoose";
@@ -15,7 +15,17 @@ var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __getProtoOf = Object.getPrototypeOf;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __esmMin = (fn, res) => () => (fn && (res = fn(fn = 0)), res);
 var __commonJSMin = (cb, mod) => () => (mod || (cb((mod = { exports: {} }).exports, mod), cb = null), mod.exports);
+var __exportAll = (all, no_symbols) => {
+	let target = {};
+	for (var name in all) __defProp(target, name, {
+		get: all[name],
+		enumerable: true
+	});
+	if (!no_symbols) __defProp(target, Symbol.toStringTag, { value: "Module" });
+	return target;
+};
 var __copyProps = (to, from, except, desc) => {
 	if (from && typeof from === "object" || typeof from === "function") for (var keys = __getOwnPropNames(from), i = 0, n = keys.length, key; i < n; i++) {
 		key = keys[i];
@@ -30,7 +40,402 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 	value: mod,
 	enumerable: true
 }) : target, mod));
+var __toCommonJS = (mod) => __hasOwnProp.call(mod, "module.exports") ? mod["module.exports"] : __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 var __require = /* @__PURE__ */ createRequire(import.meta.url);
+//#endregion
+//#region node_modules/dotenv/package.json
+var package_exports = /* @__PURE__ */ __exportAll({
+	browser: () => browser,
+	default: () => package_default,
+	description: () => description,
+	devDependencies: () => devDependencies,
+	engines: () => engines,
+	exports: () => exports$1,
+	funding: () => funding,
+	homepage: () => homepage,
+	keywords: () => keywords,
+	license: () => license,
+	main: () => main,
+	name: () => name,
+	readmeFilename: () => readmeFilename,
+	repository: () => repository,
+	scripts: () => scripts,
+	types: () => types,
+	version: () => version
+});
+var name, version, description, main, types, exports$1, scripts, repository, homepage, funding, keywords, readmeFilename, license, devDependencies, engines, browser, package_default;
+var init_package = __esmMin((() => {
+	name = "dotenv";
+	version = "16.6.1";
+	description = "Loads environment variables from .env file";
+	main = "lib/main.js";
+	types = "lib/main.d.ts";
+	exports$1 = {
+		".": {
+			"types": "./lib/main.d.ts",
+			"require": "./lib/main.js",
+			"default": "./lib/main.js"
+		},
+		"./config": "./config.js",
+		"./config.js": "./config.js",
+		"./lib/env-options": "./lib/env-options.js",
+		"./lib/env-options.js": "./lib/env-options.js",
+		"./lib/cli-options": "./lib/cli-options.js",
+		"./lib/cli-options.js": "./lib/cli-options.js",
+		"./package.json": "./package.json"
+	};
+	scripts = {
+		"dts-check": "tsc --project tests/types/tsconfig.json",
+		"lint": "standard",
+		"pretest": "npm run lint && npm run dts-check",
+		"test": "tap run --allow-empty-coverage --disable-coverage --timeout=60000",
+		"test:coverage": "tap run --show-full-coverage --timeout=60000 --coverage-report=text --coverage-report=lcov",
+		"prerelease": "npm test",
+		"release": "standard-version"
+	};
+	repository = {
+		"type": "git",
+		"url": "git://github.com/motdotla/dotenv.git"
+	};
+	homepage = "https://github.com/motdotla/dotenv#readme";
+	funding = "https://dotenvx.com";
+	keywords = [
+		"dotenv",
+		"env",
+		".env",
+		"environment",
+		"variables",
+		"config",
+		"settings"
+	];
+	readmeFilename = "README.md";
+	license = "BSD-2-Clause";
+	devDependencies = {
+		"@types/node": "^18.11.3",
+		"decache": "^4.6.2",
+		"sinon": "^14.0.1",
+		"standard": "^17.0.0",
+		"standard-version": "^9.5.0",
+		"tap": "^19.2.0",
+		"typescript": "^4.8.4"
+	};
+	engines = { "node": ">=12" };
+	browser = { "fs": false };
+	package_default = {
+		name,
+		version,
+		description,
+		main,
+		types,
+		exports: exports$1,
+		scripts,
+		repository,
+		homepage,
+		funding,
+		keywords,
+		readmeFilename,
+		license,
+		devDependencies,
+		engines,
+		browser
+	};
+}));
+//#endregion
+//#region electron/env.ts
+var import_main = /* @__PURE__ */ __toESM((/* @__PURE__ */ __commonJSMin(((exports, module) => {
+	var fs$1 = __require("fs");
+	var path$1 = __require("path");
+	var os = __require("os");
+	var crypto$2 = __require("crypto");
+	var version = (init_package(), __toCommonJS(package_exports).default).version;
+	var LINE = /(?:^|^)\s*(?:export\s+)?([\w.-]+)(?:\s*=\s*?|:\s+?)(\s*'(?:\\'|[^'])*'|\s*"(?:\\"|[^"])*"|\s*`(?:\\`|[^`])*`|[^#\r\n]+)?\s*(?:#.*)?(?:$|$)/gm;
+	function parse(src) {
+		const obj = {};
+		let lines = src.toString();
+		lines = lines.replace(/\r\n?/gm, "\n");
+		let match;
+		while ((match = LINE.exec(lines)) != null) {
+			const key = match[1];
+			let value = match[2] || "";
+			value = value.trim();
+			const maybeQuote = value[0];
+			value = value.replace(/^(['"`])([\s\S]*)\1$/gm, "$2");
+			if (maybeQuote === "\"") {
+				value = value.replace(/\\n/g, "\n");
+				value = value.replace(/\\r/g, "\r");
+			}
+			obj[key] = value;
+		}
+		return obj;
+	}
+	function _parseVault(options) {
+		options = options || {};
+		const vaultPath = _vaultPath(options);
+		options.path = vaultPath;
+		const result = DotenvModule.configDotenv(options);
+		if (!result.parsed) {
+			const err = /* @__PURE__ */ new Error(`MISSING_DATA: Cannot parse ${vaultPath} for an unknown reason`);
+			err.code = "MISSING_DATA";
+			throw err;
+		}
+		const keys = _dotenvKey(options).split(",");
+		const length = keys.length;
+		let decrypted;
+		for (let i = 0; i < length; i++) try {
+			const attrs = _instructions(result, keys[i].trim());
+			decrypted = DotenvModule.decrypt(attrs.ciphertext, attrs.key);
+			break;
+		} catch (error) {
+			if (i + 1 >= length) throw error;
+		}
+		return DotenvModule.parse(decrypted);
+	}
+	function _warn(message) {
+		console.log(`[dotenv@${version}][WARN] ${message}`);
+	}
+	function _debug(message) {
+		console.log(`[dotenv@${version}][DEBUG] ${message}`);
+	}
+	function _log(message) {
+		console.log(`[dotenv@${version}] ${message}`);
+	}
+	function _dotenvKey(options) {
+		if (options && options.DOTENV_KEY && options.DOTENV_KEY.length > 0) return options.DOTENV_KEY;
+		if (process.env.DOTENV_KEY && process.env.DOTENV_KEY.length > 0) return process.env.DOTENV_KEY;
+		return "";
+	}
+	function _instructions(result, dotenvKey) {
+		let uri;
+		try {
+			uri = new URL(dotenvKey);
+		} catch (error) {
+			if (error.code === "ERR_INVALID_URL") {
+				const err = /* @__PURE__ */ new Error("INVALID_DOTENV_KEY: Wrong format. Must be in valid uri format like dotenv://:key_1234@dotenvx.com/vault/.env.vault?environment=development");
+				err.code = "INVALID_DOTENV_KEY";
+				throw err;
+			}
+			throw error;
+		}
+		const key = uri.password;
+		if (!key) {
+			const err = /* @__PURE__ */ new Error("INVALID_DOTENV_KEY: Missing key part");
+			err.code = "INVALID_DOTENV_KEY";
+			throw err;
+		}
+		const environment = uri.searchParams.get("environment");
+		if (!environment) {
+			const err = /* @__PURE__ */ new Error("INVALID_DOTENV_KEY: Missing environment part");
+			err.code = "INVALID_DOTENV_KEY";
+			throw err;
+		}
+		const environmentKey = `DOTENV_VAULT_${environment.toUpperCase()}`;
+		const ciphertext = result.parsed[environmentKey];
+		if (!ciphertext) {
+			const err = /* @__PURE__ */ new Error(`NOT_FOUND_DOTENV_ENVIRONMENT: Cannot locate environment ${environmentKey} in your .env.vault file.`);
+			err.code = "NOT_FOUND_DOTENV_ENVIRONMENT";
+			throw err;
+		}
+		return {
+			ciphertext,
+			key
+		};
+	}
+	function _vaultPath(options) {
+		let possibleVaultPath = null;
+		if (options && options.path && options.path.length > 0) if (Array.isArray(options.path)) {
+			for (const filepath of options.path) if (fs$1.existsSync(filepath)) possibleVaultPath = filepath.endsWith(".vault") ? filepath : `${filepath}.vault`;
+		} else possibleVaultPath = options.path.endsWith(".vault") ? options.path : `${options.path}.vault`;
+		else possibleVaultPath = path$1.resolve(process.cwd(), ".env.vault");
+		if (fs$1.existsSync(possibleVaultPath)) return possibleVaultPath;
+		return null;
+	}
+	function _resolveHome(envPath) {
+		return envPath[0] === "~" ? path$1.join(os.homedir(), envPath.slice(1)) : envPath;
+	}
+	function _configVault(options) {
+		const debug = Boolean(options && options.debug);
+		const quiet = options && "quiet" in options ? options.quiet : true;
+		if (debug || !quiet) _log("Loading env from encrypted .env.vault");
+		const parsed = DotenvModule._parseVault(options);
+		let processEnv = process.env;
+		if (options && options.processEnv != null) processEnv = options.processEnv;
+		DotenvModule.populate(processEnv, parsed, options);
+		return { parsed };
+	}
+	function configDotenv(options) {
+		const dotenvPath = path$1.resolve(process.cwd(), ".env");
+		let encoding = "utf8";
+		const debug = Boolean(options && options.debug);
+		const quiet = options && "quiet" in options ? options.quiet : true;
+		if (options && options.encoding) encoding = options.encoding;
+		else if (debug) _debug("No encoding is specified. UTF-8 is used by default");
+		let optionPaths = [dotenvPath];
+		if (options && options.path) if (!Array.isArray(options.path)) optionPaths = [_resolveHome(options.path)];
+		else {
+			optionPaths = [];
+			for (const filepath of options.path) optionPaths.push(_resolveHome(filepath));
+		}
+		let lastError;
+		const parsedAll = {};
+		for (const path of optionPaths) try {
+			const parsed = DotenvModule.parse(fs$1.readFileSync(path, { encoding }));
+			DotenvModule.populate(parsedAll, parsed, options);
+		} catch (e) {
+			if (debug) _debug(`Failed to load ${path} ${e.message}`);
+			lastError = e;
+		}
+		let processEnv = process.env;
+		if (options && options.processEnv != null) processEnv = options.processEnv;
+		DotenvModule.populate(processEnv, parsedAll, options);
+		if (debug || !quiet) {
+			const keysCount = Object.keys(parsedAll).length;
+			const shortPaths = [];
+			for (const filePath of optionPaths) try {
+				const relative = path$1.relative(process.cwd(), filePath);
+				shortPaths.push(relative);
+			} catch (e) {
+				if (debug) _debug(`Failed to load ${filePath} ${e.message}`);
+				lastError = e;
+			}
+			_log(`injecting env (${keysCount}) from ${shortPaths.join(",")}`);
+		}
+		if (lastError) return {
+			parsed: parsedAll,
+			error: lastError
+		};
+		else return { parsed: parsedAll };
+	}
+	function config(options) {
+		if (_dotenvKey(options).length === 0) return DotenvModule.configDotenv(options);
+		const vaultPath = _vaultPath(options);
+		if (!vaultPath) {
+			_warn(`You set DOTENV_KEY but you are missing a .env.vault file at ${vaultPath}. Did you forget to build it?`);
+			return DotenvModule.configDotenv(options);
+		}
+		return DotenvModule._configVault(options);
+	}
+	function decrypt(encrypted, keyStr) {
+		const key = Buffer.from(keyStr.slice(-64), "hex");
+		let ciphertext = Buffer.from(encrypted, "base64");
+		const nonce = ciphertext.subarray(0, 12);
+		const authTag = ciphertext.subarray(-16);
+		ciphertext = ciphertext.subarray(12, -16);
+		try {
+			const aesgcm = crypto$2.createDecipheriv("aes-256-gcm", key, nonce);
+			aesgcm.setAuthTag(authTag);
+			return `${aesgcm.update(ciphertext)}${aesgcm.final()}`;
+		} catch (error) {
+			const isRange = error instanceof RangeError;
+			const invalidKeyLength = error.message === "Invalid key length";
+			const decryptionFailed = error.message === "Unsupported state or unable to authenticate data";
+			if (isRange || invalidKeyLength) {
+				const err = /* @__PURE__ */ new Error("INVALID_DOTENV_KEY: It must be 64 characters long (or more)");
+				err.code = "INVALID_DOTENV_KEY";
+				throw err;
+			} else if (decryptionFailed) {
+				const err = /* @__PURE__ */ new Error("DECRYPTION_FAILED: Please check your DOTENV_KEY");
+				err.code = "DECRYPTION_FAILED";
+				throw err;
+			} else throw error;
+		}
+	}
+	function populate(processEnv, parsed, options = {}) {
+		const debug = Boolean(options && options.debug);
+		const override = Boolean(options && options.override);
+		if (typeof parsed !== "object") {
+			const err = /* @__PURE__ */ new Error("OBJECT_REQUIRED: Please check the processEnv argument being passed to populate");
+			err.code = "OBJECT_REQUIRED";
+			throw err;
+		}
+		for (const key of Object.keys(parsed)) if (Object.prototype.hasOwnProperty.call(processEnv, key)) {
+			if (override === true) processEnv[key] = parsed[key];
+			if (debug) if (override === true) _debug(`"${key}" is already defined and WAS overwritten`);
+			else _debug(`"${key}" is already defined and was NOT overwritten`);
+		} else processEnv[key] = parsed[key];
+	}
+	var DotenvModule = {
+		configDotenv,
+		_configVault,
+		_parseVault,
+		config,
+		decrypt,
+		parse,
+		populate
+	};
+	module.exports.configDotenv = DotenvModule.configDotenv;
+	module.exports._configVault = DotenvModule._configVault;
+	module.exports._parseVault = DotenvModule._parseVault;
+	module.exports.config = DotenvModule.config;
+	module.exports.decrypt = DotenvModule.decrypt;
+	module.exports.parse = DotenvModule.parse;
+	module.exports.populate = DotenvModule.populate;
+	module.exports = DotenvModule;
+})))(), 1);
+/**
+* Centralised environment configuration loader.
+*
+* This module MUST be imported before any other module that reads `process.env`
+* (notably the IPC handlers), because ES module imports are evaluated in source
+* order — see specs/002-excel-import-env-config/research.md R7.
+*
+* Sensitive/deployment values come from the environment (`.env`); non-sensitive
+* seed defaults stay in code but are overridable here. In a packaged
+* (production) build the app refuses to start without a JWT secret (FR-012).
+*/
+import_main.default.config();
+try {
+	if (app?.isPackaged) import_main.default.config({ path: path.join(path.dirname(app.getPath("exe")), ".env") });
+} catch {}
+var DEV_SECRET = "dev_insecure_jwt_secret_do_not_use_in_production";
+function isProduction() {
+	try {
+		return !!app?.isPackaged;
+	} catch {
+		return false;
+	}
+}
+var devSecretWarned = false;
+/**
+* The JWT signing secret. In production it must come from the environment;
+* in development a fixed insecure secret is used with a one-time warning.
+*/
+function getJwtSecret() {
+	const fromEnv = process.env.JWT_SECRET?.trim();
+	if (fromEnv) return fromEnv;
+	if (isProduction()) throw new Error("JWT_SECRET is not configured.");
+	if (!devSecretWarned) {
+		console.warn("[env] JWT_SECRET not set — using an insecure development secret. Set JWT_SECRET in .env before shipping a production build.");
+		devSecretWarned = true;
+	}
+	return DEV_SECRET;
+}
+/**
+* Validate that required configuration is present for the current build.
+* Production build with no JWT secret → not ok (caller must halt startup).
+*/
+function checkRequiredConfig() {
+	const secret = process.env.JWT_SECRET?.trim();
+	if (isProduction() && !secret) return {
+		ok: false,
+		error: "JWT_SECRET is not configured. The application cannot start securely.\nCreate a .env file (see .env.example) next to the application and set JWT_SECRET to a long random value, then restart."
+	};
+	return { ok: true };
+}
+/** Initial admin credentials used only when seeding a fresh database. */
+function getSeedAdmin() {
+	return {
+		username: process.env.SEED_ADMIN_USERNAME?.trim() || "admin",
+		password: process.env.SEED_ADMIN_PASSWORD?.trim() || null
+	};
+}
+/**
+* Resolve a non-sensitive seed setting: optional `envKey` override, else the
+* provided code default. Applied by the seeder only on first run (empty table).
+*/
+function seedSetting(envKey, fallback) {
+	const v = process.env[envKey]?.trim();
+	return v && v.length > 0 ? v : fallback;
+}
 //#endregion
 //#region electron/db/migrations/index.ts
 var migrations = [{
@@ -2083,71 +2488,74 @@ var bcryptjs_default = {
 //#region electron/db/seed.ts
 async function seedDatabase(db) {
 	if (db.prepare("SELECT COUNT(*) as count FROM users").get().count === 0) {
-		console.log("No users found. Seeding default admin user...");
-		const hashedPassword = await bcryptjs_default.hash("admin123", 10);
+		const { username, password } = getSeedAdmin();
+		const adminPassword = password || "admin123";
+		if (!password) console.warn("[seed] SEED_ADMIN_PASSWORD not set — seeding default admin password \"admin123\". Set SEED_ADMIN_PASSWORD in .env and change it after first login.");
+		console.log(`No users found. Seeding admin user "${username}"...`);
+		const hashedPassword = await bcryptjs_default.hash(adminPassword, 10);
 		db.prepare(`
       INSERT INTO users (username, password, role, name, is_active)
       VALUES (?, ?, ?, ?, ?)
-    `).run("admin", hashedPassword, "admin", "Administrator", 1);
+    `).run(username, hashedPassword, "admin", "Administrator", 1);
 	}
 	if (db.prepare("SELECT COUNT(*) as count FROM settings").get().count === 0) {
 		console.log("No settings found. Seeding default configuration...");
 		const defaultSettings = [
 			{
 				key: "nursery_monthly",
-				value: "2500"
+				value: seedSetting("SEED_NURSERY_MONTHLY", "2500")
 			},
 			{
 				key: "nursery_daily",
-				value: "150"
+				value: seedSetting("SEED_NURSERY_DAILY", "150")
 			},
 			{
 				key: "nursery_hourly",
-				value: "30"
+				value: seedSetting("SEED_NURSERY_HOURLY", "30")
 			},
 			{
 				key: "hosting_monthly",
-				value: "3000"
+				value: seedSetting("SEED_HOSTING_MONTHLY", "3000")
 			},
 			{
 				key: "hosting_daily",
-				value: "200"
+				value: seedSetting("SEED_HOSTING_DAILY", "200")
 			},
 			{
 				key: "hosting_hourly",
-				value: "40"
+				value: seedSetting("SEED_HOSTING_HOURLY", "40")
 			},
 			{
 				key: "session_hourly",
-				value: "100"
+				value: seedSetting("SEED_SESSION_HOURLY", "100")
 			},
 			{
 				key: "session_daily",
-				value: "400"
+				value: seedSetting("SEED_SESSION_DAILY", "400")
 			},
 			{
 				key: "target_profit_pct",
-				value: "0.20"
+				value: seedSetting("SEED_TARGET_PROFIT_PCT", "0.20")
 			},
 			{
 				key: "max_capacity",
-				value: "50"
+				value: seedSetting("SEED_MAX_CAPACITY", "50")
 			},
 			{
 				key: "work_days",
-				value: "22"
+				value: seedSetting("SEED_WORK_DAYS", "22")
 			},
 			{
 				key: "work_hours",
-				value: "8"
+				value: seedSetting("SEED_WORK_HOURS", "8")
 			},
 			{
 				key: "brand_app_name",
-				value: "أكاديمية زين الدين"
+				value: seedSetting("SEED_BRAND_APP_NAME", "أكاديمية زين الدين")
 			},
 			{
 				key: "brand_org_name",
-				value: "مركز زين الدين للتوحد ونمو الطفل"
+				value: seedSetting("SEED_BRAND_ORG_NAME", "مركز زين الدين للتوحد ونمو الطفل")
 			},
 			{
 				key: "brand_tagline",
@@ -2155,15 +2563,15 @@ async function seedDatabase(db) {
 			},
 			{
 				key: "brand_primary_color",
-				value: "#0f766e"
+				value: seedSetting("SEED_BRAND_PRIMARY_COLOR", "#0f766e")
 			},
 			{
 				key: "brand_accent_color",
-				value: "#f59e0b"
+				value: seedSetting("SEED_BRAND_ACCENT_COLOR", "#f59e0b")
 			},
 			{
 				key: "brand_phone",
-				value: "+20 123 456 7890"
+				value: seedSetting("SEED_BRAND_PHONE", "+20 123 456 7890")
 			},
 			{
 				key: "brand_address",
@@ -2171,7 +2579,7 @@ async function seedDatabase(db) {
 			},
 			{
 				key: "brand_email",
-				value: "info@zaineldeen.com"
+				value: seedSetting("SEED_BRAND_EMAIL", "info@zaineldeen.com")
 			},
 			{
 				key: "brand_show_logo_sidebar",
@@ -6329,7 +6737,6 @@ function requireAdmin() {
 }
 //#endregion
 //#region electron/ipc/authIPC.ts
-var JWT_SECRET = process.env.JWT_SECRET || "nursery_default_jwt_secret_key_12345";
 var currentUserSession = null;
 function getCurrentUser() {
 	return currentUserSession;
@@ -6352,7 +6759,7 @@ ipcMain.handle("auth:login", async (_event, { username, password }) => {
 			id: user.id,
 			username: user.username,
 			role: user.role
-		}, JWT_SECRET, { expiresIn: "30d" });
+		}, getJwtSecret(), { expiresIn: "30d" });
 		currentUserSession = userData;
 		return {
 			user: userData,
@@ -6380,7 +6787,7 @@ ipcMain.handle("auth:current", () => {
 ipcMain.handle("auth:restore", async (_event, { token }) => {
 	try {
 		if (!token) return null;
-		const payload = import_jsonwebtoken.default.verify(token, JWT_SECRET);
+		const payload = import_jsonwebtoken.default.verify(token, getJwtSecret());
 		const user = getDb().prepare("SELECT * FROM users WHERE id = ?").get(payload.id);
 		if (!user || user.is_active === 0) {
 			currentUserSession = null;
@@ -10433,7 +10840,7 @@ ipcMain.handle("storage:import", async (_event, args) => {
 			if (result.canceled || result.filePaths.length === 0) throw new Error("Import cancelled");
 			filePath = result.filePaths[0];
 		}
-		const { importFromWorkbook } = await import("./importService-DPGzyLSB.js");
+		const { importFromWorkbook } = await import("./importService-RcYa1Y0a.js");
 		return { imported: await importFromWorkbook(filePath) };
 	} catch (error) {
 		console.error("storage:import error:", error);
@@ -11054,6 +11461,13 @@ function createWindow() {
 	});
 }
 app.whenReady().then(async () => {
+	const configCheck = checkRequiredConfig();
+	if (!configCheck.ok) {
+		console.error("FATAL CONFIG ERROR:", configCheck.error);
+		dialog.showErrorBox("Configuration Error / خطأ في الإعداد", configCheck.error || "Invalid configuration");
+		app.quit();
+		return;
+	}
 	try {
 		const db = initDb();
 		runMigrations(db);

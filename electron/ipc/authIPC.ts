@@ -4,8 +4,7 @@ import jwt from 'jsonwebtoken'
 import { getDb } from '../db/connection.js'
 import type { User } from '../../src/types/index.js'
 import { requireAdmin } from './_guard.js'
-
-const JWT_SECRET = process.env.JWT_SECRET || 'nursery_default_jwt_secret_key_12345'
+import { getJwtSecret } from '../env.js'
 
 // Session persistence in Electron main process memory
 let currentUserSession: User | null = null
@@ -47,7 +46,7 @@ ipcMain.handle('auth:login', async (_event, { username, password }) => {
     
     const token = jwt.sign(
       { id: user.id, username: user.username, role: user.role },
-      JWT_SECRET,
+      getJwtSecret(),
       { expiresIn: '30d' }
     )
     
@@ -82,7 +81,7 @@ ipcMain.handle('auth:restore', async (_event, { token }) => {
   try {
     if (!token) return null
 
-    const payload = jwt.verify(token, JWT_SECRET) as { id: number }
+    const payload = jwt.verify(token, getJwtSecret()) as { id: number }
     const db = getDb()
     const user = db.prepare('SELECT * FROM users WHERE id = ?').get(payload.id) as any
 

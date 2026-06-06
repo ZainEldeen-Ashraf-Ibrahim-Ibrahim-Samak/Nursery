@@ -1,4 +1,6 @@
-import { app, BrowserWindow, protocol, net } from 'electron'
+// MUST be first: loads .env into process.env before any module reads it.
+import { checkRequiredConfig } from './env.js'
+import { app, BrowserWindow, protocol, net, dialog } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -66,6 +68,15 @@ function createWindow() {
 }
 
 app.whenReady().then(async () => {
+  // Refuse to start a production build without a configured signing secret (FR-012).
+  const configCheck = checkRequiredConfig()
+  if (!configCheck.ok) {
+    console.error('FATAL CONFIG ERROR:', configCheck.error)
+    dialog.showErrorBox('Configuration Error / خطأ في الإعداد', configCheck.error || 'Invalid configuration')
+    app.quit()
+    return
+  }
+
   // Initialize Database, run migrations and seed
   try {
     const db = initDb()

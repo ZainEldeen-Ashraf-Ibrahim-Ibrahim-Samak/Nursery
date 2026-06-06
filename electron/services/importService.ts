@@ -4,57 +4,181 @@ import { getDb } from '../db/connection.js'
 /**
  * Import service for the Nursery Management System.
  *
- * Reads an Excel workbook (in the original workbook format used by the center)
- * and inserts children, payments, employees, salary_payments, and expenses
- * into the database.
+ * Reads the center's `Nursery_V4_Final_5.xlsx` workbook (and workbooks of the same
+ * layout) and loads children, payments, employees, salary payments, and expenses
+ * into the local SQLite database.
+ *
+ * Workbook layout facts (see specs/002-excel-import-env-config/data-model.md):
+ * - Two blank lead columns (A, B); the first data column is index 3 ("C").
+ * - Header is row 3; data starts at row 4.
+ * - Many cells are Excel formulas — only their cached `.result` carries the value.
+ * - Monthly sheets are named with an Arabic month only (no year).
  *
  * Strategy:
- * - Each import is idempotent: uses INSERT OR IGNORE to avoid duplicates.
- * - Children are matched by name (Arabic full name).
- * - Payments are matched by (child_id, month, year, service).
- * - Employees are matched by name.
- * - Salary payments are matched by (employee_id, month, year).
- * - Expenses are matched by (item, month, year) using the UNIQUE constraint.
+ * - Idempotent: existing rows are matched and skipped, never overwritten.
+ * - Children matched by name; payments by (child_id, month, year, service);
+ *   employees by name; salaries by (employee_id, month, year); expenses by
+ *   (item, month, year).
+ * - Required fields missing from the workbook are auto-filled with safe
+ *   placeholders so the record still imports (FR-006a).
+ * - Each sheet's writes run inside a transaction (atomic per sheet).
  */
 
-interface ImportSummary {
-  children: { imported: number; skipped: number }
-  payments: { imported: number; skipped: number }
-  employees: { imported: number; skipped: number }
-  salaryPayments: { imported: number; skipped: number }
-  expenses: { imported: number; skipped: number }
-  sheets: string[]
+// ── Shared contract (specs/.../contracts/import-ipc.md) ───────────────────────
+
+export interface EntityCount {
+  imported: number
+  skipped: number
 }
 
-const arabicMonths = [
+export interface ImportSummary {
+  children: EntityCount
+  payments: EntityCount
+  employees: EntityCount
+  salaryPayments: EntityCount
+  expenses: EntityCount
+  sheetsProcessed: string[]
+  sheetsIgnored: string[]
+  year: number
+  rowErrors: number
+}
+
+export interface ImportResult {
+  imported: ImportSummary
+}
+
+// ── Layout constants ──────────────────────────────────────────────────────────
+
+const DATA_START_ROW = 4
+
+const ARABIC_MONTHS = [
   'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
   'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'
 ]
 
+// Column numbers are 1-based (ExcelJS getCell). The workbook has a single blank
+// lead column (A); the row number ("#") sits in column B(2) and real data starts
+// at column C(3). Verified against Nursery_V4_Final_5.xlsx.
+
+// Children master sheet (👶 بيانات الأطفال)
+const CHILD_COL = {
+  name: 3, guardian: 4, guardianPhone: 5, childPhone: 6, nationalId: 7,
+  service: 8, unit: 9, price: 10, regDate: 11, notes: 12
+}
+
+// Monthly revenue sheets (يناير … ديسمبر)
+const PAY_COL = {
+  name: 3, service: 4, unit: 5, quantity: 6, price: 7,
+  total: 8, paid: 9, balance: 10, status: 11, notes: 12
+}
+
+// Salaries sheet (👔 الرواتب) — monthly net columns span 12..23
+const SAL_COL = {
+  name: 3, role: 4, base: 5, housing: 6, transport: 7,
+  bonus: 8, deductions: 9, net: 10, firstMonth: 12
+}
+
+// Expenses sheet (💸 المصروفات) — monthly amount columns span 4..15
+const EXP_COL = {
+  item: 3, firstMonth: 4
+}
+
+// ── Cell helpers ──────────────────────────────────────────────────────────────
+
 /**
- * Safely convert a cell value to a number.
+ * Resolve an ExcelJS cell value to its effective primitive: formula cells expose
+ * their cached `.result`, rich text is joined, hyperlinks use their text.
  */
+function resolveCellValue(v: unknown): unknown {
+  if (v === null || v === undefined) return null
+  if (v instanceof Date) return v
+  if (typeof v === 'object') {
+    const o = v as any
+    if ('result' in o) return o.result
+    if ('richText' in o && Array.isArray(o.richText)) {
+      return o.richText.map((r: any) => r?.text ?? '').join('')
+    }
+    if ('text' in o) return o.text
+    if ('error' in o) return null
+  }
+  return v
+}
+
+function cellAt(row: ExcelJS.Row, col: number): unknown {
+  return resolveCellValue(row.getCell(col).value)
+}
+
 function toNum(val: unknown): number {
-  if (val === null || val === undefined || val === '') return 0
-  const n = Number(val)
+  const v = resolveCellValue(val)
+  if (v === null || v === undefined || v === '') return 0
+  const n = Number(v)
   return isNaN(n) ? 0 : n
 }
 
-/**
- * Safely convert a cell value to a string.
- */
 function toStr(val: unknown): string {
-  if (val === null || val === undefined) return ''
-  return String(val).trim()
+  const v = resolveCellValue(val)
+  if (v === null || v === undefined) return ''
+  if (v instanceof Date) return v.toISOString().slice(0, 10)
+  return String(v).trim()
 }
 
-/**
- * Main import function.
- */
+/** Empty string → null (for nullable columns; node:sqlite rejects undefined). */
+function orNull(s: string): string | null {
+  return s === '' ? null : s
+}
+
+// ── Year & date resolution ────────────────────────────────────────────────────
+
+function resolveImportYear(): number {
+  const envYear = parseInt(process.env.IMPORT_DEFAULT_YEAR ?? '', 10)
+  if (!isNaN(envYear) && envYear > 1900 && envYear < 3000) return envYear
+  return new Date().getFullYear()
+}
+
+function firstOfMonth(year: number, monthIndex: number): string {
+  const mm = String(monthIndex + 1).padStart(2, '0')
+  return `${year}-${mm}-01`
+}
+
+// ── Sheet classification ──────────────────────────────────────────────────────
+
+function isIgnoredSheet(name: string): boolean {
+  return (
+    name.includes('داشبورد') ||
+    name.includes('إعدادات') || name.includes('الإعدادات') ||
+    name.includes('كشف حساب') ||
+    name.includes('تخطيط') || name.includes('تارجت') ||
+    name.toLowerCase().includes('dashboard') ||
+    name.toLowerCase().includes('setting')
+  )
+}
+
+function isChildrenSheet(name: string): boolean {
+  return name.includes('بيانات الأطفال') || name.includes('الأطفال')
+}
+
+function isSalarySheet(name: string): boolean {
+  return name.includes('رواتب') || name.includes('راتب') || name.includes('موظف') ||
+    name.toLowerCase().includes('salary')
+}
+
+function isExpensesSheet(name: string): boolean {
+  return name.includes('مصروف') || name.toLowerCase().includes('expense')
+}
+
+function monthOfSheet(name: string): number {
+  return ARABIC_MONTHS.findIndex((m) => name.includes(m))
+}
+
+// ── Main import ───────────────────────────────────────────────────────────────
+
 export async function importFromWorkbook(filePath: string): Promise<ImportSummary> {
   const db = getDb()
   const workbook = new ExcelJS.Workbook()
   await workbook.xlsx.readFile(filePath)
+
+  const year = resolveImportYear()
+  const now = new Date().toISOString()
 
   const summary: ImportSummary = {
     children: { imported: 0, skipped: 0 },
@@ -62,172 +186,225 @@ export async function importFromWorkbook(filePath: string): Promise<ImportSummar
     employees: { imported: 0, skipped: 0 },
     salaryPayments: { imported: 0, skipped: 0 },
     expenses: { imported: 0, skipped: 0 },
-    sheets: workbook.worksheets.map((ws) => ws.name)
+    sheetsProcessed: [],
+    sheetsIgnored: [],
+    year,
+    rowErrors: 0
   }
 
-  const now = new Date().toISOString()
+  // Prepared statements reused across sheets
+  const findChild = db.prepare('SELECT id FROM children WHERE name = ?')
+  const insertChild = db.prepare(`
+    INSERT INTO children
+      (name, guardian, guardian_phone, child_phone, national_id, service, unit, price,
+       reg_date, notes, is_active, created_at, updated_at, synced)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, 0)
+  `)
+  const findPayment = db.prepare(
+    'SELECT id FROM payments WHERE child_id = ? AND month = ? AND year = ? AND service = ?'
+  )
+  const insertPayment = db.prepare(`
+    INSERT INTO payments
+      (child_id, month, year, service, unit, quantity, price, total, paid, balance,
+       status, notes, created_at, updated_at, synced)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+  `)
+  const findEmployee = db.prepare('SELECT id FROM employees WHERE name = ?')
+  const insertEmployee = db.prepare(`
+    INSERT INTO employees
+      (name, role, base_salary, housing, transport, net_salary, is_active, created_at, synced)
+    VALUES (?, ?, ?, ?, ?, ?, 1, ?, 0)
+  `)
+  const findSalary = db.prepare(
+    'SELECT id FROM salary_payments WHERE employee_id = ? AND month = ? AND year = ?'
+  )
+  const insertSalary = db.prepare(`
+    INSERT INTO salary_payments
+      (employee_id, month, year, bonus, deductions, actual_paid, paid_date, notes, synced)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
+  `)
+  const insertExpense = db.prepare(`
+    INSERT INTO expenses (item, month, year, amount, category, notes, created_at, synced)
+    VALUES (?, ?, ?, ?, NULL, NULL, ?, 0)
+    ON CONFLICT(item, month, year) DO NOTHING
+  `)
 
-  // ───────────────────────────────────────────────────
-  // 1. Import children + payments from monthly sheets
-  // ───────────────────────────────────────────────────
-  // Look for sheets named after Arabic months (e.g. "يناير 2025")
-  for (const ws of workbook.worksheets) {
-    const sheetName = ws.name.trim()
+  /** Ensure a child row exists for `name`; return its id (creating a placeholder). */
+  function ensureChild(name: string, opts: {
+    service?: string; unit?: string; price?: number; regDate?: string
+  } = {}): number {
+    const existing = findChild.get(name) as any
+    if (existing) return existing.id
+    const res = insertChild.run(
+      name, '—', '—', null, null,
+      opts.service || 'حضانة', opts.unit || 'شهر', opts.price ?? 0,
+      opts.regDate || now.slice(0, 10), null, now, now
+    )
+    summary.children.imported++
+    return Number(res.lastInsertRowid)
+  }
 
-    // Detect monthly payment sheets: contain an Arabic month and a year
-    const monthMatch = arabicMonths.find((m) => sheetName.includes(m))
-    const yearMatch = sheetName.match(/\d{4}/)
-    if (!monthMatch || !yearMatch) continue
-
-    const month = monthMatch
-    const year = parseInt(yearMatch[0])
-
-    // Read rows: expect column layout similar to:
-    // Col1: Name, Col2: Service, Col3: Monthly Fee, Col4: Paid, Col5: Balance, Col6: Notes
-    ws.eachRow({ includeEmpty: false }, (row, rowNum) => {
-      if (rowNum < 2) return // Skip header
-      const name = toStr(row.getCell(1).value)
-      const service = toStr(row.getCell(2).value)
-      const totalFee = toNum(row.getCell(3).value)
-      const paid = toNum(row.getCell(4).value)
-
-      if (!name) return
-
-      // Upsert child
-      let child = db.prepare('SELECT id FROM children WHERE name = ?').get(name) as any
-      if (!child) {
-        const result = db.prepare(`
-          INSERT OR IGNORE INTO children (name, service, monthly_fee, join_date, created_at, synced)
-          VALUES (?, ?, ?, ?, ?, 0)
-        `).run(name, service || 'حضانة', totalFee, now, now)
-
-        if (result.changes > 0) {
+  // ── 1. Children master sheet ────────────────────────────────────────────────
+  const childSheet = workbook.worksheets.find((ws) => isChildrenSheet(ws.name))
+  if (childSheet) {
+    summary.sheetsProcessed.push(childSheet.name)
+    const importChildren = db.transaction(() => {
+      for (let r = DATA_START_ROW; r <= childSheet.rowCount; r++) {
+        const row = childSheet.getRow(r)
+        const name = toStr(cellAt(row, CHILD_COL.name))
+        if (!name) continue
+        if (findChild.get(name)) { summary.children.skipped++; continue }
+        try {
+          insertChild.run(
+            name,
+            toStr(cellAt(row, CHILD_COL.guardian)) || '—',
+            toStr(cellAt(row, CHILD_COL.guardianPhone)) || '—',
+            orNull(toStr(cellAt(row, CHILD_COL.childPhone))),
+            orNull(toStr(cellAt(row, CHILD_COL.nationalId))),
+            toStr(cellAt(row, CHILD_COL.service)) || 'حضانة',
+            toStr(cellAt(row, CHILD_COL.unit)) || 'شهر',
+            toNum(cellAt(row, CHILD_COL.price)),
+            toStr(cellAt(row, CHILD_COL.regDate)) || now.slice(0, 10),
+            orNull(toStr(cellAt(row, CHILD_COL.notes))),
+            now, now
+          )
           summary.children.imported++
-          child = { id: result.lastInsertRowid }
-        } else {
-          summary.children.skipped++
-          child = db.prepare('SELECT id FROM children WHERE name = ?').get(name) as any
+        } catch {
+          summary.rowErrors++
         }
       }
-
-      if (!child) return
-
-      // Upsert payment
-      const balance = totalFee - paid
-      const status = paid >= totalFee ? 'paid' : paid > 0 ? 'partial' : 'unpaid'
-
-      const existing = db.prepare(
-        'SELECT id FROM payments WHERE child_id = ? AND month = ? AND year = ? AND service = ?'
-      ).get(child.id, month, year, service || 'حضانة')
-
-      if (!existing) {
-        db.prepare(`
-          INSERT INTO payments (child_id, service, month, year, total, paid, balance, status, created_at, synced)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
-        `).run(child.id, service || 'حضانة', month, year, totalFee, paid, balance, status, now)
-        summary.payments.imported++
-      } else {
-        summary.payments.skipped++
-      }
     })
+    importChildren()
   }
 
-  // ───────────────────────────────────────────────────
-  // 2. Import employees + salaries from 'الرواتب' sheet
-  // ───────────────────────────────────────────────────
-  const salarySheet = workbook.worksheets.find((ws) =>
-    ws.name.includes('راتب') || ws.name.includes('موظف') || ws.name.toLowerCase().includes('salary')
-  )
+  // ── 2. Monthly payment sheets ───────────────────────────────────────────────
+  for (const ws of workbook.worksheets) {
+    if (isIgnoredSheet(ws.name) || isChildrenSheet(ws.name) ||
+        isSalarySheet(ws.name) || isExpensesSheet(ws.name)) continue
+    const monthIdx = monthOfSheet(ws.name)
+    if (monthIdx < 0) continue
 
+    summary.sheetsProcessed.push(ws.name)
+    const month = ARABIC_MONTHS[monthIdx]
+    const regBase = firstOfMonth(year, monthIdx)
+
+    const importMonth = db.transaction(() => {
+      for (let r = DATA_START_ROW; r <= ws.rowCount; r++) {
+        const row = ws.getRow(r)
+        const name = toStr(cellAt(row, PAY_COL.name))
+        if (!name) continue
+        try {
+          const service = toStr(cellAt(row, PAY_COL.service)) || 'حضانة'
+          const unit = toStr(cellAt(row, PAY_COL.unit)) || 'شهر'
+          const quantity = toNum(cellAt(row, PAY_COL.quantity)) || 1
+          const price = toNum(cellAt(row, PAY_COL.price))
+          const total = toNum(cellAt(row, PAY_COL.total)) || price * quantity
+          const paid = toNum(cellAt(row, PAY_COL.paid))
+          const balanceCell = toNum(cellAt(row, PAY_COL.balance))
+          const balance = balanceCell || total - paid
+          const status = paid >= total && total > 0 ? 'paid' : paid > 0 ? 'partial' : 'unpaid'
+          const notes = orNull(toStr(cellAt(row, PAY_COL.notes)))
+
+          const childId = ensureChild(name, { service, unit, price, regDate: regBase })
+
+          if (findPayment.get(childId, month, year, service)) {
+            summary.payments.skipped++
+            continue
+          }
+          insertPayment.run(
+            childId, month, year, service, unit, quantity, price, total, paid,
+            balance, status, notes, now, now
+          )
+          summary.payments.imported++
+        } catch {
+          summary.rowErrors++
+        }
+      }
+    })
+    importMonth()
+  }
+
+  // ── 3. Employees + salary payments ──────────────────────────────────────────
+  const salarySheet = workbook.worksheets.find((ws) => isSalarySheet(ws.name))
   if (salarySheet) {
-    let month = arabicMonths[new Date().getMonth()]
-    let year = new Date().getFullYear()
+    summary.sheetsProcessed.push(salarySheet.name)
+    const importSalaries = db.transaction(() => {
+      for (let r = DATA_START_ROW; r <= salarySheet.rowCount; r++) {
+        const row = salarySheet.getRow(r)
+        const name = toStr(cellAt(row, SAL_COL.name))
+        if (!name) continue
+        try {
+          const role = toStr(cellAt(row, SAL_COL.role)) || 'موظف'
+          const base = toNum(cellAt(row, SAL_COL.base))
+          const housing = toNum(cellAt(row, SAL_COL.housing))
+          const transport = toNum(cellAt(row, SAL_COL.transport))
+          const bonus = toNum(cellAt(row, SAL_COL.bonus))
+          const deductions = toNum(cellAt(row, SAL_COL.deductions))
+          const net = toNum(cellAt(row, SAL_COL.net)) || base + housing + transport - deductions + bonus
 
-    // Try to read month/year from cell A1 or B1
-    const headerMonthCell = toStr(salarySheet.getCell('A1').value) || toStr(salarySheet.getCell('B1').value)
-    const headerMonthMatch = arabicMonths.find((m) => headerMonthCell.includes(m))
-    if (headerMonthMatch) month = headerMonthMatch
-    const headerYearMatch = headerMonthCell.match(/\d{4}/)
-    if (headerYearMatch) year = parseInt(headerYearMatch[0])
+          if (base === 0 && net === 0) continue
 
-    salarySheet.eachRow({ includeEmpty: false }, (row, rowNum) => {
-      if (rowNum < 2) return
-      const name = toStr(row.getCell(1).value)
-      const baseSalary = toNum(row.getCell(2).value)
-      const housing = toNum(row.getCell(3).value)
-      const transport = toNum(row.getCell(4).value)
-      const bonus = toNum(row.getCell(5).value)
-      const deduction = toNum(row.getCell(6).value)
-      const actualPaid = toNum(row.getCell(7).value)
+          let emp = findEmployee.get(name) as any
+          if (!emp) {
+            const res = insertEmployee.run(name, role, base, housing, transport, net, now)
+            summary.employees.imported++
+            emp = { id: Number(res.lastInsertRowid) }
+          } else {
+            summary.employees.skipped++
+          }
 
-      if (!name || (!baseSalary && !actualPaid)) return
-
-      // Upsert employee
-      let emp = db.prepare('SELECT id FROM employees WHERE name = ?').get(name) as any
-      if (!emp) {
-        const result = db.prepare(`
-          INSERT OR IGNORE INTO employees (name, base_salary, housing_allowance, transport_allowance, is_active, created_at, synced)
-          VALUES (?, ?, ?, ?, 1, ?, 0)
-        `).run(name, baseSalary, housing, transport, now)
-
-        if (result.changes > 0) {
-          summary.employees.imported++
-          emp = { id: result.lastInsertRowid }
-        } else {
-          summary.employees.skipped++
-          emp = db.prepare('SELECT id FROM employees WHERE name = ?').get(name) as any
+          // One salary payment per month column that carries a value.
+          for (let m = 0; m < 12; m++) {
+            const actual = toNum(cellAt(row, SAL_COL.firstMonth + m))
+            const paid = actual || net
+            if (paid === 0) continue
+            if (findSalary.get(emp.id, ARABIC_MONTHS[m], year)) {
+              summary.salaryPayments.skipped++
+              continue
+            }
+            insertSalary.run(
+              emp.id, ARABIC_MONTHS[m], year, bonus, deductions, paid,
+              firstOfMonth(year, m), null
+            )
+            summary.salaryPayments.imported++
+          }
+        } catch {
+          summary.rowErrors++
         }
       }
+    })
+    importSalaries()
+  }
 
-      if (!emp) return
-
-      // Upsert salary payment
-      const existing = db.prepare(
-        'SELECT id FROM salary_payments WHERE employee_id = ? AND month = ? AND year = ?'
-      ).get(emp.id, month, year)
-
-      if (!existing) {
-        db.prepare(`
-          INSERT INTO salary_payments (employee_id, month, year, bonus, deduction, actual_paid, pay_date, created_at, synced)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
-        `).run(emp.id, month, year, bonus, deduction, actualPaid || baseSalary, now.slice(0, 10), now)
-        summary.salaryPayments.imported++
-      } else {
-        summary.salaryPayments.skipped++
+  // ── 4. Expenses ─────────────────────────────────────────────────────────────
+  const expensesSheet = workbook.worksheets.find((ws) => isExpensesSheet(ws.name))
+  if (expensesSheet) {
+    summary.sheetsProcessed.push(expensesSheet.name)
+    const importExpenses = db.transaction(() => {
+      for (let r = DATA_START_ROW; r <= expensesSheet.rowCount; r++) {
+        const row = expensesSheet.getRow(r)
+        const item = toStr(cellAt(row, EXP_COL.item))
+        if (!item) continue
+        try {
+          for (let m = 0; m < 12; m++) {
+            const amount = toNum(cellAt(row, EXP_COL.firstMonth + m))
+            if (amount === 0) continue
+            const res = insertExpense.run(item, ARABIC_MONTHS[m], year, amount, now)
+            if (Number(res.changes) > 0) summary.expenses.imported++
+            else summary.expenses.skipped++
+          }
+        } catch {
+          summary.rowErrors++
+        }
       }
     })
+    importExpenses()
   }
 
-  // ───────────────────────────────────────────────────
-  // 3. Import expenses from 'المصروفات' sheet
-  // ───────────────────────────────────────────────────
-  const expensesSheet = workbook.worksheets.find((ws) =>
-    ws.name.includes('مصروف') || ws.name.toLowerCase().includes('expense')
-  )
-
-  if (expensesSheet) {
-    const year = new Date().getFullYear()
-
-    // Expected structure: Row1 = header (item | Jan | Feb | ... | Dec)
-    // Col1 = item name, Col2..Col13 = monthly amounts for Jan-Dec
-    expensesSheet.eachRow({ includeEmpty: false }, (row, rowNum) => {
-      if (rowNum < 2) return
-      const item = toStr(row.getCell(1).value)
-      if (!item) return
-
-      arabicMonths.forEach((month, idx) => {
-        const amount = toNum(row.getCell(idx + 2).value)
-        if (amount === 0) return
-
-        db.prepare(`
-          INSERT INTO expenses (item, month, year, amount, category, notes, created_at, synced)
-          VALUES (?, ?, ?, ?, NULL, NULL, ?, 0)
-          ON CONFLICT(item, month, year) DO NOTHING
-        `).run(item, month, year, amount, now)
-        summary.expenses.imported++
-      })
-    })
-  }
+  // Record ignored sheets for the summary.
+  summary.sheetsIgnored = workbook.worksheets
+    .map((ws) => ws.name)
+    .filter((n) => !summary.sheetsProcessed.includes(n))
 
   return summary
 }
