@@ -1,6 +1,8 @@
 import { create } from 'zustand'
 import type { User } from '../types/index.js'
 
+const TOKEN_STORAGE_KEY = 'nursery_auth_token'
+
 interface AuthState {
   user: User | null
   token: string | null
@@ -24,6 +26,10 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ isLoading: true, error: null })
     try {
       const result = await window.api.auth.login({ username, password })
+      // Persist the token so the session survives an app restart
+      if (result.token) {
+        localStorage.setItem(TOKEN_STORAGE_KEY, result.token)
+      }
       set({
         user: result.user,
         token: result.token,
@@ -49,6 +55,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     } catch (err) {
       console.error('Logout error:', err)
     } finally {
+      localStorage.removeItem(TOKEN_STORAGE_KEY)
       set({
         user: null,
         token: null,
@@ -62,16 +69,31 @@ export const useAuthStore = create<AuthState>((set) => ({
   checkCurrent: async () => {
     set({ isLoading: true })
     try {
-      const result = await window.api.auth.current()
+      // First try the in-memory main-process session (same app run)
+      let result = await window.api.auth.current()
+
+      // On a fresh app start the in-memory session is gone — restore it from the
+      // persisted JWT so the user stays logged in across restarts.
+      if (!result || !result.user) {
+        const token = localStorage.getItem(TOKEN_STORAGE_KEY)
+        if (token) {
+          result = await window.api.auth.restore({ token })
+        }
+      }
+
       if (result && result.user) {
         set({
           user: result.user,
+          token: localStorage.getItem(TOKEN_STORAGE_KEY),
           isAuthenticated: true,
           isLoading: false,
         })
       } else {
+        // No valid session — clear any stale token
+        localStorage.removeItem(TOKEN_STORAGE_KEY)
         set({
           user: null,
+          token: null,
           isAuthenticated: false,
           isLoading: false,
         })

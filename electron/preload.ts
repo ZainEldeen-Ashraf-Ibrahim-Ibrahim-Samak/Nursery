@@ -6,6 +6,7 @@ const api = {
     login: (args: any) => ipcRenderer.invoke('auth:login', args),
     logout: () => ipcRenderer.invoke('auth:logout'),
     current: () => ipcRenderer.invoke('auth:current'),
+    restore: (args: { token: string }) => ipcRenderer.invoke('auth:restore', args),
   },
   users: {
     list: () => ipcRenderer.invoke('users:list'),

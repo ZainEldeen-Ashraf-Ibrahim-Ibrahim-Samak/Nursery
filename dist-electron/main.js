@@ -6372,6 +6372,35 @@ ipcMain.handle("auth:logout", () => {
 ipcMain.handle("auth:current", () => {
 	return currentUserSession ? { user: currentUserSession } : null;
 });
+/**
+* auth:restore — Restore a session from a previously issued JWT (persisted in the
+* renderer). Verifies the token, reloads the user from the DB, and re-establishes
+* the main-process session so it survives app restarts.
+*/
+ipcMain.handle("auth:restore", async (_event, { token }) => {
+	try {
+		if (!token) return null;
+		const payload = import_jsonwebtoken.default.verify(token, JWT_SECRET);
+		const user = getDb().prepare("SELECT * FROM users WHERE id = ?").get(payload.id);
+		if (!user || user.is_active === 0) {
+			currentUserSession = null;
+			return null;
+		}
+		const userData = {
+			id: user.id,
+			username: user.username,
+			role: user.role,
+			name: user.name,
+			is_active: user.is_active,
+			created_at: user.created_at
+		};
+		currentUserSession = userData;
+		return { user: userData };
+	} catch {
+		currentUserSession = null;
+		return null;
+	}
+});
 ipcMain.handle("users:list", async () => {
 	try {
 		requireAdmin();
@@ -10631,7 +10660,7 @@ function resolveConflict(local, cloud) {
 function logSync(action, entityType, recordId, status, error = null) {
 	try {
 		getDb().prepare(`
-      INSERT INTO sync_log (action, entity_type, record_id, status, error, created_at)
+      INSERT INTO sync_log (action, table_name, record_id, status, error, synced_at)
       VALUES (?, ?, ?, ?, ?, ?)
     `).run(action, entityType, String(recordId), status, error, (/* @__PURE__ */ new Date()).toISOString());
 	} catch {}
@@ -10683,7 +10712,7 @@ ipcMain.handle("sync:status", async () => {
 			pending[entity.name] = row?.c ?? 0;
 		}
 		const uriRow = db.prepare("SELECT value FROM settings WHERE key = 'sync_mongo_uri'").get();
-		const lastLogRow = db.prepare("SELECT created_at, status, action FROM sync_log ORDER BY id DESC LIMIT 1").get();
+		const lastLogRow = db.prepare("SELECT synced_at AS created_at, status, action FROM sync_log ORDER BY id DESC LIMIT 1").get();
 		return {
 			connected,
 			error,

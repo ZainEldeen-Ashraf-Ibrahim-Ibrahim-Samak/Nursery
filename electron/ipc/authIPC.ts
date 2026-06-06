@@ -73,6 +73,42 @@ ipcMain.handle('auth:current', () => {
   return currentUserSession ? { user: currentUserSession } : null
 })
 
+/**
+ * auth:restore — Restore a session from a previously issued JWT (persisted in the
+ * renderer). Verifies the token, reloads the user from the DB, and re-establishes
+ * the main-process session so it survives app restarts.
+ */
+ipcMain.handle('auth:restore', async (_event, { token }) => {
+  try {
+    if (!token) return null
+
+    const payload = jwt.verify(token, JWT_SECRET) as { id: number }
+    const db = getDb()
+    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(payload.id) as any
+
+    if (!user || user.is_active === 0) {
+      currentUserSession = null
+      return null
+    }
+
+    const userData: User = {
+      id: user.id,
+      username: user.username,
+      role: user.role as 'admin' | 'employee',
+      name: user.name,
+      is_active: user.is_active,
+      created_at: user.created_at
+    }
+
+    currentUserSession = userData
+    return { user: userData }
+  } catch {
+    // Invalid/expired token — treat as no session
+    currentUserSession = null
+    return null
+  }
+})
+
 ipcMain.handle('users:list', async () => {
   try {
     requireAdmin()

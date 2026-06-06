@@ -20,6 +20,7 @@ import TargetPlanning from './pages/Target/TargetPlanning.js'
 import StorageManager from './pages/Storage/StorageManager.js'
 import SyncManager from './pages/Sync/SyncManager.js'
 import Settings from './pages/Settings/Settings.js'
+import UsersList from './pages/Users/UsersList.js'
 
 // Layout component wrapping protected routes
 const AppLayout: React.FC = () => {
@@ -116,21 +117,11 @@ export default function App() {
             path="users"
             element={
               <RoleGuard allowedRoles={['admin']}>
-                <div className="p-6">
-                  {/* Users page stub, mapped to a directory */}
-                  <Navigate to="/users/list" replace />
-                </div>
+                <UsersList />
               </RoleGuard>
             }
           />
-          <Route
-            path="users/list"
-            element={
-              <RoleGuard allowedRoles={['admin']}>
-                <Navigate to="/users" replace />
-              </RoleGuard>
-            }
-          />
+          <Route path="users/list" element={<Navigate to="/users" replace />} />
 
           {/* Settings - Admin only */}
           <Route

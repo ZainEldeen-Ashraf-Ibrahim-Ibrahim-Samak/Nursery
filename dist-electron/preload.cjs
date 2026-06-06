@@ -4,7 +4,8 @@ electron.contextBridge.exposeInMainWorld("api", {
 	auth: {
 		login: (args) => electron.ipcRenderer.invoke("auth:login", args),
 		logout: () => electron.ipcRenderer.invoke("auth:logout"),
-		current: () => electron.ipcRenderer.invoke("auth:current")
+		current: () => electron.ipcRenderer.invoke("auth:current"),
+		restore: (args) => electron.ipcRenderer.invoke("auth:restore", args)
 	},
 	users: {
 		list: () => electron.ipcRenderer.invoke("users:list"),

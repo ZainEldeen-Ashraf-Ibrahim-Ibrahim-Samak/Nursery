@@ -33,7 +33,7 @@ function logSync(action: string, entityType: string, recordId: string | number, 
   try {
     const db = getDb()
     db.prepare(`
-      INSERT INTO sync_log (action, entity_type, record_id, status, error, created_at)
+      INSERT INTO sync_log (action, table_name, record_id, status, error, synced_at)
       VALUES (?, ?, ?, ?, ?, ?)
     `).run(action, entityType, String(recordId), status, error, new Date().toISOString())
   } catch {
@@ -101,7 +101,7 @@ ipcMain.handle('sync:status', async () => {
     }
 
     const uriRow = db.prepare("SELECT value FROM settings WHERE key = 'sync_mongo_uri'").get() as any
-    const lastLogRow = db.prepare('SELECT created_at, status, action FROM sync_log ORDER BY id DESC LIMIT 1').get() as any
+    const lastLogRow = db.prepare('SELECT synced_at AS created_at, status, action FROM sync_log ORDER BY id DESC LIMIT 1').get() as any
 
     return {
       connected,
