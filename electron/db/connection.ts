@@ -1,8 +1,77 @@
-import Database from 'better-sqlite3'
+import { DatabaseSync } from 'node:sqlite'
 import path from 'node:path'
 import { app } from 'electron'
 
-let db: Database.Database | null = null
+/**
+ * Database layer backed by Node's built-in `node:sqlite` (DatabaseSync).
+ *
+ * `Db` is a thin wrapper that exposes the small subset of the better-sqlite3
+ * surface the app relies on (`prepare`, `exec`, `pragma`, `transaction`, `close`),
+ * so IPC handlers and migrations keep their existing call sites unchanged.
+ */
+
+export interface RunResult {
+  changes: number | bigint
+  lastInsertRowid: number | bigint
+}
+
+export interface Statement {
+  run(...params: any[]): RunResult
+  get(...params: any[]): any
+  all(...params: any[]): any[]
+}
+
+export class Db {
+  private raw: DatabaseSync
+
+  constructor(location: string) {
+    this.raw = new DatabaseSync(location)
+  }
+
+  prepare(sql: string): Statement {
+    // node:sqlite StatementSync already provides run/get/all with correct `this` binding.
+    return this.raw.prepare(sql) as unknown as Statement
+  }
+
+  exec(sql: string): void {
+    this.raw.exec(sql)
+  }
+
+  /** Mirror better-sqlite3's `pragma('key = value')` via an exec'd PRAGMA statement. */
+  pragma(statement: string): void {
+    this.raw.exec(`PRAGMA ${statement}`)
+  }
+
+  /**
+   * Mirror better-sqlite3's `transaction(fn)`: returns a function that runs `fn`
+   * inside BEGIN/COMMIT, rolling back (and rethrowing) on error.
+   */
+  transaction<T extends (...args: any[]) => any>(fn: T): T {
+    const raw = this.raw
+    const wrapped = (...args: any[]): any => {
+      raw.exec('BEGIN')
+      try {
+        const result = fn(...args)
+        raw.exec('COMMIT')
+        return result
+      } catch (err) {
+        try {
+          raw.exec('ROLLBACK')
+        } catch {
+          // ignore rollback failure; surface the original error
+        }
+        throw err
+      }
+    }
+    return wrapped as T
+  }
+
+  close(): void {
+    this.raw.close()
+  }
+}
+
+let db: Db | null = null
 
 export function getDbPath(): string {
   if (process.env.NODE_ENV === 'test') {
@@ -16,19 +85,19 @@ export function getDbPath(): string {
   }
 }
 
-export function initDb(dbPath = getDbPath()): Database.Database {
+export function initDb(dbPath = getDbPath()): Db {
   if (db) return db
 
-  db = new Database(dbPath)
-  
+  db = new Db(dbPath)
+
   // Apply performance and integrity pragmas
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')
-  
+
   return db
 }
 
-export function getDb(): Database.Database {
+export function getDb(): Db {
   if (!db) {
     return initDb()
   }

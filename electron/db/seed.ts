@@ -1,7 +1,7 @@
-import Database from 'better-sqlite3'
+import type { Db } from './connection.js'
 import bcrypt from 'bcryptjs'
 
-export async function seedDatabase(db: Database.Database): Promise<void> {
+export async function seedDatabase(db: Db): Promise<void> {
   // Check if users already exist
   const userCountRow = db.prepare('SELECT COUNT(*) as count FROM users').get() as { count: number }
   

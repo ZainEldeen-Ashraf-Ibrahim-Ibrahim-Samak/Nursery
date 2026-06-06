@@ -25,7 +25,6 @@ export default defineConfig({
             outDir: 'dist-electron',
             rollupOptions: {
               external: [
-                'better-sqlite3',
                 'mongoose',
                 'exceljs',
                 'pdfmake'

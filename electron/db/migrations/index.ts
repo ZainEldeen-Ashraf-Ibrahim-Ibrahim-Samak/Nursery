@@ -1,8 +1,8 @@
-import Database from 'better-sqlite3'
+import type { Db } from '../connection.js'
 
 interface Migration {
   name: string
-  up: (db: Database.Database) => void
+  up: (db: Db) => void
 }
 
 const migrations: Migration[] = [
@@ -145,7 +145,7 @@ const migrations: Migration[] = [
   }
 ]
 
-export function runMigrations(db: Database.Database): void {
+export function runMigrations(db: Db): void {
   // Create migrations table if not exists
   db.exec(`
     CREATE TABLE IF NOT EXISTS migrations (

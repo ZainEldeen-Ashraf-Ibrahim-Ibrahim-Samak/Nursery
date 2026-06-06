@@ -1,10 +1,9 @@
-import { n as getDb, r as initDb, t as closeDb } from "./connection-nh_u5GiX.js";
+import { n as getDb, r as initDb, t as closeDb } from "./connection-BgU_q3q-.js";
 import { createRequire } from "node:module";
 import { BrowserWindow, app, dialog, ipcMain, net, protocol } from "electron";
 import path from "node:path";
 import fs from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import "better-sqlite3";
 import nodeCrypto from "crypto";
 import ExcelJS from "exceljs";
 import PdfPrinter from "pdfmake";
@@ -10405,7 +10404,7 @@ ipcMain.handle("storage:import", async (_event, args) => {
 			if (result.canceled || result.filePaths.length === 0) throw new Error("Import cancelled");
 			filePath = result.filePaths[0];
 		}
-		const { importFromWorkbook } = await import("./importService-CSuNfFjF.js");
+		const { importFromWorkbook } = await import("./importService-DPGzyLSB.js");
 		return { imported: await importFromWorkbook(filePath) };
 	} catch (error) {
 		console.error("storage:import error:", error);
