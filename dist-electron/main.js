@@ -11000,6 +11000,7 @@ function createWindow() {
 		height: 800,
 		minWidth: 960,
 		minHeight: 600,
+		icon: path.join(__dirname, "../assets/branding/icon.png"),
 		webPreferences: {
 			contextIsolation: true,
 			nodeIntegration: false,
@@ -11010,10 +11011,8 @@ function createWindow() {
 	mainWindow.webContents.on("preload-error", (_event, preloadPath, error) => {
 		console.error("PRELOAD ERROR at", preloadPath, "->", error);
 	});
-	if (process.env.VITE_DEV_SERVER_URL) {
-		mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
-		mainWindow.webContents.openDevTools();
-	} else mainWindow.loadFile(path.join(__dirname, "../dist/index.html"));
+	if (process.env.VITE_DEV_SERVER_URL) mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
+	else mainWindow.loadFile(path.join(__dirname, "../dist/index.html"));
 	mainWindow.on("closed", () => {
 		mainWindow = null;
 	});

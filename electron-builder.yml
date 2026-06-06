@@ -7,6 +7,10 @@ files:
   - dist
   - dist-electron
   - package.json
+  # Runtime assets the app reads/copies on first launch (branding logos, app icon, fonts).
+  # Bundled inside the asar so the existing `path.join(__dirname, '../assets/...')` resolves.
+  - assets/branding/**/*
+  - assets/default-branding/**/*
 win:
   target: nsis
   icon: assets/branding/icon.ico
