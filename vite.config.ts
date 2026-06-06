@@ -43,6 +43,14 @@ export default defineConfig({
             sourcemap: true,
             minify: false,
             outDir: 'dist-electron',
+            // Electron's sandboxed renderer only supports a CommonJS preload.
+            // The package is `"type": "module"`, so force a CJS build emitted as
+            // `.cjs` (unambiguously CommonJS regardless of package "type").
+            lib: {
+              entry: path.resolve(__dirname, 'electron/preload.ts'),
+              formats: ['cjs'],
+              fileName: () => 'preload.cjs',
+            },
           }
         }
       }
