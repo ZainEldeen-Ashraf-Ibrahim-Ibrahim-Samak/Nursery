@@ -50,12 +50,6 @@ function createWindow() {
   mainWindow.webContents.on('preload-error', (_event, preloadPath, error) => {
     console.error('PRELOAD ERROR at', preloadPath, '->', error)
   })
-  mainWindow.webContents.on('did-finish-load', () => {
-    mainWindow?.webContents
-      .executeJavaScript('typeof window.api')
-      .then((t) => console.log('[diag] typeof window.api =', t))
-      .catch(() => {})
-  })
 
   // Load URL or File
   if (process.env.VITE_DEV_SERVER_URL) {
