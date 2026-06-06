@@ -46,6 +46,17 @@ function createWindow() {
     title: 'نظام إدارة الحضانة ومركز التوحد | Nursery & Autism Center Management System',
   })
 
+  // Surface any preload load/execution failure (otherwise window.api is silently undefined)
+  mainWindow.webContents.on('preload-error', (_event, preloadPath, error) => {
+    console.error('PRELOAD ERROR at', preloadPath, '->', error)
+  })
+  mainWindow.webContents.on('did-finish-load', () => {
+    mainWindow?.webContents
+      .executeJavaScript('typeof window.api')
+      .then((t) => console.log('[diag] typeof window.api =', t))
+      .catch(() => {})
+  })
+
   // Load URL or File
   if (process.env.VITE_DEV_SERVER_URL) {
     mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL)
