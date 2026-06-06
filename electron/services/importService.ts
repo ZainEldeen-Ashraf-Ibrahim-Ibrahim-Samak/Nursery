@@ -127,6 +127,21 @@ function orNull(s: string): string | null {
   return s === '' ? null : s
 }
 
+/**
+ * The workbook sheets embed summary/total/tip rows (e.g. "إجمالي الرواتب",
+ * "💰 إجمالي الفواتير", "💡 ..."). These are NOT real records and must be
+ * skipped so they don't pollute children/employees/expenses.
+ */
+function isDataName(name: string): boolean {
+  if (!name) return false
+  const first = name.trimStart().charAt(0)
+  // Leading decorative symbol/emoji (not an Arabic/Latin letter or digit)
+  if (!/[؀-ۿA-Za-z0-9]/.test(first)) return false
+  // Summary / total / tip keywords
+  if (/إجمالي|الإجمالي|ملخّص|ملخص|صافي الربح|التارجت|نسبة التحصيل|المحصّل|المحصل/.test(name)) return false
+  return true
+}
+
 // ── Year & date resolution ────────────────────────────────────────────────────
 
 function resolveImportYear(): number {
@@ -252,7 +267,7 @@ export async function importFromWorkbook(filePath: string): Promise<ImportSummar
       for (let r = DATA_START_ROW; r <= childSheet.rowCount; r++) {
         const row = childSheet.getRow(r)
         const name = toStr(cellAt(row, CHILD_COL.name))
-        if (!name) continue
+        if (!isDataName(name)) continue
         if (findChild.get(name)) { summary.children.skipped++; continue }
         try {
           insertChild.run(
@@ -292,7 +307,7 @@ export async function importFromWorkbook(filePath: string): Promise<ImportSummar
       for (let r = DATA_START_ROW; r <= ws.rowCount; r++) {
         const row = ws.getRow(r)
         const name = toStr(cellAt(row, PAY_COL.name))
-        if (!name) continue
+        if (!isDataName(name)) continue
         try {
           const service = toStr(cellAt(row, PAY_COL.service)) || 'حضانة'
           const unit = toStr(cellAt(row, PAY_COL.unit)) || 'شهر'
@@ -332,7 +347,7 @@ export async function importFromWorkbook(filePath: string): Promise<ImportSummar
       for (let r = DATA_START_ROW; r <= salarySheet.rowCount; r++) {
         const row = salarySheet.getRow(r)
         const name = toStr(cellAt(row, SAL_COL.name))
-        if (!name) continue
+        if (!isDataName(name)) continue
         try {
           const role = toStr(cellAt(row, SAL_COL.role)) || 'موظف'
           const base = toNum(cellAt(row, SAL_COL.base))
@@ -384,7 +399,7 @@ export async function importFromWorkbook(filePath: string): Promise<ImportSummar
       for (let r = DATA_START_ROW; r <= expensesSheet.rowCount; r++) {
         const row = expensesSheet.getRow(r)
         const item = toStr(cellAt(row, EXP_COL.item))
-        if (!item) continue
+        if (!isDataName(item)) continue
         try {
           for (let m = 0; m < 12; m++) {
             const amount = toNum(cellAt(row, EXP_COL.firstMonth + m))

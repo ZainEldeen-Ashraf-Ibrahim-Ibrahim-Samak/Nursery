@@ -38,12 +38,15 @@ export async function writeSampleWorkbook(): Promise<string> {
     rows.forEach((r, i) => setRow(ws, 4 + i, 2, [i + 1, ...r]))
   }
 
-  // يناير: 3 children; one fully paid, one partial, one unpaid; plus a blank-name row (skipped)
+  // يناير: 3 children; one fully paid, one partial, one unpaid; plus a blank-name
+  // row and an embedded summary row (both must be skipped by the importer)
   buildMonth('يناير', [
     ['أحمد محمد', 'حضانة', 'شهر', 1, 3500, 3500, 3500, 0, '✅', null],
     ['فاطمة علي', 'حضانة', 'شهر', 1, 3500, 3500, 1000, 2500, '⚠️', null],
     ['سارة خالد', 'استضافة', 'شهر', 1, 3000, 3000, 0, 3000, '❌', null],
     ['', 'حضانة', 'شهر', 1, 0, 0, 0, 0, '', null], // blank name → skipped
+    ['💰 إجمالي الفواتير', '', '', '', '', 10000, 0, 0, '', null], // summary → skipped
+    ['📈 صافي الربح', '', '', '', '', 5000, 0, 0, '', null],       // summary → skipped
   ])
   // فبراير: 2 children
   buildMonth('فبراير', [
@@ -60,6 +63,8 @@ export async function writeSampleWorkbook(): Promise<string> {
   setRow(sal, 3, 2, ['#', 'الاسم', 'الوظيفة', 'الراتب الأساسي', 'بدل سكن', 'بدل مواصلات', 'حوافز', 'خصومات', 'صافي الراتب', null, ...months, 'إجمالي'])
   setRow(sal, 4, 2, [1, 'مدير', 'المدير', 6000, 500, 300, 0, 0, 6800, null, ...Array(12).fill(6800), 81600])
   setRow(sal, 5, 2, [2, 'موظفة 1', 'معلمة', 5000, 300, 200, 0, 0, 5500, null, ...Array(12).fill(5500), 66000])
+  // Totals row → must be skipped by the importer
+  setRow(sal, 6, 2, [3, 'إجمالي الرواتب الشهرية', '', 11000, 800, 500, 0, 0, 12300, null, ...Array(12).fill(12300), 147600])
 
   // Expenses: "#" B(2), item C(3), months D(4)..O(15), total P(16)
   const exp = wb.addWorksheet('💸 المصروفات')
@@ -67,6 +72,8 @@ export async function writeSampleWorkbook(): Promise<string> {
   setRow(exp, 3, 2, ['#', 'بند المصروف', ...months, 'إجمالي'])
   setRow(exp, 4, 2, [1, 'إيجار المبنى', ...Array(12).fill(15000), 180000])
   setRow(exp, 5, 2, [2, 'فاتورة كهرباء', ...Array(12).fill(2000), 24000])
+  // Totals row → must be skipped by the importer
+  setRow(exp, 6, 2, [3, 'إجمالي المصروفات التشغيلية', ...Array(12).fill(17000), 204000])
 
   const filePath = path.join(os.tmpdir(), `nursery-sample-${Date.now()}.xlsx`)
   await wb.xlsx.writeFile(filePath)
