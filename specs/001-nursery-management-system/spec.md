@@ -8,6 +8,16 @@
 
 **Input**: User description: "Nursery & Autism Center Management System — a bilingual (Arabic RTL / English LTR) desktop application for managing children records, monthly payment tracking, employee salaries, operational expenses, a financial dashboard, target planning, per-child account statements, white-label branding, Excel export matching the original workbook, and cloud synchronization for administrators."
 
+## Clarifications
+
+### Session 2026-06-06
+
+- Q: How are employee accounts created and managed? → A: Admins create, edit, and deactivate employee accounts from within the app (a user-management screen).
+- Q: What currency is used for all financial figures? → A: Egyptian Pound (EGP / ج.م), a fixed single currency.
+- Q: Which export formats must be supported? → A: Both Excel (.xlsx) and PDF available for every export type.
+- Q: When does a login session expire? → A: It persists indefinitely until the user explicitly logs out.
+- Q: How is an overpayment (paid > total) handled? → A: Allow it; record the negative balance as a credit and set status to "paid".
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Manage Children Records (Priority: P1)
@@ -217,7 +227,7 @@ An administrator synchronizes local data with a cloud database: pushing unsynced
 
 - What happens when a payment sheet is opened for a month before any children were registered? (No rows generated; empty sheet with zero totals.)
 - How does the system handle a child registered mid-year when generating their statement? (Statement starts at the registration month, not January.)
-- What happens when a paid amount exceeds the total for a row? (System treats it as fully paid with a zero or negative balance and should flag the overpayment.)
+- What happens when a paid amount exceeds the total for a row? (Allowed; the negative balance is shown as a credit and the status is "paid".)
 - How does the system behave when the cloud connection is unavailable during a sync? (Sync fails gracefully with a status message; local data is unaffected.)
 - What happens when an uploaded logo or icon file is missing or corrupt at export/startup time? (System falls back to the default branding asset.)
 - How does the system handle switching language while data is displayed? (Layout direction and labels update; numeric data is unchanged.)
@@ -232,8 +242,9 @@ An administrator synchronizes local data with a cloud database: pushing unsynced
 - **FR-001**: System MUST authenticate users with a username and password and reject invalid credentials with a clear message.
 - **FR-002**: System MUST support two roles, administrator and employee, and enforce role-based access on every capability.
 - **FR-003**: System MUST restrict employees from viewing salaries, editing settings/prices, accessing sync and storage management, and deleting records.
-- **FR-004**: System MUST persist a user's session so a returning user with a valid session is logged in automatically.
+- **FR-004**: System MUST persist a user's session indefinitely until the user explicitly logs out, so a returning user is logged in automatically on reopen with no time-based expiry.
 - **FR-005**: System MUST store user passwords in a non-recoverable hashed form.
+- **FR-005a**: System MUST allow administrators to create, edit, and deactivate employee accounts from an in-app user-management screen; this screen MUST be unavailable to employees.
 
 **Children**
 - **FR-006**: System MUST allow administrators to create, edit, and deactivate child records with name, guardian, guardian phone, optional child phone, optional national ID, service, unit, price, registration date, and notes.
@@ -244,7 +255,7 @@ An administrator synchronizes local data with a cloud database: pushing unsynced
 **Payments**
 - **FR-010**: System MUST generate a payment row for each active child for a given month based on the child's service and price.
 - **FR-011**: System MUST compute each row's total as quantity × price and the balance as total − paid.
-- **FR-012**: System MUST assign a status of paid, partial, or unpaid based on the paid amount relative to the total.
+- **FR-012**: System MUST assign a status of paid, partial, or unpaid based on the paid amount relative to the total. A paid amount equal to or greater than the total is "paid"; an amount exceeding the total is permitted and recorded as a negative balance (credit).
 - **FR-013**: Users MUST be able to edit only the quantity and the paid amount on a payment row; price derives from the child/settings.
 - **FR-014**: System MUST display per-month summary totals for invoiced, collected, and arrears.
 - **FR-015**: System MUST support recording a full payment for multiple selected children in one action.
@@ -283,6 +294,7 @@ An administrator synchronizes local data with a cloud database: pushing unsynced
 **Export**
 - **FR-035**: System MUST produce a full multi-sheet export whose sheet names, column structure, and styling match the original workbook.
 - **FR-036**: System MUST produce partial exports for a single month, a single child statement, salaries, and expenses.
+- **FR-036a**: System MUST offer both Excel (.xlsx) and PDF output for every export type (full export, single month, child statement, salaries, expenses).
 - **FR-037**: System MUST let the user choose the export language for headers (Arabic or English).
 - **FR-038**: System MUST allow employees to export an individual child statement.
 
@@ -338,7 +350,7 @@ An administrator synchronizes local data with a cloud database: pushing unsynced
 - Months are tracked using the Arabic month names used in the original workbook, with English equivalents provided for the English interface.
 - A single organization/branch is supported in this version; multi-branch support is out of scope (noted as future in the plan).
 - The cloud database connection details are provided and configured by the administrator; provisioning the cloud account is out of scope.
-- Currency is a single configured currency; multi-currency handling is out of scope.
+- Currency is the Egyptian Pound (EGP / ج.م), fixed for all financial figures and exports; multi-currency handling and conversion are out of scope.
 - "Net profit" is computed as collected minus the sum of operational expenses and salaries for the period, per the plan's business logic.
 - Standard desktop performance expectations apply (data volume on the order of ~100 children and ~11 employees as described).
 
