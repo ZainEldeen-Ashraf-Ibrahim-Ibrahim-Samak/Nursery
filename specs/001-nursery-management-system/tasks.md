@@ -32,12 +32,12 @@ description: "Task list for Nursery & Autism Center Management System"
 
 **Purpose**: Project initialization and toolchain
 
-- [ ] T001 Scaffold Electron + React + TypeScript project (Vite `react-ts` template) at repo root with `electron/`, `src/`, `tests/`, `assets/` directories per plan.md
-- [ ] T002 Install dependencies in package.json: electron, react, react-dom, react-router-dom, zustand, better-sqlite3, exceljs, pdfmake, mongoose, bcryptjs, jsonwebtoken, recharts, react-i18next, i18next, date-fns, clsx; dev: vite, vite-plugin-electron, tailwindcss, postcss, autoprefixer, electron-builder, typescript, vitest, @playwright/test, @types/better-sqlite3
-- [ ] T003 [P] Configure Tailwind in tailwind.config.js (primary/success/danger/warning colors, Cairo/Inter fonts) and CSS variables `--color-primary`/`--color-accent` in src/index.css
-- [ ] T004 [P] Configure vite.config.ts with vite-plugin-electron (main + preload entries) and tsconfig project references for main/preload/renderer
-- [ ] T005 [P] Configure ESLint + Prettier and npm scripts (dev, build, dist, test, test:e2e) in package.json
-- [ ] T006 [P] Create electron-builder.yml (win/mac/linux icon paths under assets/branding) and `.env` template (JWT_SECRET, MONGO_URI)
+- [x] T001 Scaffold Electron + React + TypeScript project (Vite `react-ts` template) at repo root with `electron/`, `src/`, `tests/`, `assets/` directories per plan.md
+- [x] T002 Install dependencies in package.json: electron, react, react-dom, react-router-dom, zustand, better-sqlite3, exceljs, pdfmake, mongoose, bcryptjs, jsonwebtoken, recharts, react-i18next, i18next, date-fns, clsx; dev: vite, vite-plugin-electron, tailwindcss, postcss, autoprefixer, electron-builder, typescript, vitest, @playwright/test, @types/better-sqlite3
+- [x] T003 [P] Configure Tailwind in tailwind.config.js (primary/success/danger/warning colors, Cairo/Inter fonts) and CSS variables `--color-primary`/`--color-accent` in src/index.css
+- [x] T004 [P] Configure vite.config.ts with vite-plugin-electron (main + preload entries) and tsconfig project references for main/preload/renderer
+- [x] T005 [P] Configure ESLint + Prettier and npm scripts (dev, build, dist, test, test:e2e) in package.json
+- [x] T006 [P] Create electron-builder.yml (win/mac/linux icon paths under assets/branding) and `.env` template (JWT_SECRET, MONGO_URI)
 
 ---
 
@@ -47,23 +47,23 @@ description: "Task list for Nursery & Autism Center Management System"
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete
 
-- [ ] T007 Implement SQLite connection with pragmas (WAL, foreign_keys) in electron/db/connection.ts using app userData path
-- [ ] T008 Create versioned migration framework and initial schema for all tables (users, children, payments, employees, salary_payments, expenses, settings, sync_log) in electron/db/migrations/
-- [ ] T009 Implement first-launch seed (default admin user, default pricing/target settings, default brand_* keys) in electron/db/seed.ts
-- [ ] T010 [P] Define shared TypeScript types (Child, Payment, Employee, SalaryPayment, Expense, Setting, User, SyncLog) in src/types/
-- [ ] T011 Implement electron/main.ts: BrowserWindow (contextIsolation on, nodeIntegration off), RTL support, `asset://` protocol registration, app lifecycle, migrations+seed on startup
-- [ ] T012 Implement typed contextBridge `window.api` skeleton in electron/preload.ts (all channels from contracts/ipc-contracts.md, stubbed)
-- [ ] T013 Implement auth primitives in electron/ipc/authIPC.ts: bcrypt hashing, JWT issue/verify, handlers `auth:login`/`auth:logout`/`auth:current` (session persists until logout)
-- [ ] T014 Implement server-side role guard helper (`requireAdmin`) used by all admin-only IPC handlers in electron/ipc/_guard.ts
-- [ ] T015 Implement settings IPC `settings:get`/`settings:update` (admin write) in electron/ipc/settingsIPC.ts
-- [ ] T016 [P] Set up i18n (react-i18next) with src/i18n/ar.json + en.json and live `document.documentElement.dir` switching
-- [ ] T017 [P] Scaffold Zustand stores directory and useAuthStore in src/store/useAuthStore.ts
-- [ ] T018 [P] Build UI primitives in src/components/ui/ (Button, Input, Select, Modal, Table, Badge, Card, Stat, Alert, SearchBar, Pagination, LoadingSpinner)
-- [ ] T019 Build layout components in src/components/layout/ (Sidebar, Header, LanguageSwitcher, RoleGuard)
-- [ ] T020 Implement Router + protected routes + i18n provider in src/App.tsx
-- [ ] T021 [P] Implement useBranding hook (CSS variable + title application) in src/hooks/useBranding.ts and AppLogo in src/components/ui/AppLogo.tsx
-- [ ] T022 [P] Add default branding assets in assets/default-branding/ and copy to assets/branding/ on first run
-- [ ] T023 [P] Set up IPC contract test harness validating the `window.api` surface against contracts/ipc-contracts.md in tests/contract/api-surface.test.ts
+- [x] T007 Implement SQLite connection with pragmas (WAL, foreign_keys) in electron/db/connection.ts using app userData path
+- [x] T008 Create versioned migration framework and initial schema for all tables (users, children, payments, employees, salary_payments, expenses, settings, sync_log) in electron/db/migrations/
+- [x] T009 Implement first-launch seed (default admin user, default pricing/target settings, default brand_* keys) in electron/db/seed.ts
+- [x] T010 [P] Define shared TypeScript types (Child, Payment, Employee, SalaryPayment, Expense, Setting, User, SyncLog) in src/types/
+- [x] T011 Implement electron/main.ts: BrowserWindow (contextIsolation on, nodeIntegration off), RTL support, `asset://` protocol registration, app lifecycle, migrations+seed on startup
+- [x] T012 Implement typed contextBridge `window.api` skeleton in electron/preload.ts (all channels from contracts/ipc-contracts.md, stubbed)
+- [x] T013 Implement auth primitives in electron/ipc/authIPC.ts: bcrypt hashing, JWT issue/verify, handlers `auth:login`/`auth:logout`/`auth:current` (session persists until logout)
+- [x] T014 Implement server-side role guard helper (`requireAdmin`) used by all admin-only IPC handlers in electron/ipc/_guard.ts
+- [x] T015 Implement settings IPC `settings:get`/`settings:update` (admin write) in electron/ipc/settingsIPC.ts
+- [x] T016 [P] Set up i18n (react-i18next) with src/i18n/ar.json + en.json and live `document.documentElement.dir` switching
+- [x] T017 [P] Scaffold Zustand stores directory and useAuthStore in src/store/useAuthStore.ts
+- [x] T018 [P] Build UI primitives in src/components/ui/ (Button, Input, Select, Modal, Table, Badge, Card, Stat, Alert, SearchBar, Pagination, LoadingSpinner)
+- [x] T019 Build layout components in src/components/layout/ (Sidebar, Header, LanguageSwitcher, RoleGuard)
+- [x] T020 Implement Router + protected routes + i18n provider in src/App.tsx
+- [x] T021 [P] Implement useBranding hook (CSS variable + title application) in src/hooks/useBranding.ts and AppLogo in src/components/ui/AppLogo.tsx
+- [x] T022 [P] Add default branding assets in assets/default-branding/ and copy to assets/branding/ on first run
+- [x] T023 [P] Set up IPC contract test harness validating the `window.api` surface against contracts/ipc-contracts.md in tests/contract/api-surface.test.ts
 
 **Checkpoint**: Foundation ready — user story implementation can begin
 
@@ -75,13 +75,13 @@ description: "Task list for Nursery & Autism Center Management System"
 
 **Independent Test**: Log in as admin and as employee; confirm each sees only permitted nav, and admins can create/deactivate employee accounts.
 
-- [ ] T024 [P] [US10] Contract test for auth + users channels in tests/contract/auth.test.ts
-- [ ] T025 [P] [US10] Unit test role enforcement (employee blocked from admin actions) in tests/unit/roles.test.ts
-- [ ] T026 [US10] Build Login page (username/password, language switcher, error message) in src/pages/Login.tsx
-- [ ] T027 [US10] Implement auto-login from persisted session via `auth:current` in src/App.tsx
-- [ ] T028 [US10] Implement user-management IPC (`users:list`/`create`/`update`/`deactivate`, admin-only) in electron/ipc/authIPC.ts
-- [ ] T029 [US10] Build Users management page (list + create/edit/deactivate employees) in src/pages/Users/UsersList.tsx
-- [ ] T030 [US10] Enforce role-based nav/visibility (hide salaries, sync, storage, settings-edit, delete for employees) in src/components/layout/RoleGuard.tsx and Sidebar
+- [x] T024 [P] [US10] Contract test for auth + users channels in tests/contract/auth.test.ts
+- [x] T025 [P] [US10] Unit test role enforcement (employee blocked from admin actions) in tests/unit/roles.test.ts
+- [x] T026 [US10] Build Login page (username/password, language switcher, error message) in src/pages/Login.tsx
+- [x] T027 [US10] Implement auto-login from persisted session via `auth:current` in src/App.tsx
+- [x] T028 [US10] Implement user-management IPC (`users:list`/`create`/`update`/`deactivate`, admin-only) in electron/ipc/authIPC.ts
+- [x] T029 [US10] Build Users management page (list + create/edit/deactivate employees) in src/pages/Users/UsersList.tsx
+- [x] T030 [US10] Enforce role-based nav/visibility (hide salaries, sync, storage, settings-edit, delete for employees) in src/components/layout/RoleGuard.tsx and Sidebar
 
 **Checkpoint**: Login, sessions, and role restrictions fully functional
 
@@ -93,13 +93,13 @@ description: "Task list for Nursery & Autism Center Management System"
 
 **Independent Test**: Add children, search/filter, edit a price, deactivate one; confirm employee is read-only.
 
-- [ ] T031 [P] [US1] Contract test for children channels in tests/contract/children.test.ts
-- [ ] T032 [US1] Implement children IPC (`children:get` with search/filter, `add`/`update`/`deactivate`, admin writes) in electron/ipc/childrenIPC.ts
-- [ ] T033 [P] [US1] Implement useChildrenStore in src/store/useChildrenStore.ts
-- [ ] T034 [US1] Build ChildrenList page (sortable/filterable table, search, export button) in src/pages/Children/ChildrenList.tsx
-- [ ] T035 [US1] Build ChildForm (service→unit/price defaults from settings, editable price) in src/pages/Children/ChildForm.tsx
-- [ ] T036 [US1] Build Settings container (3 tabs) + PricingSettings tab in src/pages/Settings/Settings.tsx and src/pages/Settings/PricingSettings.tsx
-- [ ] T037 [US1] Enforce employee read-only on children UI (hide add/edit/delete)
+- [x] T031 [P] [US1] Contract test for children channels in tests/contract/children.test.ts
+- [x] T032 [US1] Implement children IPC (`children:get` with search/filter, `add`/`update`/`deactivate`, admin writes) in electron/ipc/childrenIPC.ts
+- [x] T033 [P] [US1] Implement useChildrenStore in src/store/useChildrenStore.ts
+- [x] T034 [US1] Build ChildrenList page (sortable/filterable table, search, export button) in src/pages/Children/ChildrenList.tsx
+- [x] T035 [US1] Build ChildForm (service→unit/price defaults from settings, editable price) in src/pages/Children/ChildForm.tsx
+- [x] T036 [US1] Build Settings container (3 tabs) + PricingSettings tab in src/pages/Settings/Settings.tsx and src/pages/Settings/PricingSettings.tsx
+- [x] T037 [US1] Enforce employee read-only on children UI (hide add/edit/delete)
 
 **Checkpoint**: Children registry usable end-to-end
 
@@ -111,13 +111,13 @@ description: "Task list for Nursery & Autism Center Management System"
 
 **Independent Test**: Select a month, generate rows, record full/partial/over payments; confirm status and summary totals.
 
-- [ ] T038 [P] [US2] Unit test payment calculations (total, balance, status, overpayment→credit) in tests/unit/payments.test.ts
-- [ ] T039 [P] [US2] Contract test for payments channels (server-side recompute, price ignored from client) in tests/contract/payments.test.ts
-- [ ] T040 [US2] Implement payments IPC (`payments:get`+summary, `generate` idempotent, `update` recompute, `bulkPay`) in electron/ipc/paymentsIPC.ts
-- [ ] T041 [P] [US2] Implement usePaymentsStore in src/store/usePaymentsStore.ts
-- [ ] T042 [US2] Build MonthlyPayments page + PaymentRow (editable quantity/paid only) in src/pages/Payments/MonthlyPayments.tsx and PaymentRow.tsx
-- [ ] T043 [US2] Add month/year selector and summary bar (invoiced/collected/arrears)
-- [ ] T044 [US2] Implement bulk "record full payment" for selected children
+- [x] T038 [P] [US2] Unit test payment calculations (total, balance, status, overpayment→credit) in tests/unit/payments.test.ts
+- [x] T039 [P] [US2] Contract test for payments channels (server-side recompute, price ignored from client) in tests/contract/payments.test.ts
+- [x] T040 [US2] Implement payments IPC (`payments:get`+summary, `generate` idempotent, `update` recompute, `bulkPay`) in electron/ipc/paymentsIPC.ts
+- [x] T041 [P] [US2] Implement usePaymentsStore in src/store/usePaymentsStore.ts
+- [x] T042 [US2] Build MonthlyPayments page + PaymentRow (editable quantity/paid only) in src/pages/Payments/MonthlyPayments.tsx and PaymentRow.tsx
+- [x] T043 [US2] Add month/year selector and summary bar (invoiced/collected/arrears)
+- [x] T044 [US2] Implement bulk "record full payment" for selected children
 
 **Checkpoint**: Monthly collection tracking functional
 
@@ -129,12 +129,12 @@ description: "Task list for Nursery & Autism Center Management System"
 
 **Independent Test**: Enter payments/expenses for a month; open dashboard; confirm KPIs, summary, and charts reflect data within 2s.
 
-- [ ] T045 [P] [US3] Unit test dashboard + target calculations (collection rate, net profit, target required, gap) in tests/unit/dashboard.test.ts
-- [ ] T046 [US3] Implement `dashboard:get` aggregation IPC (KPIs, 12-month summary, revenue-by-service, alerts) in electron/ipc/dashboardIPC.ts
-- [ ] T047 [P] [US3] Implement useDashboard hook in src/hooks/useDashboard.ts
-- [ ] T048 [US3] Build Dashboard page with month selector + KPI cards in src/pages/Dashboard.tsx
-- [ ] T049 [US3] Add 12-month summary table, revenue-by-service table, target calculator card, and smart alerts
-- [ ] T050 [P] [US3] Build charts (RevenueChart, CollectionDonut, MonthlyProfitBar) in src/components/charts/
+- [x] T045 [P] [US3] Unit test dashboard + target calculations (collection rate, net profit, target required, gap) in tests/unit/dashboard.test.ts
+- [x] T046 [US3] Implement `dashboard:get` aggregation IPC (KPIs, 12-month summary, revenue-by-service, alerts) in electron/ipc/dashboardIPC.ts
+- [x] T047 [P] [US3] Implement useDashboard hook in src/hooks/useDashboard.ts
+- [x] T048 [US3] Build Dashboard page with month selector + KPI cards in src/pages/Dashboard.tsx
+- [x] T049 [US3] Add 12-month summary table, revenue-by-service table, target calculator card, and smart alerts
+- [x] T050 [P] [US3] Build charts (RevenueChart, CollectionDonut, MonthlyProfitBar) in src/components/charts/
 
 **Checkpoint**: All P1 stories complete — **MVP achievable**
 
@@ -146,12 +146,12 @@ description: "Task list for Nursery & Autism Center Management System"
 
 **Independent Test**: Export a month as xlsx and pdf; confirm sheet/layout parity and branding header.
 
-- [ ] T051 [P] [US9] Implement export header/branding helper (`getExportHeader`) in electron/services/exportHeader.ts
-- [ ] T052 [US9] Implement ExcelJS workbook builder (original sheet names+emoji, columns, `#,##0.00`, status colors, RTL views, embedded logo) in electron/services/exportService.ts
-- [ ] T053 [US9] Implement pdfmake builder with embedded Cairo font (RTL) in electron/services/pdfService.ts
-- [ ] T054 [US9] Implement export IPC (`export:full`/`month`/`child`/`salaries`/`expenses`, format+lang, save dialog, role checks) in electron/ipc/exportIPC.ts
-- [ ] T055 [P] [US9] Contract test export channels incl. employee-can-export-child-only in tests/contract/export.test.ts
-- [ ] T056 [US9] Implement useExport hook and wire export buttons across pages in src/hooks/useExport.ts
+- [x] T051 [P] [US9] Implement export header/branding helper (`getExportHeader`) in electron/services/exportHeader.ts
+- [x] T052 [US9] Implement ExcelJS workbook builder (original sheet names+emoji, columns, `#,##0.00`, status colors, RTL views, embedded logo) in electron/services/exportService.ts
+- [x] T053 [US9] Implement pdfmake builder with embedded Cairo font (`RTL`) in electron/services/pdfService.ts
+- [x] T054 [US9] Implement export IPC (`export:full`/`month`/`child`/`salaries`/`expenses`, format+lang, save dialog, role checks) in electron/ipc/exportIPC.ts
+- [x] T055 [P] [US9] Contract test export channels incl. employee-can-export-child-only in tests/contract/export.test.ts
+- [x] T056 [US9] Implement useExport hook and wire export buttons across pages in src/hooks/useExport.ts
 
 **Checkpoint**: Export works for all report types in both formats
 
@@ -163,10 +163,10 @@ description: "Task list for Nursery & Autism Center Management System"
 
 **Independent Test**: Open a child's statement; confirm months from reg_date to now with accurate totals; export it.
 
-- [ ] T057 [P] [US4] Unit test statement builder (reg_date→now span, per-month totals/status) in tests/unit/statement.test.ts
-- [ ] T058 [US4] Implement statement computation in electron/ipc/childrenIPC.ts (or statementIPC.ts)
-- [ ] T059 [US4] Build ChildStatement page (child header, 12-row table, overall totals) in src/pages/Children/ChildStatement.tsx
-- [ ] T060 [US4] Wire statement export (xlsx + pdf) via useExport
+- [x] T057 [P] [US4] Unit test statement builder (reg_date→now span, per-month totals/status) in tests/unit/statement.test.ts
+- [x] T058 [US4] Implement statement computation in electron/ipc/childrenIPC.ts (or statementIPC.ts)
+- [x] T059 [US4] Build ChildStatement page (child header, 12-row table, overall totals) in src/pages/Children/ChildStatement.tsx
+- [x] T060 [US4] Wire statement export (xlsx + pdf) via useExport
 
 **Checkpoint**: Statements viewable and exportable
 
@@ -178,11 +178,11 @@ description: "Task list for Nursery & Autism Center Management System"
 
 **Independent Test**: Add employees, record a month's payroll; confirm net salaries and monthly total; employee access denied.
 
-- [ ] T061 [P] [US5] Contract test salaries channels (admin-only) in tests/contract/salaries.test.ts
-- [ ] T062 [US5] Implement salaries IPC (`employees:*`, `salary:get`/`update`) in electron/ipc/salariesIPC.ts
-- [ ] T063 [P] [US5] Implement useSalariesStore in src/store/useSalariesStore.ts
-- [ ] T064 [US5] Build SalariesList + SalaryForm pages with 12-month columns and monthly totals in src/pages/Salaries/
-- [ ] T065 [US5] Enforce admin-only access on salaries module
+- [x] T061 [P] [US5] Contract test salaries channels (admin-only) in tests/contract/salaries.test.ts
+- [x] T062 [US5] Implement salaries IPC (`employees:*`, `salary:get`/`update`) in electron/ipc/salariesIPC.ts
+- [x] T063 [P] [US5] Implement useSalariesStore in src/store/useSalariesStore.ts
+- [x] T064 [US5] Build SalariesList + SalaryForm pages with 12-month columns and monthly totals in src/pages/Salaries/
+- [x] T065 [US5] Enforce admin-only access on salaries module
 
 **Checkpoint**: Payroll functional
 
@@ -194,11 +194,11 @@ description: "Task list for Nursery & Autism Center Management System"
 
 **Independent Test**: Enter monthly amounts; confirm annual totals and combined grand total; add/remove items.
 
-- [ ] T066 [P] [US6] Contract test expenses channels in tests/contract/expenses.test.ts
-- [ ] T067 [US6] Implement expenses IPC (`expenses:get`/`update`/`addItem`/`removeItem`) in electron/ipc/expensesIPC.ts
-- [ ] T068 [P] [US6] Implement useExpensesStore in src/store/useExpensesStore.ts
-- [ ] T069 [US6] Build ExpensesList + ExpenseForm (12-month grid, annual totals, add/remove items) in src/pages/Expenses/
-- [ ] T070 [US6] Compute and display combined operational expenses + salaries total
+- [x] T066 [P] [US6] Contract test expenses channels in tests/contract/expenses.test.ts
+- [x] T067 [US6] Implement expenses IPC (`expenses:get`/`update`/`addItem`/`removeItem`) in electron/ipc/expensesIPC.ts
+- [x] T068 [P] [US6] Implement useExpensesStore in src/store/useExpensesStore.ts
+- [x] T069 [US6] Build ExpensesList + ExpenseForm (12-month grid, annual totals, add/remove items) in src/pages/Expenses/
+- [x] T070 [US6] Compute and display combined operational expenses + salaries total
 
 **Checkpoint**: Expenses functional
 
@@ -210,10 +210,10 @@ description: "Task list for Nursery & Autism Center Management System"
 
 **Independent Test**: Set target profit %, enter a distribution; confirm required target, gap, and coverage %.
 
-- [ ] T071 [P] [US7] Unit test target coverage + units-needed calculations in tests/unit/target.test.ts
-- [ ] T072 [US7] Implement target IPC (`target:get`, `target:calc`) in electron/ipc/targetIPC.ts
-- [ ] T073 [US7] Build TargetPlanning page (12-month table) in src/pages/Target/TargetPlanning.tsx
-- [ ] T074 [US7] Build smart suggestions + custom distribution calculator with coverage progress bar
+- [x] T071 [P] [US7] Unit test target coverage + units-needed calculations in tests/unit/target.test.ts
+- [x] T072 [US7] Implement target IPC (`target:get`, `target:calc`) in electron/ipc/targetIPC.ts
+- [x] T073 [US7] Build TargetPlanning page (12-month table) in src/pages/Target/TargetPlanning.tsx
+- [x] T074 [US7] Build smart suggestions + custom distribution calculator with coverage progress bar
 
 **Checkpoint**: Target planning functional
 
@@ -225,11 +225,11 @@ description: "Task list for Nursery & Autism Center Management System"
 
 **Independent Test**: Change name/colors/logo and see live updates and on exports; reset to defaults; employee has no branding tab.
 
-- [ ] T075 [P] [US8] Contract test branding channels in tests/contract/branding.test.ts
-- [ ] T076 [US8] Implement branding IPC (`get`/`save`/`upload-logo`/`upload-icon`/`reset`/`apply-icon`; live title + icon) in electron/ipc/brandingIPC.ts
-- [ ] T077 [P] [US8] Build ColorPicker + ImageUpload components in src/components/ui/
-- [ ] T078 [US8] Implement useBrandingStore and BrandingSettings tab in src/pages/Settings/BrandingSettings.tsx
-- [ ] T079 [US8] Wire live color/title/icon application + restore-defaults; warn that installer icon needs rebuild
+- [x] T075 [P] [US8] Contract test branding channels in tests/contract/branding.test.ts
+- [x] T076 [US8] Implement branding IPC (`get`/`save`/`upload-logo`/`upload-icon`/`reset`/`apply-icon`; live title + icon) in electron/ipc/brandingIPC.ts
+- [x] T077 [P] [US8] Build ColorPicker + ImageUpload components in src/components/ui/
+- [x] T078 [US8] Implement useBrandingStore and BrandingSettings tab in src/pages/Settings/BrandingSettings.tsx
+- [x] T079 [US8] Wire live color/title/icon application + restore-defaults; warn that installer icon needs rebuild
 
 **Checkpoint**: Branding fully customizable
 
@@ -241,10 +241,10 @@ description: "Task list for Nursery & Autism Center Management System"
 
 **Independent Test**: Back up then restore; confirm record counts match; import workbook populates data.
 
-- [ ] T080 [P] [US11] Contract test storage channels in tests/contract/storage.test.ts
-- [ ] T081 [US11] Implement storage IPC (`stats`/`backup`/`restore`/`clear`/`audit`) in electron/ipc/storageIPC.ts
-- [ ] T082 [US11] Implement original-workbook import parser (`storage:import`) using ExcelJS in electron/services/importService.ts
-- [ ] T083 [US11] Build StorageManager page (stats, backup/restore, import, clear w/ confirm, audit log) in src/pages/Storage/StorageManager.tsx
+- [x] T080 [P] [US11] Contract test storage channels in tests/contract/storage.test.ts
+- [x] T081 [US11] Implement storage IPC (`stats`, `backup`, `restore`, `import`, `clear`, `audit`) in electron/ipc/storageIPC.ts
+- [x] T082 [US11] Implement import service (Excel → DB) in electron/services/importService.ts
+- [x] T083 [US11] Build StorageManager page (backup/restore/import/clear/audit) in src/pages/Storage/StorageManager.tsx
 
 **Checkpoint**: Data management functional
 
@@ -256,13 +256,13 @@ description: "Task list for Nursery & Autism Center Management System"
 
 **Independent Test**: Configure connection, push unsynced records; confirm they report as synced; pull newer records.
 
-- [ ] T084 [P] [US12] Unit test sync conflict resolver (most-recent `updated_at` wins, id tie-break) in tests/unit/sync.test.ts
-- [ ] T085 [US12] Define mongoose models/collections in electron/services/mongoSync.ts
-- [ ] T086 [US12] Implement sync IPC (`push`/`pull`/`status`, graceful offline failure, sync_log writes) in electron/ipc/syncIPC.ts
-- [ ] T087 [P] [US12] Implement useSyncStore + useSync hook in src/store/useSyncStore.ts and src/hooks/useSync.ts
-- [ ] T088 [US12] Build SyncManager page (connection status, last sync, pending counts, manual push/pull, conflict strategy, auto-sync toggle) in src/pages/Sync/SyncManager.tsx
-- [ ] T089 [US12] Build SecuritySettings tab (app password, MongoDB URI, auto-sync interval) in src/pages/Settings/SecuritySettings.tsx
-- [ ] T090 [US12] Implement auto-sync interval scheduler in main process
+- [x] T084 [P] [US12] Unit test sync conflict resolver (most-recent `updated_at` wins, id tie-break) in tests/unit/sync.test.ts
+- [x] T085 [US12] Define mongoose models/collections in electron/services/mongoSync.ts
+- [x] T086 [US12] Implement sync IPC (`push`/`pull`/`status`, graceful offline failure, sync_log writes) in electron/ipc/syncIPC.ts
+- [x] T087 [P] [US12] Implement useSyncStore + useSync hook in src/store/useSyncStore.ts and src/hooks/useSync.ts
+- [x] T088 [US12] Build SyncManager page (connection status, last sync, pending counts, manual push/pull, conflict strategy, auto-sync toggle) in src/pages/Sync/SyncManager.tsx
+- [x] T089 [US12] Build SecuritySettings tab (app password, MongoDB URI, auto-sync interval) in src/pages/Settings/SecuritySettings.tsx
+- [x] T090 [US12] Implement auto-sync interval scheduler in main process
 
 **Checkpoint**: All user stories complete
 

@@ -1,0 +1,301 @@
+import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import { useSyncStore } from '../../store/useSyncStore.js'
+import { Card } from '../../components/ui/Card.js'
+import { Button } from '../../components/ui/Button.js'
+import { Alert } from '../../components/ui/Alert.js'
+import { Badge } from '../../components/ui/Badge.js'
+import { Input } from '../../components/ui/Input.js'
+
+export default function SyncManager() {
+  const { i18n } = useTranslation()
+  const isAr = i18n.language === 'ar'
+
+  const {
+    status,
+    isConnecting,
+    isPushing,
+    isPulling,
+    isLoading,
+    lastPushResults,
+    lastPullResults,
+    error,
+    autoSyncEnabled,
+    fetchStatus,
+    connect,
+    disconnect,
+    push,
+    pull,
+    setAutoSync,
+    clearError
+  } = useSyncStore()
+
+  const [mongoUri, setMongoUri] = useState('')
+  const [autoInterval, setAutoInterval] = useState('30')
+
+  useEffect(() => {
+    fetchStatus()
+  }, [])
+
+  const handleConnect = async () => {
+    if (!mongoUri.trim()) return
+    await connect(mongoUri.trim())
+  }
+
+  const handleToggleAutoSync = async () => {
+    await setAutoSync(!autoSyncEnabled, Number(autoInterval) || 30)
+  }
+
+  const isConnected = status?.connected ?? false
+
+  const totalPending = status
+    ? Object.values(status.pending).reduce((s, n) => s + n, 0)
+    : 0
+
+  const formatResults = (results: Record<string, any> | null, mode: 'push' | 'pull') => {
+    if (!results) return null
+    return Object.entries(results).map(([entity, stats]) => ({
+      entity,
+      count: mode === 'push' ? stats.pushed ?? 0 : stats.pulled ?? 0,
+      failed: stats.failed ?? 0,
+      skipped: stats.skipped ?? 0
+    }))
+  }
+
+  return (
+    <div className="p-6 space-y-6">
+      {/* Header */}
+      <div>
+        <h1 className="text-2xl font-bold text-slate-900">
+          {isAr ? 'المزامنة السحابية' : 'Cloud Synchronization'}
+        </h1>
+        <p className="text-sm text-slate-500 mt-1">
+          {isAr
+            ? 'مزامنة البيانات مع قاعدة بيانات MongoDB السحابية. يتطلب صلاحيات المسؤول.'
+            : 'Sync data with MongoDB cloud database. Requires administrator access.'}
+        </p>
+      </div>
+
+      {error && (
+        <Alert variant="danger" title={isAr ? 'خطأ في المزامنة' : 'Sync Error'} onClose={clearError}>
+          {error}
+        </Alert>
+      )}
+
+      {/* Connection Status */}
+      <Card className="p-6 space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className={`h-3 w-3 rounded-full ${isConnected ? 'bg-emerald-500 shadow-md shadow-emerald-200' : 'bg-slate-300'}`} />
+            <h2 className="font-bold text-slate-800">
+              {isAr ? 'حالة الاتصال' : 'Connection Status'}
+            </h2>
+            <Badge variant={isConnected ? 'success' : 'neutral'}>
+              {isConnected ? (isAr ? 'متصل' : 'Connected') : (isAr ? 'غير متصل' : 'Disconnected')}
+            </Badge>
+          </div>
+
+          {isConnected && (
+            <Button variant="outline" onClick={disconnect}>
+              🔌 {isAr ? 'قطع الاتصال' : 'Disconnect'}
+            </Button>
+          )}
+        </div>
+
+        {status?.lastSync && (
+          <div className="text-xs text-slate-400">
+            {isAr ? 'آخر مزامنة:' : 'Last sync:'}{' '}
+            <span className="font-mono">{new Date(status.lastSync.created_at).toLocaleString(isAr ? 'ar-EG' : 'en-US')}</span>
+            {' '}—{' '}
+            <Badge variant={status.lastSync.status === 'success' ? 'success' : 'danger'}>
+              {status.lastSync.action} / {status.lastSync.status}
+            </Badge>
+          </div>
+        )}
+
+        {!isConnected && (
+          <div className="space-y-3 pt-2 border-t border-slate-100">
+            <p className="text-sm text-slate-600 font-medium">
+              {isAr ? 'أدخل رابط الاتصال بـ MongoDB:' : 'Enter MongoDB connection URI:'}
+            </p>
+            <div className="flex gap-3">
+              <Input
+                label=""
+                type="password"
+                value={mongoUri}
+                onChange={(e) => setMongoUri(e.target.value)}
+                placeholder="mongodb+srv://user:pass@cluster.mongodb.net/nursery"
+                className="flex-1"
+              />
+              <Button
+                variant="primary"
+                onClick={handleConnect}
+                isLoading={isConnecting}
+                disabled={!mongoUri.trim()}
+              >
+                🔗 {isAr ? 'اتصل' : 'Connect'}
+              </Button>
+            </div>
+            <p className="text-xs text-slate-400">
+              {isAr
+                ? 'مثال: mongodb+srv://user:password@cluster0.mongodb.net/nursery_db'
+                : 'Example: mongodb+srv://user:password@cluster0.mongodb.net/nursery_db'}
+            </p>
+          </div>
+        )}
+      </Card>
+
+      {/* Pending Records */}
+      {status && totalPending > 0 && (
+        <Alert variant="warning" title={isAr ? `${totalPending} سجل بانتظار المزامنة` : `${totalPending} records pending sync`}>
+          {isAr
+            ? 'توجد سجلات محلية لم تُرفع بعد إلى السحابة. اضغط "رفع" لمزامنتها.'
+            : 'There are local records not yet synced to the cloud. Press "Push" to sync them.'}
+        </Alert>
+      )}
+
+      {/* Push/Pull Actions */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <Card className="p-6 space-y-4">
+          <div className="flex items-center gap-3">
+            <span className="text-3xl">⬆️</span>
+            <div>
+              <h2 className="font-bold text-slate-800">{isAr ? 'رفع (Push)' : 'Push to Cloud'}</h2>
+              <p className="text-xs text-slate-400">
+                {isAr ? 'يرفع السجلات المحلية غير المزامنة إلى MongoDB.' : 'Uploads unsynced local records to MongoDB.'}
+              </p>
+            </div>
+          </div>
+
+          {status && (
+            <div className="text-sm space-y-1">
+              {Object.entries(status.pending).map(([entity, count]) => (
+                <div key={entity} className="flex justify-between text-slate-600">
+                  <span>{entity}</span>
+                  <Badge variant={count > 0 ? 'warning' : 'success'}>
+                    {count > 0 ? `${count} pending` : '✅ synced'}
+                  </Badge>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <Button
+            variant="primary"
+            onClick={push}
+            isLoading={isPushing}
+            disabled={!isConnected}
+            className="w-full"
+          >
+            ⬆️ {isAr ? 'رفع البيانات' : 'Push Data'}
+          </Button>
+
+          {lastPushResults && (
+            <div className="bg-emerald-50 rounded-xl p-3 space-y-1 text-xs">
+              <p className="font-bold text-emerald-700">✅ {isAr ? 'نتائج الرفع:' : 'Push Results:'}</p>
+              {formatResults(lastPushResults, 'push')?.map(({ entity, count, failed }) => (
+                <div key={entity} className="flex justify-between text-slate-600">
+                  <span>{entity}</span>
+                  <span>
+                    <span className="text-emerald-600 font-semibold">↑ {count}</span>
+                    {failed > 0 && <span className="text-red-500"> ({failed} failed)</span>}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+
+        <Card className="p-6 space-y-4">
+          <div className="flex items-center gap-3">
+            <span className="text-3xl">⬇️</span>
+            <div>
+              <h2 className="font-bold text-slate-800">{isAr ? 'سحب (Pull)' : 'Pull from Cloud'}</h2>
+              <p className="text-xs text-slate-400">
+                {isAr
+                  ? 'يجلب السجلات الأحدث من MongoDB ويطبق استراتيجية حل التعارض (الأحدث يفوز).'
+                  : 'Fetches newer records from MongoDB. Conflict strategy: most recent wins.'}
+              </p>
+            </div>
+          </div>
+
+          <div className="bg-slate-50 rounded-xl p-3 space-y-1 text-xs text-slate-600">
+            <p className="font-semibold text-slate-700">{isAr ? 'استراتيجية حل التعارض:' : 'Conflict Strategy:'}</p>
+            <p>⏱️ {isAr ? 'الأحدث updated_at يفوز' : 'Most recent updated_at wins'}</p>
+            <p>🔢 {isAr ? 'تعادل: id الأعلى يفوز' : 'Tie-break: higher id wins'}</p>
+          </div>
+
+          <Button
+            variant="outline"
+            onClick={pull}
+            isLoading={isPulling}
+            disabled={!isConnected}
+            className="w-full"
+          >
+            ⬇️ {isAr ? 'سحب البيانات' : 'Pull Data'}
+          </Button>
+
+          {lastPullResults && (
+            <div className="bg-blue-50 rounded-xl p-3 space-y-1 text-xs">
+              <p className="font-bold text-blue-700">✅ {isAr ? 'نتائج السحب:' : 'Pull Results:'}</p>
+              {formatResults(lastPullResults, 'pull')?.map(({ entity, count, failed, skipped }) => (
+                <div key={entity} className="flex justify-between text-slate-600">
+                  <span>{entity}</span>
+                  <span>
+                    <span className="text-blue-600 font-semibold">↓ {count}</span>
+                    {skipped > 0 && <span className="text-slate-400"> ({skipped} skipped)</span>}
+                    {failed > 0 && <span className="text-red-500"> ({failed} failed)</span>}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+      </div>
+
+      {/* Auto-Sync (T090) */}
+      <Card className="p-6 space-y-4">
+        <div className="flex items-center gap-3">
+          <span className="text-3xl">⏰</span>
+          <div>
+            <h2 className="font-bold text-slate-800">{isAr ? 'المزامنة التلقائية' : 'Auto-Sync'}</h2>
+            <p className="text-xs text-slate-400">
+              {isAr ? 'تشغيل المزامنة تلقائياً على فترات منتظمة.' : 'Automatically push unsynced records on a regular interval.'}
+            </p>
+          </div>
+          <Badge variant={autoSyncEnabled ? 'success' : 'neutral'}>
+            {autoSyncEnabled ? (isAr ? 'مفعّل' : 'Active') : (isAr ? 'موقف' : 'Off')}
+          </Badge>
+        </div>
+
+        <div className="flex items-center gap-4">
+          <Input
+            label={isAr ? 'الفترة (دقيقة)' : 'Interval (minutes)'}
+            type="number"
+            min="1"
+            max="1440"
+            value={autoInterval}
+            onChange={(e) => setAutoInterval(e.target.value)}
+            className="w-32"
+          />
+          <Button
+            variant={autoSyncEnabled ? 'outline' : 'primary'}
+            onClick={handleToggleAutoSync}
+            disabled={!isConnected && !autoSyncEnabled}
+          >
+            {autoSyncEnabled
+              ? (isAr ? '⏹ إيقاف' : '⏹ Stop Auto-Sync')
+              : (isAr ? '▶ تشغيل' : '▶ Start Auto-Sync')}
+          </Button>
+        </div>
+      </Card>
+
+      {/* Refresh Status */}
+      <div className="flex justify-end">
+        <Button variant="outline" onClick={fetchStatus} isLoading={isLoading}>
+          🔄 {isAr ? 'تحديث الحالة' : 'Refresh Status'}
+        </Button>
+      </div>
+    </div>
+  )
+}
