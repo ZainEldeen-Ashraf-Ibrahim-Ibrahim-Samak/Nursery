@@ -382,7 +382,7 @@ function generateSalariesSheet(
 
   // Fetch employees and join with payroll for the month/year
   const payroll = db.prepare(`
-    SELECT e.name, e.role, e.base_salary, e.housing_allowance, e.transport_allowance, e.net_salary,
+    SELECT e.name, e.role, e.base_salary, e.housing, e.transport, e.net_salary,
            s.bonus, s.deductions, s.actual_paid, s.paid_date as pay_date, s.notes
     FROM employees e
     LEFT JOIN salary_payments s ON e.id = s.employee_id AND s.month = ? AND s.year = ?
@@ -401,8 +401,8 @@ function generateSalariesSheet(
       p.name,
       p.role === 'admin' ? (lang === 'ar' ? 'مسؤول' : 'Admin') : (lang === 'ar' ? 'موظف' : 'Employee'),
       p.base_salary,
-      p.housing_allowance,
-      p.transport_allowance,
+      p.housing,
+      p.transport,
       p.net_salary,
       bonus,
       deductions,
@@ -442,6 +442,79 @@ function generateSalariesSheet(
   }
 
   formatGridData(worksheet, startRow + 1, [3, 4, 5, 6, 7, 8, 9])
+  autofitColumns(worksheet)
+}
+
+// Generate employees roster sheet
+function generateEmployeesSheet(
+  worksheet: ExcelJS.Worksheet,
+  workbook: ExcelJS.Workbook,
+  brand: ExportHeaderData,
+  lang: string
+) {
+  const db = getDb()
+  const title = lang === 'ar' ? 'سجل الموظفين' : 'Employees Roster'
+
+  const startRow = writeBrandingHeader(worksheet, workbook, brand, lang, title)
+
+  const headers = lang === 'ar'
+    ? ['اسم الموظف', 'الوظيفة', 'الراتب الأساسي', 'بدل السكن', 'بدل الانتقال', 'صافي الراتب', 'الحالة']
+    : ['Employee Name', 'Role', 'Base Salary', 'Housing Allow', 'Transport Allow', 'Net Salary', 'Status']
+
+  const headerRow = worksheet.getRow(startRow)
+  headerRow.values = headers
+  headerRow.height = 24
+  headerRow.eachCell((cell) => {
+    cell.font = { name: FONT_FAMILY, size: 10, bold: true }
+    cell.fill = HEADER_FILL
+    cell.border = BORDER_STYLE
+    cell.alignment = { vertical: 'middle', horizontal: 'center' }
+  })
+
+  const employees = db.prepare(`
+    SELECT name, role, base_salary, housing, transport, net_salary, is_active
+    FROM employees
+    ORDER BY is_active DESC, name ASC
+  `).all() as any[]
+
+  let currentRow = startRow + 1
+  for (const e of employees) {
+    const dataRow = worksheet.getRow(currentRow)
+    dataRow.values = [
+      e.name,
+      e.role,
+      e.base_salary,
+      e.housing,
+      e.transport,
+      e.net_salary,
+      e.is_active === 1 ? (lang === 'ar' ? 'نشط' : 'Active') : (lang === 'ar' ? 'غير نشط' : 'Inactive')
+    ]
+    dataRow.height = 20
+    currentRow++
+  }
+
+  // Totals row (active payroll)
+  if (employees.length > 0) {
+    const totalRow = worksheet.getRow(currentRow)
+    totalRow.height = 22
+    totalRow.getCell(1).value = lang === 'ar' ? 'الإجمالي' : 'Totals'
+    totalRow.getCell(3).value = { formula: `SUM(C${startRow + 1}:C${currentRow - 1})` }
+    totalRow.getCell(4).value = { formula: `SUM(D${startRow + 1}:D${currentRow - 1})` }
+    totalRow.getCell(5).value = { formula: `SUM(E${startRow + 1}:E${currentRow - 1})` }
+    totalRow.getCell(6).value = { formula: `SUM(F${startRow + 1}:F${currentRow - 1})` }
+    for (let c = 1; c <= 7; c++) {
+      const cell = totalRow.getCell(c)
+      cell.fill = SUBHEADER_FILL
+      cell.border = BORDER_STYLE
+      cell.font = { name: FONT_FAMILY, size: 10, bold: true }
+      if (c >= 3 && c <= 6) {
+        cell.numFmt = '#,##0.00'
+        cell.alignment = { horizontal: 'right' }
+      }
+    }
+  }
+
+  formatGridData(worksheet, startRow + 1, [3, 4, 5, 6])
   autofitColumns(worksheet)
 }
 
@@ -646,7 +719,7 @@ function translateMonthName(mAr: string, lang: string): string {
 
 // Main excel builder handler mapping to paths
 export async function buildExcelFile(
-  type: 'full' | 'month' | 'child' | 'salaries' | 'expenses',
+  type: 'full' | 'month' | 'child' | 'salaries' | 'expenses' | 'employees',
   params: any,
   savePath: string
 ): Promise<void> {
@@ -676,7 +749,13 @@ export async function buildExcelFile(
     const sheetName = lang === 'ar' ? 'المصاريف' : 'Expenses'
     const ws = workbook.addWorksheet(sheetName)
     generateExpensesSheet(ws, workbook, brand, year, lang)
-  } 
+  }
+
+  else if (type === 'employees') {
+    const sheetName = lang === 'ar' ? 'الموظفون' : 'Employees'
+    const ws = workbook.addWorksheet(sheetName)
+    generateEmployeesSheet(ws, workbook, brand, lang)
+  }
   
   else if (type === 'full') {
     // 1. Dashboard summary tab

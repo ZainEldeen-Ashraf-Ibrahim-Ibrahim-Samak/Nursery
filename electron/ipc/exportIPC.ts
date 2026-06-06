@@ -14,7 +14,7 @@ function checkAuth() {
 
 // Utility to handle export build logic depending on format
 async function executeExport(
-  type: 'full' | 'month' | 'child' | 'salaries' | 'expenses',
+  type: 'full' | 'month' | 'child' | 'salaries' | 'expenses' | 'employees',
   params: any,
   defaultFilename: string
 ) {
@@ -97,6 +97,20 @@ ipcMain.handle('export:salaries', async (_event, { month, year, format, lang }) 
   } catch (error: any) {
     console.error('Failed to run salaries export:', error)
     throw new Error(error.message || 'Failed to export payroll report')
+  }
+})
+
+// 6. Employees roster export (Admin only)
+ipcMain.handle('export:employees', async (_event, { format, lang }) => {
+  try {
+    requireAdmin()
+    const filename = lang === 'ar'
+      ? `سجل_الموظفين.${format}`
+      : `employees_roster.${format}`
+    return await executeExport('employees', { format, lang }, filename)
+  } catch (error: any) {
+    console.error('Failed to run employees export:', error)
+    throw new Error(error.message || 'Failed to export employees roster')
   }
 })
 

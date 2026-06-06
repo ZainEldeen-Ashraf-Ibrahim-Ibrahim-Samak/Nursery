@@ -81,6 +81,7 @@ const api = {
     child: (args: any) => ipcRenderer.invoke('export:child', args),
     salaries: (args: any) => ipcRenderer.invoke('export:salaries', args),
     expenses: (args: any) => ipcRenderer.invoke('export:expenses', args),
+    employees: (args: any) => ipcRenderer.invoke('export:employees', args),
   },
 
   // Storage

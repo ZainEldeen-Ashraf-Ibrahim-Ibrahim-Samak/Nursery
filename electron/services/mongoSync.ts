@@ -100,12 +100,13 @@ export const PaymentModel: Model<any> = mongoose.models['sync_payments'] ||
 const employeeSchema = new Schema({
   id: { type: Number, required: true, unique: true },
   name: String,
+  role: String,
   base_salary: Number,
-  housing_allowance: Number,
-  transport_allowance: Number,
+  housing: Number,
+  transport: Number,
+  net_salary: Number,
   is_active: Number,
   created_at: String,
-  updated_at: String,
   synced: Number
 }, sharedOptions)
 

@@ -137,7 +137,7 @@ function getStatusColor(status: string): string {
 }
 
 export function buildPdfFile(
-  type: 'full' | 'month' | 'child' | 'salaries' | 'expenses',
+  type: 'full' | 'month' | 'child' | 'salaries' | 'expenses' | 'employees',
   params: any,
   savePath: string
 ): Promise<void> {
@@ -163,7 +163,7 @@ export function buildPdfFile(
 
       // Layout orientation
       let pageOrientation: 'portrait' | 'landscape' = 'portrait'
-      if (['full', 'month', 'salaries', 'expenses'].includes(type)) {
+      if (['full', 'month', 'salaries', 'expenses', 'employees'].includes(type)) {
         pageOrientation = 'landscape'
       }
 
@@ -359,7 +359,7 @@ export function buildPdfFile(
         docDefinition.content.push(...getPdfHeader(brand, lang, title))
 
         const payroll = db.prepare(`
-          SELECT e.name, e.role, e.base_salary, e.housing_allowance, e.transport_allowance, e.net_salary,
+          SELECT e.name, e.role, e.base_salary, e.housing, e.transport, e.net_salary,
                  s.bonus, s.deductions, s.actual_paid, s.paid_date as pay_date
           FROM employees e
           LEFT JOIN salary_payments s ON e.id = s.employee_id AND s.month = ? AND s.year = ?
@@ -383,8 +383,8 @@ export function buildPdfFile(
             { text: shapeText(p.name), bold: false, alignment: isAr ? 'right' : 'left' },
             { text: shapeText(p.role === 'admin' ? (isAr ? 'مسؤول' : 'Admin') : (isAr ? 'موظف' : 'Employee')), alignment: 'center' },
             { text: shapeText(formatCurrency(p.base_salary, lang)), alignment: 'right' },
-            { text: shapeText(formatCurrency(p.housing_allowance, lang)), alignment: 'right' },
-            { text: shapeText(formatCurrency(p.transport_allowance, lang)), alignment: 'right' },
+            { text: shapeText(formatCurrency(p.housing, lang)), alignment: 'right' },
+            { text: shapeText(formatCurrency(p.transport, lang)), alignment: 'right' },
             { text: shapeText(formatCurrency(p.net_salary, lang)), alignment: 'right' },
             { text: shapeText(formatCurrency(p.bonus || 0, lang)), alignment: 'right' },
             { text: shapeText(formatCurrency(p.deductions || 0, lang)), alignment: 'right' },
@@ -421,6 +421,68 @@ export function buildPdfFile(
         })
       } 
       
+      else if (type === 'employees') {
+        const title = isAr ? 'سجل الموظفين' : 'Employees Roster'
+        docDefinition.content.push(...getPdfHeader(brand, lang, title))
+
+        const employees = db.prepare(`
+          SELECT name, role, base_salary, housing, transport, net_salary, is_active
+          FROM employees
+          ORDER BY is_active DESC, name ASC
+        `).all() as any[]
+
+        const headers = isAr
+          ? ['اسم الموظف', 'الوظيفة', 'الراتب الأساسي', 'بدل سكن', 'بدل انتقال', 'صافي الراتب', 'الحالة']
+          : ['Employee Name', 'Role', 'Base Salary', 'Housing', 'Transport', 'Net Salary', 'Status']
+
+        const body: any[][] = [
+          headers.map(h => ({ text: shapeText(h), bold: true, fillColor: brand.primaryColor, color: '#ffffff', alignment: 'center' }))
+        ]
+
+        let sumBase = 0, sumHousing = 0, sumTransport = 0, sumNet = 0
+        for (const e of employees) {
+          if (e.is_active === 1) {
+            sumBase += e.base_salary || 0
+            sumHousing += e.housing || 0
+            sumTransport += e.transport || 0
+            sumNet += e.net_salary || 0
+          }
+          body.push([
+            { text: shapeText(e.name), alignment: isAr ? 'right' : 'left' },
+            { text: shapeText(e.role), alignment: 'center' },
+            { text: shapeText(formatCurrency(e.base_salary, lang)), alignment: 'right' },
+            { text: shapeText(formatCurrency(e.housing, lang)), alignment: 'right' },
+            { text: shapeText(formatCurrency(e.transport, lang)), alignment: 'right' },
+            { text: shapeText(formatCurrency(e.net_salary, lang)), bold: true, alignment: 'right' },
+            { text: shapeText(e.is_active === 1 ? (isAr ? 'نشط' : 'Active') : (isAr ? 'غير نشط' : 'Inactive')), alignment: 'center' }
+          ])
+        }
+
+        body.push([
+          { text: shapeText(isAr ? 'الإجمالي (النشطون)' : 'Totals (active)'), bold: true, fillColor: '#f1f5f9', alignment: isAr ? 'right' : 'left' },
+          { text: '', fillColor: '#f1f5f9' },
+          { text: shapeText(formatCurrency(sumBase, lang)), bold: true, fillColor: '#f1f5f9', alignment: 'right' },
+          { text: shapeText(formatCurrency(sumHousing, lang)), bold: true, fillColor: '#f1f5f9', alignment: 'right' },
+          { text: shapeText(formatCurrency(sumTransport, lang)), bold: true, fillColor: '#f1f5f9', alignment: 'right' },
+          { text: shapeText(formatCurrency(sumNet, lang)), bold: true, fillColor: '#f1f5f9', alignment: 'right' },
+          { text: '', fillColor: '#f1f5f9' }
+        ])
+
+        docDefinition.content.push({
+          table: {
+            headerRows: 1,
+            widths: ['*', 'auto', 'auto', 'auto', 'auto', 'auto', 'auto'],
+            body
+          },
+          layout: {
+            hLineWidth: () => 0.5,
+            vLineWidth: () => 0.5,
+            hLineColor: () => '#cbd5e1',
+            vLineColor: () => '#cbd5e1'
+          }
+        })
+      }
+
       else if (type === 'expenses') {
         const title = isAr ? `تقرير المصاريف التشغيلية السنوية لسنة ${year}` : `Annual Expenses: ${year}`
         docDefinition.content.push(...getPdfHeader(brand, lang, title))

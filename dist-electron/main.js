@@ -8236,7 +8236,7 @@ function generateSalariesSheet(worksheet, workbook, brand, month, year, lang) {
 		};
 	});
 	const payroll = db.prepare(`
-    SELECT e.name, e.role, e.base_salary, e.housing_allowance, e.transport_allowance, e.net_salary,
+    SELECT e.name, e.role, e.base_salary, e.housing, e.transport, e.net_salary,
            s.bonus, s.deductions, s.actual_paid, s.paid_date as pay_date, s.notes
     FROM employees e
     LEFT JOIN salary_payments s ON e.id = s.employee_id AND s.month = ? AND s.year = ?
@@ -8251,8 +8251,8 @@ function generateSalariesSheet(worksheet, workbook, brand, month, year, lang) {
 			p.name,
 			p.role === "admin" ? lang === "ar" ? "مسؤول" : "Admin" : lang === "ar" ? "موظف" : "Employee",
 			p.base_salary,
-			p.housing_allowance,
-			p.transport_allowance,
+			p.housing,
+			p.transport,
 			p.net_salary,
 			bonus,
 			deductions,
@@ -8299,6 +8299,93 @@ function generateSalariesSheet(worksheet, workbook, brand, month, year, lang) {
 		7,
 		8,
 		9
+	]);
+	autofitColumns(worksheet);
+}
+function generateEmployeesSheet(worksheet, workbook, brand, lang) {
+	const db = getDb();
+	const startRow = writeBrandingHeader(worksheet, workbook, brand, lang, lang === "ar" ? "سجل الموظفين" : "Employees Roster");
+	const headers = lang === "ar" ? [
+		"اسم الموظف",
+		"الوظيفة",
+		"الراتب الأساسي",
+		"بدل السكن",
+		"بدل الانتقال",
+		"صافي الراتب",
+		"الحالة"
+	] : [
+		"Employee Name",
+		"Role",
+		"Base Salary",
+		"Housing Allow",
+		"Transport Allow",
+		"Net Salary",
+		"Status"
+	];
+	const headerRow = worksheet.getRow(startRow);
+	headerRow.values = headers;
+	headerRow.height = 24;
+	headerRow.eachCell((cell) => {
+		cell.font = {
+			name: FONT_FAMILY,
+			size: 10,
+			bold: true
+		};
+		cell.fill = HEADER_FILL;
+		cell.border = BORDER_STYLE;
+		cell.alignment = {
+			vertical: "middle",
+			horizontal: "center"
+		};
+	});
+	const employees = db.prepare(`
+    SELECT name, role, base_salary, housing, transport, net_salary, is_active
+    FROM employees
+    ORDER BY is_active DESC, name ASC
+  `).all();
+	let currentRow = startRow + 1;
+	for (const e of employees) {
+		const dataRow = worksheet.getRow(currentRow);
+		dataRow.values = [
+			e.name,
+			e.role,
+			e.base_salary,
+			e.housing,
+			e.transport,
+			e.net_salary,
+			e.is_active === 1 ? lang === "ar" ? "نشط" : "Active" : lang === "ar" ? "غير نشط" : "Inactive"
+		];
+		dataRow.height = 20;
+		currentRow++;
+	}
+	if (employees.length > 0) {
+		const totalRow = worksheet.getRow(currentRow);
+		totalRow.height = 22;
+		totalRow.getCell(1).value = lang === "ar" ? "الإجمالي" : "Totals";
+		totalRow.getCell(3).value = { formula: `SUM(C${startRow + 1}:C${currentRow - 1})` };
+		totalRow.getCell(4).value = { formula: `SUM(D${startRow + 1}:D${currentRow - 1})` };
+		totalRow.getCell(5).value = { formula: `SUM(E${startRow + 1}:E${currentRow - 1})` };
+		totalRow.getCell(6).value = { formula: `SUM(F${startRow + 1}:F${currentRow - 1})` };
+		for (let c = 1; c <= 7; c++) {
+			const cell = totalRow.getCell(c);
+			cell.fill = SUBHEADER_FILL;
+			cell.border = BORDER_STYLE;
+			cell.font = {
+				name: FONT_FAMILY,
+				size: 10,
+				bold: true
+			};
+			if (c >= 3 && c <= 6) {
+				cell.numFmt = "#,##0.00";
+				cell.alignment = { horizontal: "right" };
+			}
+		}
+	}
+	formatGridData(worksheet, startRow + 1, [
+		3,
+		4,
+		5,
+		6
 	]);
 	autofitColumns(worksheet);
 }
@@ -8523,6 +8610,9 @@ async function buildExcelFile(type, params, savePath) {
 	} else if (type === "expenses") {
 		const sheetName = lang === "ar" ? "المصاريف" : "Expenses";
 		generateExpensesSheet(workbook.addWorksheet(sheetName), workbook, brand, year, lang);
+	} else if (type === "employees") {
+		const sheetName = lang === "ar" ? "الموظفون" : "Employees";
+		generateEmployeesSheet(workbook.addWorksheet(sheetName), workbook, brand, lang);
 	} else if (type === "full") {
 		const wsDash = workbook.addWorksheet(lang === "ar" ? "لوحة القيادة" : "Dashboard");
 		wsDash.views = [{
@@ -9633,7 +9723,8 @@ function buildPdfFile(type, params, savePath) {
 				"full",
 				"month",
 				"salaries",
-				"expenses"
+				"expenses",
+				"employees"
 			].includes(type)) pageOrientation = "landscape";
 			const docDefinition = {
 				pageOrientation,
@@ -10121,7 +10212,7 @@ function buildPdfFile(type, params, savePath) {
 				const title = isAr ? `مرتبات ومكافآت الموظفين لشهر ${month} لسنة ${year}` : `Employee Payroll: ${month} ${year}`;
 				docDefinition.content.push(...getPdfHeader(brand, lang, title));
 				const payroll = db.prepare(`
-          SELECT e.name, e.role, e.base_salary, e.housing_allowance, e.transport_allowance, e.net_salary,
+          SELECT e.name, e.role, e.base_salary, e.housing, e.transport, e.net_salary,
                  s.bonus, s.deductions, s.actual_paid, s.paid_date as pay_date
           FROM employees e
           LEFT JOIN salary_payments s ON e.id = s.employee_id AND s.month = ? AND s.year = ?
@@ -10175,11 +10266,11 @@ function buildPdfFile(type, params, savePath) {
 							alignment: "right"
 						},
 						{
-							text: shapeText(formatCurrency(p.housing_allowance, lang)),
+							text: shapeText(formatCurrency(p.housing, lang)),
 							alignment: "right"
 						},
 						{
-							text: shapeText(formatCurrency(p.transport_allowance, lang)),
+							text: shapeText(formatCurrency(p.transport, lang)),
 							alignment: "right"
 						},
 						{
@@ -10259,6 +10350,138 @@ function buildPdfFile(type, params, savePath) {
 							"auto",
 							"auto",
 							"auto",
+							"auto",
+							"auto",
+							"auto",
+							"auto",
+							"auto",
+							"auto"
+						],
+						body
+					},
+					layout: {
+						hLineWidth: () => .5,
+						vLineWidth: () => .5,
+						hLineColor: () => "#cbd5e1",
+						vLineColor: () => "#cbd5e1"
+					}
+				});
+			} else if (type === "employees") {
+				const title = isAr ? "سجل الموظفين" : "Employees Roster";
+				docDefinition.content.push(...getPdfHeader(brand, lang, title));
+				const employees = db.prepare(`
+          SELECT name, role, base_salary, housing, transport, net_salary, is_active
+          FROM employees
+          ORDER BY is_active DESC, name ASC
+        `).all();
+				const body = [(isAr ? [
+					"اسم الموظف",
+					"الوظيفة",
+					"الراتب الأساسي",
+					"بدل سكن",
+					"بدل انتقال",
+					"صافي الراتب",
+					"الحالة"
+				] : [
+					"Employee Name",
+					"Role",
+					"Base Salary",
+					"Housing",
+					"Transport",
+					"Net Salary",
+					"Status"
+				]).map((h) => ({
+					text: shapeText(h),
+					bold: true,
+					fillColor: brand.primaryColor,
+					color: "#ffffff",
+					alignment: "center"
+				}))];
+				let sumBase = 0, sumHousing = 0, sumTransport = 0, sumNet = 0;
+				for (const e of employees) {
+					if (e.is_active === 1) {
+						sumBase += e.base_salary || 0;
+						sumHousing += e.housing || 0;
+						sumTransport += e.transport || 0;
+						sumNet += e.net_salary || 0;
+					}
+					body.push([
+						{
+							text: shapeText(e.name),
+							alignment: isAr ? "right" : "left"
+						},
+						{
+							text: shapeText(e.role),
+							alignment: "center"
+						},
+						{
+							text: shapeText(formatCurrency(e.base_salary, lang)),
+							alignment: "right"
+						},
+						{
+							text: shapeText(formatCurrency(e.housing, lang)),
+							alignment: "right"
+						},
+						{
+							text: shapeText(formatCurrency(e.transport, lang)),
+							alignment: "right"
+						},
+						{
+							text: shapeText(formatCurrency(e.net_salary, lang)),
+							bold: true,
+							alignment: "right"
+						},
+						{
+							text: shapeText(e.is_active === 1 ? isAr ? "نشط" : "Active" : isAr ? "غير نشط" : "Inactive"),
+							alignment: "center"
+						}
+					]);
+				}
+				body.push([
+					{
+						text: shapeText(isAr ? "الإجمالي (النشطون)" : "Totals (active)"),
+						bold: true,
+						fillColor: "#f1f5f9",
+						alignment: isAr ? "right" : "left"
+					},
+					{
+						text: "",
+						fillColor: "#f1f5f9"
+					},
+					{
+						text: shapeText(formatCurrency(sumBase, lang)),
+						bold: true,
+						fillColor: "#f1f5f9",
+						alignment: "right"
+					},
+					{
+						text: shapeText(formatCurrency(sumHousing, lang)),
+						bold: true,
+						fillColor: "#f1f5f9",
+						alignment: "right"
+					},
+					{
+						text: shapeText(formatCurrency(sumTransport, lang)),
+						bold: true,
+						fillColor: "#f1f5f9",
+						alignment: "right"
+					},
+					{
+						text: shapeText(formatCurrency(sumNet, lang)),
+						bold: true,
+						fillColor: "#f1f5f9",
+						alignment: "right"
+					},
+					{
+						text: "",
+						fillColor: "#f1f5f9"
+					}
+				]);
+				docDefinition.content.push({
+					table: {
+						headerRows: 1,
+						widths: [
+							"*",
 							"auto",
 							"auto",
 							"auto",
@@ -10712,6 +10935,19 @@ ipcMain.handle("export:salaries", async (_event, { month, year, format, lang }) 
 		throw new Error(error.message || "Failed to export payroll report");
 	}
 });
+ipcMain.handle("export:employees", async (_event, { format, lang }) => {
+	try {
+		requireAdmin();
+		const filename = lang === "ar" ? `سجل_الموظفين.${format}` : `employees_roster.${format}`;
+		return await executeExport("employees", {
+			format,
+			lang
+		}, filename);
+	} catch (error) {
+		console.error("Failed to run employees export:", error);
+		throw new Error(error.message || "Failed to export employees roster");
+	}
+});
 ipcMain.handle("export:expenses", async (_event, { year, format, lang }) => {
 	try {
 		requireAdmin();
@@ -10981,12 +11217,13 @@ var employeeSchema = new Schema({
 		unique: true
 	},
 	name: String,
+	role: String,
 	base_salary: Number,
-	housing_allowance: Number,
-	transport_allowance: Number,
+	housing: Number,
+	transport: Number,
+	net_salary: Number,
 	is_active: Number,
 	created_at: String,
-	updated_at: String,
 	synced: Number
 }, sharedOptions);
 employeeSchema.index({ id: 1 }, { unique: true });

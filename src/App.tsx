@@ -15,6 +15,7 @@ import ChildForm from './pages/Children/ChildForm.js'
 import ChildStatement from './pages/Children/ChildStatement.js'
 import MonthlyPayments from './pages/Payments/MonthlyPayments.js'
 import SalariesList from './pages/Salaries/SalariesList.js'
+import EmployeesList from './pages/Employees/EmployeesList.js'
 import ExpensesList from './pages/Expenses/ExpensesList.js'
 import TargetPlanning from './pages/Target/TargetPlanning.js'
 import StorageManager from './pages/Storage/StorageManager.js'
@@ -81,6 +82,16 @@ export default function App() {
 
           {/* Payments - Both read/write */}
           <Route path="payments" element={<MonthlyPayments />} />
+
+          {/* Employees - Admin only */}
+          <Route
+            path="employees"
+            element={
+              <RoleGuard allowedRoles={['admin']}>
+                <EmployeesList />
+              </RoleGuard>
+            }
+          />
 
           {/* Salaries - Admin only */}
           <Route
