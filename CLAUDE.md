@@ -1,4 +1,11 @@
 <!-- SPECKIT START -->
-For additional context about technologies to be used, project structure,
-shell commands, and other important information, read the current plan
+Active feature plan: `specs/001-nursery-management-system/plan.md`
+(see also: spec.md, research.md, data-model.md, contracts/ipc-contracts.md, quickstart.md in the same directory)
+
+Stack: Electron 28 + React 18 + TypeScript (Vite, Tailwind, Zustand). Local data in SQLite
+(better-sqlite3, main process only); ExcelJS + pdfmake export and mongoose sync also main-process only.
+Renderer talks to the main process exclusively through the typed `window.api` IPC bridge
+(contextIsolation on, nodeIntegration off). Roles: admin/employee, re-validated in IPC handlers.
+Bilingual Arabic (RTL) / English (LTR). Currency: EGP. For technologies, structure, and conventions,
+read the current plan.
 <!-- SPECKIT END -->
