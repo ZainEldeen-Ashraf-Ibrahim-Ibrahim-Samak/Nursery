@@ -10665,6 +10665,13 @@ function logSync(action, entityType, recordId, status, error = null) {
     `).run(action, entityType, String(recordId), status, error, (/* @__PURE__ */ new Date()).toISOString());
 	} catch {}
 }
+function getMongoUri() {
+	try {
+		return getDb().prepare("SELECT value FROM settings WHERE key = 'sync_mongo_uri'").get()?.value || process.env.MONGO_URI || null;
+	} catch {
+		return process.env.MONGO_URI || null;
+	}
+}
 /**
 * sync:connect — Connect to MongoDB with given URI.
 * Saves URI to settings. Admin only.
@@ -10711,12 +10718,12 @@ ipcMain.handle("sync:status", async () => {
 			const row = db.prepare(`SELECT COUNT(*) as c FROM ${entity.table} WHERE synced = 0`).get();
 			pending[entity.name] = row?.c ?? 0;
 		}
-		const uriRow = db.prepare("SELECT value FROM settings WHERE key = 'sync_mongo_uri'").get();
+		const mongoUri = getMongoUri();
 		const lastLogRow = db.prepare("SELECT synced_at AS created_at, status, action FROM sync_log ORDER BY id DESC LIMIT 1").get();
 		return {
 			connected,
 			error,
-			uri: uriRow?.value ? "***configured***" : null,
+			uri: mongoUri ? "***configured***" : null,
 			pending,
 			lastSync: lastLogRow || null
 		};
@@ -10735,9 +10742,9 @@ ipcMain.handle("sync:push", async () => {
 		const db = getDb();
 		const { connected } = getConnectionStatus();
 		if (!connected) {
-			const uriRow = db.prepare("SELECT value FROM settings WHERE key = 'sync_mongo_uri'").get();
-			if (!uriRow?.value) throw new Error("No MongoDB URI configured. Please connect first.");
-			await connectMongo(uriRow.value);
+			const mongoUri = getMongoUri();
+			if (!mongoUri) throw new Error("No MongoDB URI configured. Please connect first.");
+			await connectMongo(mongoUri);
 		}
 		const results = {};
 		const now = (/* @__PURE__ */ new Date()).toISOString();
@@ -10783,9 +10790,9 @@ ipcMain.handle("sync:pull", async () => {
 		const db = getDb();
 		const { connected } = getConnectionStatus();
 		if (!connected) {
-			const uriRow = db.prepare("SELECT value FROM settings WHERE key = 'sync_mongo_uri'").get();
-			if (!uriRow?.value) throw new Error("No MongoDB URI configured.");
-			await connectMongo(uriRow.value);
+			const mongoUri = getMongoUri();
+			if (!mongoUri) throw new Error("No MongoDB URI configured.");
+			await connectMongo(mongoUri);
 		}
 		const results = {};
 		for (const entity of SYNC_ENTITIES) {
@@ -11072,6 +11079,11 @@ app.whenReady().then(async () => {
 		if (!currentLogo || !currentLogo.value) db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('brand_logo_path', 'branding/logo.png')").run();
 		const currentIcon = db.prepare("SELECT value FROM settings WHERE key = 'brand_icon_path'").get();
 		if (!currentIcon || !currentIcon.value) db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('brand_icon_path', 'branding/icon.png')").run();
+		const mongoUri = getMongoUri();
+		if (mongoUri) {
+			console.log("Connecting to MongoDB on startup...");
+			connectMongo(mongoUri).then(() => console.log("Successfully connected to MongoDB on startup.")).catch((err) => console.error("Failed to connect to MongoDB on startup:", err.message));
+		}
 		const autoIntervalRow = db.prepare("SELECT value FROM settings WHERE key = 'sync_auto_interval'").get();
 		const savedInterval = Number(autoIntervalRow?.value ?? 0);
 		if (savedInterval > 0) startAutoSync(savedInterval * 60 * 1e3);

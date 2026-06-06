@@ -19,7 +19,8 @@ import './ipc/exportIPC.js'
 import './ipc/storageIPC.js'
 import './ipc/syncIPC.js'
 import './ipc/dashboardIPC.js'
-import { startAutoSync } from './ipc/syncIPC.js'
+import { startAutoSync, getMongoUri } from './ipc/syncIPC.js'
+import { connectMongo } from './services/mongoSync.js'
 
 // Get __dirname equivalent in ESM if needed
 const __filename = fileURLToPath(import.meta.url)
@@ -117,6 +118,15 @@ app.whenReady().then(async () => {
     if (!currentIcon || !currentIcon.value) {
       db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('brand_icon_path', 'branding/icon.png')").run()
     }
+    // Connect to MongoDB on startup if URI is configured
+    const mongoUri = getMongoUri()
+    if (mongoUri) {
+      console.log('Connecting to MongoDB on startup...')
+      connectMongo(mongoUri)
+        .then(() => console.log('Successfully connected to MongoDB on startup.'))
+        .catch((err) => console.error('Failed to connect to MongoDB on startup:', err.message))
+    }
+
     // Resume auto-sync if a saved interval exists (T090)
     const autoIntervalRow = db.prepare("SELECT value FROM settings WHERE key = 'sync_auto_interval'").get() as { value: string } | undefined
     const savedInterval = Number(autoIntervalRow?.value ?? 0)

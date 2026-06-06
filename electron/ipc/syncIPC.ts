@@ -41,7 +41,18 @@ function logSync(action: string, entityType: string, recordId: string | number, 
   }
 }
 
+export function getMongoUri(): string | null {
+  try {
+    const db = getDb()
+    const uriRow = db.prepare("SELECT value FROM settings WHERE key = 'sync_mongo_uri'").get() as any
+    return uriRow?.value || process.env.MONGO_URI || null
+  } catch {
+    return process.env.MONGO_URI || null
+  }
+}
+
 // ── IPC Handlers ─────────────────────────────────────────────────────────────
+
 
 /**
  * sync:connect — Connect to MongoDB with given URI.
@@ -100,13 +111,13 @@ ipcMain.handle('sync:status', async () => {
       pending[entity.name] = row?.c ?? 0
     }
 
-    const uriRow = db.prepare("SELECT value FROM settings WHERE key = 'sync_mongo_uri'").get() as any
+    const mongoUri = getMongoUri()
     const lastLogRow = db.prepare('SELECT synced_at AS created_at, status, action FROM sync_log ORDER BY id DESC LIMIT 1').get() as any
 
     return {
       connected,
       error,
-      uri: uriRow?.value ? '***configured***' : null,
+      uri: mongoUri ? '***configured***' : null,
       pending,
       lastSync: lastLogRow || null
     }
@@ -128,9 +139,9 @@ ipcMain.handle('sync:push', async () => {
 
     if (!connected) {
       // Try to auto-reconnect
-      const uriRow = db.prepare("SELECT value FROM settings WHERE key = 'sync_mongo_uri'").get() as any
-      if (!uriRow?.value) throw new Error('No MongoDB URI configured. Please connect first.')
-      await connectMongo(uriRow.value)
+      const mongoUri = getMongoUri()
+      if (!mongoUri) throw new Error('No MongoDB URI configured. Please connect first.')
+      await connectMongo(mongoUri)
     }
 
     const results: Record<string, { pushed: number; failed: number }> = {}
@@ -181,9 +192,9 @@ ipcMain.handle('sync:pull', async () => {
     const { connected } = getConnectionStatus()
 
     if (!connected) {
-      const uriRow = db.prepare("SELECT value FROM settings WHERE key = 'sync_mongo_uri'").get() as any
-      if (!uriRow?.value) throw new Error('No MongoDB URI configured.')
-      await connectMongo(uriRow.value)
+      const mongoUri = getMongoUri()
+      if (!mongoUri) throw new Error('No MongoDB URI configured.')
+      await connectMongo(mongoUri)
     }
 
     const results: Record<string, { pulled: number; skipped: number; failed: number }> = {}
