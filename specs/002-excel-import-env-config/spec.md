@@ -8,6 +8,14 @@
 
 **Input**: User description: "make this Nursery_V4_Final_5.xlsx can be imported from [it] for all data in it. make all the important [values] and seed in env for avoid hard coded"
 
+## Clarifications
+
+### Session 2026-06-07
+
+- Q: How much of the configuration/seed data should move to `.env`? → A: Sensitive/deployment-specific values (security secret, initial admin login, Mongo URI) are required in `.env`; non-sensitive seed defaults (pricing, capacity, targets, branding) stay in code as defaults but are overridable via optional `.env` keys.
+- Q: How should the import populate required child fields (guardian, phone, unit, registration date) that the workbook does not contain? → A: Auto-fill missing required fields with safe placeholder defaults so the child imports successfully and can be completed later in the app.
+- Q: What should happen when no security signing secret is configured in a production build? → A: The production build MUST refuse to start and show a clear, actionable error (hard-fail; no fallback to a built-in default secret).
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Import all data from the existing workbook (Priority: P1)
@@ -39,7 +47,7 @@ An administrator (or whoever deploys the app) wants the sensitive and deployment
 
 1. **Given** an environment file specifying the initial admin username and password, **When** the database is seeded for the first time, **Then** the first admin account uses those credentials instead of a hardcoded default.
 2. **Given** an environment file specifying the security signing secret, **When** the app issues and validates login sessions, **Then** it uses the configured secret.
-3. **Given** no security secret is configured, **When** the app starts in a production build, **Then** it surfaces a clear error/warning rather than silently using a built-in default secret.
+3. **Given** no security secret is configured, **When** the app starts in a production build, **Then** it refuses to start and shows a clear, actionable error rather than silently using a built-in default secret.
 4. **Given** an environment file overriding seed values (e.g., default pricing, capacity, branding), **When** a fresh database is seeded, **Then** the seeded settings reflect the configured values, and where a value is not provided the documented default is used.
 5. **Given** an `.env.example` file, **When** a new operator sets up the app, **Then** the example lists every supported configuration key with a safe placeholder and a short description.
 
@@ -67,6 +75,7 @@ An administrator (or whoever deploys the app) wants the sensitive and deployment
 - **FR-004**: The import MUST be idempotent: re-importing the same workbook MUST NOT create duplicate records, and already-present rows MUST be reported as skipped.
 - **FR-005**: The import MUST NOT overwrite records that already exist in the system (existing data and in-app edits take precedence over re-imported rows).
 - **FR-006**: The system MUST skip individual rows that are blank or cannot be interpreted, continue importing remaining valid rows, and never abort the entire import because of a single bad row.
+- **FR-006a**: When a workbook row identifies a valid child/record but omits fields the system treats as required (e.g., guardian name, guardian phone, unit, registration date), the system MUST auto-fill those fields with safe placeholder defaults (deriving registration date from the source sheet's month/year where available) so the record imports successfully and can be completed later in the app, rather than skipping it.
 - **FR-007**: The system MUST present a summary after import showing, per category, how many records were imported and how many were skipped, plus the list of sheets that were processed and those ignored.
 - **FR-008**: Import MUST be restricted to administrators.
 - **FR-009**: Imported records MUST be written so that they are eligible for the existing cloud sync (treated as not-yet-synced local changes).
@@ -75,10 +84,10 @@ An administrator (or whoever deploys the app) wants the sensitive and deployment
 #### Environment-Based Configuration & Seeding
 
 - **FR-011**: The system MUST read the security signing secret used for login sessions from environment configuration rather than a hardcoded value.
-- **FR-012**: In a production build, the system MUST NOT fall back to a built-in default security secret; if none is configured it MUST surface a clear error/warning.
+- **FR-012**: In a production build, the system MUST NOT fall back to a built-in default security secret; if none is configured it MUST refuse to start and present a clear, actionable error (hard-fail). (A development build MAY use a generated/default secret for convenience.)
 - **FR-013**: The system MUST read the initial administrator username and password (used only when seeding a fresh database) from environment configuration, instead of the hardcoded `admin`/`admin123`.
 - **FR-014**: The system MUST read the cloud sync connection string from environment configuration when one has not been saved in settings.
-- **FR-015**: The system MUST allow the default seed settings (e.g., pricing, capacity, targets, branding text) to be supplied via environment configuration, falling back to documented defaults when a given value is not provided.
+- **FR-015**: The sensitive/deployment-specific values (security signing secret, initial admin username/password, cloud sync connection string) MUST be supplied via environment configuration. The non-sensitive seed defaults (pricing, capacity, targets, branding text) MUST remain available as built-in defaults but MUST be overridable by optional environment keys when present; operators are NOT required to set them to start the app.
 - **FR-016**: The system MUST provide an `.env.example` file enumerating every supported configuration key with a safe placeholder value and a brief description, and MUST NOT commit real secrets to the repository.
 - **FR-017**: Environment-driven seed values MUST only apply when seeding a fresh/empty database; they MUST NOT overwrite settings or accounts that already exist.
 
@@ -100,7 +109,7 @@ An administrator (or whoever deploys the app) wants the sensitive and deployment
 - **SC-003**: After import, imported children, payments, salaries, and expenses appear correctly in the rosters, statements, dashboards, and exports without any manual correction for valid rows.
 - **SC-004**: No security secret or login credential is present in the source code; 100% of sensitive and deployment-specific values are sourced from environment configuration.
 - **SC-005**: A new operator can configure and launch the app for the first time using only the `.env.example` file as a guide, with no source-code edits required.
-- **SC-006**: Starting a production build without a configured security secret produces a clear, actionable error/warning rather than silently using a default.
+- **SC-006**: Starting a production build without a configured security secret halts startup with a clear, actionable error rather than silently using a default.
 - **SC-007**: A malformed or partially invalid workbook never leaves the database in a corrupted state and never crashes the application.
 
 ## Assumptions
