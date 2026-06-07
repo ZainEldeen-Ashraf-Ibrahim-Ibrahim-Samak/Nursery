@@ -11235,7 +11235,6 @@ var childSchema = new Schema({
 	updated_at: String,
 	synced: Number
 }, sharedOptions);
-childSchema.index({ id: 1 }, { unique: true });
 var ChildModel = mongoose.models["sync_children"] || mongoose.model("sync_children", childSchema);
 var paymentSchema = new Schema({
 	id: {
@@ -11259,7 +11258,6 @@ var paymentSchema = new Schema({
 	updated_at: String,
 	synced: Number
 }, sharedOptions);
-paymentSchema.index({ id: 1 }, { unique: true });
 var PaymentModel = mongoose.models["sync_payments"] || mongoose.model("sync_payments", paymentSchema);
 var employeeSchema = new Schema({
 	id: {
@@ -11278,7 +11276,6 @@ var employeeSchema = new Schema({
 	updated_at: String,
 	synced: Number
 }, sharedOptions);
-employeeSchema.index({ id: 1 }, { unique: true });
 var EmployeeModel = mongoose.models["sync_employees"] || mongoose.model("sync_employees", employeeSchema);
 var salaryPaymentSchema = new Schema({
 	id: {
@@ -11297,7 +11294,6 @@ var salaryPaymentSchema = new Schema({
 	updated_at: String,
 	synced: Number
 }, sharedOptions);
-salaryPaymentSchema.index({ id: 1 }, { unique: true });
 var SalaryPaymentModel = mongoose.models["sync_salary_payments"] || mongoose.model("sync_salary_payments", salaryPaymentSchema);
 var expenseSchema = new Schema({
 	id: {
@@ -11315,7 +11311,6 @@ var expenseSchema = new Schema({
 	updated_at: String,
 	synced: Number
 }, sharedOptions);
-expenseSchema.index({ id: 1 }, { unique: true });
 var ExpenseModel = mongoose.models["sync_expenses"] || mongoose.model("sync_expenses", expenseSchema);
 var SYNC_ENTITIES = [
 	{

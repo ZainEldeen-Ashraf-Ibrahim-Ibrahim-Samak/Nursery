@@ -112,7 +112,6 @@ const childSchema = new Schema({
   synced: Number
 }, sharedOptions)
 
-childSchema.index({ id: 1 }, { unique: true })
 export const ChildModel: Model<any> = mongoose.models['sync_children'] ||
   mongoose.model('sync_children', childSchema)
 
@@ -137,7 +136,6 @@ const paymentSchema = new Schema({
   synced: Number
 }, sharedOptions)
 
-paymentSchema.index({ id: 1 }, { unique: true })
 export const PaymentModel: Model<any> = mongoose.models['sync_payments'] ||
   mongoose.model('sync_payments', paymentSchema)
 
@@ -157,7 +155,6 @@ const employeeSchema = new Schema({
   synced: Number
 }, sharedOptions)
 
-employeeSchema.index({ id: 1 }, { unique: true })
 export const EmployeeModel: Model<any> = mongoose.models['sync_employees'] ||
   mongoose.model('sync_employees', employeeSchema)
 
@@ -177,7 +174,6 @@ const salaryPaymentSchema = new Schema({
   synced: Number
 }, sharedOptions)
 
-salaryPaymentSchema.index({ id: 1 }, { unique: true })
 export const SalaryPaymentModel: Model<any> = mongoose.models['sync_salary_payments'] ||
   mongoose.model('sync_salary_payments', salaryPaymentSchema)
 
@@ -196,7 +192,6 @@ const expenseSchema = new Schema({
   synced: Number
 }, sharedOptions)
 
-expenseSchema.index({ id: 1 }, { unique: true })
 export const ExpenseModel: Model<any> = mongoose.models['sync_expenses'] ||
   mongoose.model('sync_expenses', expenseSchema)
 
