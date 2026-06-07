@@ -222,7 +222,7 @@ export default function Dashboard() {
                   value={formatCurrency(data.kpis.invoiced)}
                   icon="💰"
                 />
-                <Card className="p-5 flex items-start sm:items-center justify-between gap-4 border-slate-200 bg-gradient-to-br from-white to-teal-50/20">
+                <div className="bg-white rounded-xl shadow-sm p-5 flex items-start sm:items-center justify-between gap-4 border border-slate-200 bg-gradient-to-br from-white to-teal-50/20">
                   <div className="flex flex-col gap-1 text-start min-w-0">
                     <span className="text-xs font-semibold text-teal-600 uppercase tracking-wider truncate">
                       {t('collected')}
@@ -232,8 +232,8 @@ export default function Dashboard() {
                     </span>
                   </div>
                   <span className="text-2xl bg-teal-50 text-teal-600 p-2.5 rounded-lg flex-shrink-0">✅</span>
-                </Card>
-                <Card className={`p-5 flex items-start sm:items-center justify-between gap-4 border-slate-200 ${
+                </div>
+                <div className={`bg-white rounded-xl shadow-sm p-5 flex items-start sm:items-center justify-between gap-4 border border-slate-200 ${
                   data.kpis.arrears > 0 ? 'bg-gradient-to-br from-white to-rose-50/20 border-rose-200' : ''
                 }`}>
                   <div className="flex flex-col gap-1 text-start min-w-0">
@@ -249,7 +249,7 @@ export default function Dashboard() {
                   <span className={`text-2xl p-2.5 rounded-lg flex-shrink-0 ${
                     data.kpis.arrears > 0 ? 'bg-rose-50 text-rose-500' : 'bg-slate-50 text-slate-500'
                   }`}>⚠️</span>
-                </Card>
+                </div>
                 <Stat
                   title={i18n.language === 'ar' ? 'المصاريف التشغيلية' : 'Operational Cost'}
                   value={formatCurrency(data.kpis.expensesTotal + data.kpis.salariesTotal)}
@@ -260,7 +260,7 @@ export default function Dashboard() {
                   }
                   icon="💸"
                 />
-                <Card className={`p-5 flex items-start sm:items-center justify-between gap-4 border-slate-200 ${
+                <div className={`bg-white rounded-xl shadow-sm p-5 flex items-start sm:items-center justify-between gap-4 border border-slate-200 ${
                   data.kpis.netProfit >= 0 ? 'bg-gradient-to-br from-white to-emerald-50/20' : 'bg-gradient-to-br from-white to-red-50/20 border-red-200'
                 }`}>
                   <div className="flex flex-col gap-1 text-start min-w-0">
@@ -276,8 +276,8 @@ export default function Dashboard() {
                   <span className={`text-2xl p-2.5 rounded-lg flex-shrink-0 ${
                     data.kpis.netProfit >= 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-500'
                   }`}>📈</span>
-                </Card>
-                <Card className="p-5 flex items-start sm:items-center justify-between gap-4 border-slate-200">
+                </div>
+                <div className="bg-white rounded-xl shadow-sm p-5 flex items-start sm:items-center justify-between gap-4 border border-slate-200">
                   <div className="flex flex-col gap-1 text-start min-w-0">
                     <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider truncate">
                       {i18n.language === 'ar' ? 'نسبة تحصيل الاشتراكات' : 'Collection Rate'}
@@ -287,7 +287,7 @@ export default function Dashboard() {
                     </span>
                   </div>
                   <span className="text-2xl bg-slate-50 text-slate-500 p-2.5 rounded-lg flex-shrink-0">📊</span>
-                </Card>
+                </div>
               </div>
 
               {/* Charts Grid */}
