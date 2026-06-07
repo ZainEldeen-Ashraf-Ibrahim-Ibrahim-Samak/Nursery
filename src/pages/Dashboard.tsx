@@ -222,31 +222,31 @@ export default function Dashboard() {
                   value={formatCurrency(data.kpis.invoiced)}
                   icon="💰"
                 />
-                <Card className="p-5 flex items-center justify-between border-slate-200 bg-gradient-to-br from-white to-teal-50/20">
-                  <div className="flex flex-col gap-1 text-start">
-                    <span className="text-xs font-semibold text-teal-600 uppercase tracking-wider">
+                <Card className="p-5 flex items-start sm:items-center justify-between gap-4 border-slate-200 bg-gradient-to-br from-white to-teal-50/20">
+                  <div className="flex flex-col gap-1 text-start min-w-0">
+                    <span className="text-xs font-semibold text-teal-600 uppercase tracking-wider truncate">
                       {t('collected')}
                     </span>
-                    <span className="text-2xl font-extrabold text-teal-700 font-mono tracking-tight mt-1">
+                    <span className="text-xl sm:text-2xl font-extrabold text-teal-700 font-mono tracking-tight mt-1 truncate">
                       {formatCurrency(data.kpis.collected)}
                     </span>
                   </div>
-                  <span className="text-2xl bg-teal-50 text-teal-600 p-2.5 rounded-lg">✅</span>
+                  <span className="text-2xl bg-teal-50 text-teal-600 p-2.5 rounded-lg flex-shrink-0">✅</span>
                 </Card>
-                <Card className={`p-5 flex items-center justify-between border-slate-200 ${
+                <Card className={`p-5 flex items-start sm:items-center justify-between gap-4 border-slate-200 ${
                   data.kpis.arrears > 0 ? 'bg-gradient-to-br from-white to-rose-50/20 border-rose-200' : ''
                 }`}>
-                  <div className="flex flex-col gap-1 text-start">
-                    <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+                  <div className="flex flex-col gap-1 text-start min-w-0">
+                    <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider truncate">
                       {t('arrears')}
                     </span>
-                    <span className={`text-2xl font-extrabold font-mono tracking-tight mt-1 ${
+                    <span className={`text-xl sm:text-2xl font-extrabold font-mono tracking-tight mt-1 truncate ${
                       data.kpis.arrears > 0 ? 'text-rose-600' : 'text-slate-750'
                     }`}>
                       {formatCurrency(data.kpis.arrears)}
                     </span>
                   </div>
-                  <span className={`text-2xl p-2.5 rounded-lg ${
+                  <span className={`text-2xl p-2.5 rounded-lg flex-shrink-0 ${
                     data.kpis.arrears > 0 ? 'bg-rose-50 text-rose-500' : 'bg-slate-50 text-slate-500'
                   }`}>⚠️</span>
                 </Card>
@@ -260,33 +260,33 @@ export default function Dashboard() {
                   }
                   icon="💸"
                 />
-                <Card className={`p-5 flex items-center justify-between border-slate-200 ${
+                <Card className={`p-5 flex items-start sm:items-center justify-between gap-4 border-slate-200 ${
                   data.kpis.netProfit >= 0 ? 'bg-gradient-to-br from-white to-emerald-50/20' : 'bg-gradient-to-br from-white to-red-50/20 border-red-200'
                 }`}>
-                  <div className="flex flex-col gap-1 text-start">
-                    <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+                  <div className="flex flex-col gap-1 text-start min-w-0">
+                    <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider truncate">
                       {i18n.language === 'ar' ? 'صافي الربح' : 'Net Profit'}
                     </span>
-                    <span className={`text-2xl font-extrabold font-mono tracking-tight mt-1 ${
+                    <span className={`text-xl sm:text-2xl font-extrabold font-mono tracking-tight mt-1 truncate ${
                       data.kpis.netProfit >= 0 ? 'text-emerald-600' : 'text-red-600'
                     }`}>
                       {formatCurrency(data.kpis.netProfit)}
                     </span>
                   </div>
-                  <span className={`text-2xl p-2.5 rounded-lg ${
+                  <span className={`text-2xl p-2.5 rounded-lg flex-shrink-0 ${
                     data.kpis.netProfit >= 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-500'
                   }`}>📈</span>
                 </Card>
-                <Card className="p-5 flex items-center justify-between border-slate-200">
-                  <div className="flex flex-col gap-1 text-start">
-                    <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+                <Card className="p-5 flex items-start sm:items-center justify-between gap-4 border-slate-200">
+                  <div className="flex flex-col gap-1 text-start min-w-0">
+                    <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider truncate">
                       {i18n.language === 'ar' ? 'نسبة تحصيل الاشتراكات' : 'Collection Rate'}
                     </span>
-                    <span className="text-2xl font-extrabold font-mono text-slate-800 tracking-tight mt-1">
+                    <span className="text-xl sm:text-2xl font-extrabold font-mono text-slate-800 tracking-tight mt-1 truncate">
                       {Math.round(data.kpis.collectionRate * 100)}%
                     </span>
                   </div>
-                  <span className="text-2xl bg-slate-50 text-slate-500 p-2.5 rounded-lg">📊</span>
+                  <span className="text-2xl bg-slate-50 text-slate-500 p-2.5 rounded-lg flex-shrink-0">📊</span>
                 </Card>
               </div>
 

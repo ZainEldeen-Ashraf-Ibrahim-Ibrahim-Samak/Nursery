@@ -1,3 +1,1 @@
-make this Nursery_V4_Final_5.xlsx
-can be imporoted from iot for all data in it 
-make the all importantnt adn seed in env for avoid hard coded 
+the icons in cards that in dashborad not postioned well and not adapt to small screens 
