@@ -1,4 +1,5 @@
 import mongoose, { Schema, Model } from 'mongoose'
+import { promises as dnsPromises } from 'dns'
 
 /**
  * mongoSync.ts — Mongoose models for cloud sync collections.
@@ -14,11 +15,53 @@ import mongoose, { Schema, Model } from 'mongoose'
 let isConnected = false
 let connectionError: string | null = null
 
+async function convertSrvToStandardUri(uri: string): Promise<string> {
+  if (!uri.startsWith('mongodb+srv://')) return uri;
+
+  try {
+    const { Resolver } = dnsPromises;
+    const resolver = new Resolver();
+    resolver.setServers(['8.8.8.8', '8.8.4.4']); // Use Google DNS to bypass local hotspots
+
+    const url = new URL(uri);
+    const hostname = url.hostname;
+
+    // Fetch SRV records
+    const srvRecords = await resolver.resolveSrv(`_mongodb._tcp.${hostname}`);
+    if (!srvRecords || srvRecords.length === 0) throw new Error('No SRV records found');
+
+    // Fetch TXT records
+    const txtRecords = await resolver.resolveTxt(hostname);
+    const txtOptions = txtRecords.flat().join('&');
+
+    // Construct hosts string
+    const hosts = srvRecords.map(r => `${r.name}:${r.port}`).join(',');
+
+    // Extract credentials
+    const credentials = url.username ? `${url.username}:${url.password}@` : '';
+    
+    // Combine search params
+    const searchParams = new URLSearchParams(url.search);
+    const txtParams = new URLSearchParams(txtOptions);
+    for (const [key, value] of txtParams) {
+      if (!searchParams.has(key)) searchParams.set(key, value);
+    }
+    
+    searchParams.set('ssl', 'true');
+
+    return `mongodb://${credentials}${hosts}/${url.pathname.replace(/^\//, '')}?${searchParams.toString()}`;
+  } catch (error) {
+    console.error('Error converting SRV to standard URI, falling back to original:', error);
+    return uri;
+  }
+}
+
 export async function connectMongo(uri: string): Promise<void> {
   if (isConnected) return
 
   try {
-    await mongoose.connect(uri, {
+    const finalUri = await convertSrvToStandardUri(uri);
+    await mongoose.connect(finalUri, {
       serverSelectionTimeoutMS: 10000,
       connectTimeoutMS: 10000
     })

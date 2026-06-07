@@ -8,6 +8,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import ExcelJS from "exceljs";
 import PdfPrinter from "pdfmake";
 import mongoose, { Schema } from "mongoose";
+import { promises } from "dns";
 //#region \0rolldown/runtime.js
 var __create = Object.create;
 var __defProp = Object.defineProperty;
@@ -11133,10 +11134,34 @@ ipcMain.handle("storage:audit", async () => {
 */
 var isConnected = false;
 var connectionError = null;
+async function convertSrvToStandardUri(uri) {
+	if (!uri.startsWith("mongodb+srv://")) return uri;
+	try {
+		const { Resolver } = promises;
+		const resolver = new Resolver();
+		resolver.setServers(["8.8.8.8", "8.8.4.4"]);
+		const url = new URL(uri);
+		const hostname = url.hostname;
+		const srvRecords = await resolver.resolveSrv(`_mongodb._tcp.${hostname}`);
+		if (!srvRecords || srvRecords.length === 0) throw new Error("No SRV records found");
+		const txtOptions = (await resolver.resolveTxt(hostname)).flat().join("&");
+		const hosts = srvRecords.map((r) => `${r.name}:${r.port}`).join(",");
+		const credentials = url.username ? `${url.username}:${url.password}@` : "";
+		const searchParams = new URLSearchParams(url.search);
+		const txtParams = new URLSearchParams(txtOptions);
+		for (const [key, value] of txtParams) if (!searchParams.has(key)) searchParams.set(key, value);
+		searchParams.set("ssl", "true");
+		return `mongodb://${credentials}${hosts}/${url.pathname.replace(/^\//, "")}?${searchParams.toString()}`;
+	} catch (error) {
+		console.error("Error converting SRV to standard URI, falling back to original:", error);
+		return uri;
+	}
+}
 async function connectMongo(uri) {
 	if (isConnected) return;
 	try {
-		await mongoose.connect(uri, {
+		const finalUri = await convertSrvToStandardUri(uri);
+		await mongoose.connect(finalUri, {
 			serverSelectionTimeoutMS: 1e4,
 			connectTimeoutMS: 1e4
 		});

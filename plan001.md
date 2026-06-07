@@ -1,1 +1,1 @@
-child can choise more then one serivce 
+child can choise more then one serivce
