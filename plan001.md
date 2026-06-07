@@ -1,1 +1,1 @@
-the icons in cards that in dashborad not postioned well and not adapt to small screens 
+child can choise more then one serivce 
