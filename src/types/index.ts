@@ -64,6 +64,7 @@ export interface Employee {
   net_salary: number
   is_active: number // 0 or 1
   created_at: string
+  updated_at?: string
   synced: number // 0 or 1
 }
 
@@ -77,6 +78,7 @@ export interface SalaryPayment {
   actual_paid: number
   paid_date?: string | null
   notes?: string | null
+  updated_at?: string
   synced: number // 0 or 1
   
   // Optional join fields for UI
@@ -94,6 +96,7 @@ export interface Expense {
   category?: string | null
   notes?: string | null
   created_at: string
+  updated_at?: string
   synced: number // 0 or 1
 }
 

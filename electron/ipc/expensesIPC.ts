@@ -88,14 +88,15 @@ ipcMain.handle('expenses:update', async (_event, { item, month, year, amount, ca
     const now = new Date().toISOString()
 
     db.prepare(`
-      INSERT INTO expenses (item, month, year, amount, category, notes, created_at, synced)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 0)
+      INSERT INTO expenses (item, month, year, amount, category, notes, created_at, updated_at, synced)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
       ON CONFLICT(item, month, year) DO UPDATE SET
         amount = excluded.amount,
         category = excluded.category,
         notes = excluded.notes,
+        updated_at = excluded.updated_at,
         synced = 0
-    `).run(item, month, Number(year), amountNum, category, notes, now)
+    `).run(item, month, Number(year), amountNum, category, notes, now, now)
 
     const updated = db.prepare(
       'SELECT * FROM expenses WHERE item = ? AND month = ? AND year = ?'
@@ -137,9 +138,9 @@ ipcMain.handle('expenses:addItem', async (_event, { item, category = null }) => 
     const insertMany = db.transaction(() => {
       for (const month of arabicMonths) {
         db.prepare(`
-          INSERT OR IGNORE INTO expenses (item, month, year, amount, category, notes, created_at, synced)
-          VALUES (?, ?, ?, 0, ?, NULL, ?, 0)
-        `).run(itemName, month, year, category, now)
+          INSERT OR IGNORE INTO expenses (item, month, year, amount, category, notes, created_at, updated_at, synced)
+          VALUES (?, ?, ?, 0, ?, NULL, ?, ?, 0)
+        `).run(itemName, month, year, category, now, now)
       }
     })
     insertMany()

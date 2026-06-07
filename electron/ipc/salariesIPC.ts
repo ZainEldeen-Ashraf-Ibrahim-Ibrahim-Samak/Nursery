@@ -31,9 +31,9 @@ ipcMain.handle('employees:add', async (_event, employeeInput) => {
     const now = new Date().toISOString()
 
     const result = db.prepare(`
-      INSERT INTO employees (name, role, base_salary, housing, transport, net_salary, is_active, created_at, synced)
-      VALUES (?, ?, ?, ?, ?, ?, 1, ?, 0)
-    `).run(name, role, Number(base_salary), Number(housing), Number(transport), netSalary, now)
+      INSERT INTO employees (name, role, base_salary, housing, transport, net_salary, is_active, created_at, updated_at, synced)
+      VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, 0)
+    `).run(name, role, Number(base_salary), Number(housing), Number(transport), netSalary, now, now)
 
     const createdId = Number(result.lastInsertRowid)
     const createdEmployee = db.prepare('SELECT * FROM employees WHERE id = ?').get(createdId) as Employee
@@ -69,9 +69,9 @@ ipcMain.handle('employees:update', async (_event, { id, patch }) => {
 
     db.prepare(`
       UPDATE employees
-      SET name = ?, role = ?, base_salary = ?, housing = ?, transport = ?, net_salary = ?, synced = 0
+      SET name = ?, role = ?, base_salary = ?, housing = ?, transport = ?, net_salary = ?, updated_at = ?, synced = 0
       WHERE id = ?
-    `).run(name, role, base_salary, housing, transport, netSalary, id)
+    `).run(name, role, base_salary, housing, transport, netSalary, new Date().toISOString(), id)
 
     const updatedEmployee = db.prepare('SELECT * FROM employees WHERE id = ?').get(id) as Employee
     return updatedEmployee
@@ -92,7 +92,7 @@ ipcMain.handle('employees:deactivate', async (_event, { id }) => {
       throw new Error('الموظف غير موجود / Employee not found')
     }
 
-    db.prepare('UPDATE employees SET is_active = 0, synced = 0 WHERE id = ?').run(id)
+    db.prepare('UPDATE employees SET is_active = 0, updated_at = ?, synced = 0 WHERE id = ?').run(new Date().toISOString(), id)
     return { ok: true }
   } catch (error: any) {
     console.error('Failed to deactivate employee:', error)
@@ -156,17 +156,20 @@ ipcMain.handle('salary:update', async (_event, { employee_id, month, year, bonus
 
     const actualPaid = Number(emp.net_salary) + Number(bonus) - Number(deductions)
 
+    const now = new Date().toISOString()
+
     db.prepare(`
-      INSERT INTO salary_payments (employee_id, month, year, bonus, deductions, actual_paid, paid_date, notes, synced)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
+      INSERT INTO salary_payments (employee_id, month, year, bonus, deductions, actual_paid, paid_date, notes, updated_at, synced)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
       ON CONFLICT(employee_id, month, year) DO UPDATE SET
         bonus = excluded.bonus,
         deductions = excluded.deductions,
         actual_paid = excluded.actual_paid,
         paid_date = excluded.paid_date,
         notes = excluded.notes,
+        updated_at = excluded.updated_at,
         synced = 0
-    `).run(employee_id, month, Number(year), Number(bonus), Number(deductions), actualPaid, paid_date, notes)
+    `).run(employee_id, month, Number(year), Number(bonus), Number(deductions), actualPaid, paid_date, notes, now)
 
     const updatedPayment = db.prepare(`
       SELECT s.*, s.paid_date as pay_date, e.name as employee_name, e.role as employee_role

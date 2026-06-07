@@ -142,6 +142,34 @@ const migrations: Migration[] = [
         ALTER TABLE expenses_new RENAME TO expenses;
       `)
     }
+  },
+  {
+    name: '003_add_updated_at_columns',
+    up: (db) => {
+      // Add updated_at column to employees
+      try {
+        db.exec('ALTER TABLE employees ADD COLUMN updated_at TEXT;')
+      } catch (e) {
+        // Ignore if already exists
+      }
+      db.exec("UPDATE employees SET updated_at = created_at WHERE updated_at IS NULL;")
+
+      // Add updated_at column to salary_payments
+      try {
+        db.exec('ALTER TABLE salary_payments ADD COLUMN updated_at TEXT;')
+      } catch (e) {
+        // Ignore if already exists
+      }
+      db.exec("UPDATE salary_payments SET updated_at = (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')) WHERE updated_at IS NULL;")
+
+      // Add updated_at column to expenses
+      try {
+        db.exec('ALTER TABLE expenses ADD COLUMN updated_at TEXT;')
+      } catch (e) {
+        // Ignore if already exists
+      }
+      db.exec("UPDATE expenses SET updated_at = created_at WHERE updated_at IS NULL;")
+    }
   }
 ]
 

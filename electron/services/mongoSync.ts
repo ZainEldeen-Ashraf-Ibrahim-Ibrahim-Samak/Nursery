@@ -103,8 +103,8 @@ const childSchema = new Schema({
   national_id: String,
   service: String,
   unit: String,
-  monthly_fee: Number,
-  join_date: String,
+  price: Number,
+  reg_date: String,
   notes: String,
   is_active: Number,
   created_at: String,
@@ -122,6 +122,9 @@ const paymentSchema = new Schema({
   id: { type: Number, required: true, unique: true },
   child_id: Number,
   service: String,
+  unit: String,
+  quantity: Number,
+  price: Number,
   month: String,
   year: Number,
   total: Number,
@@ -150,6 +153,7 @@ const employeeSchema = new Schema({
   net_salary: Number,
   is_active: Number,
   created_at: String,
+  updated_at: String,
   synced: Number
 }, sharedOptions)
 
@@ -165,9 +169,9 @@ const salaryPaymentSchema = new Schema({
   month: String,
   year: Number,
   bonus: Number,
-  deduction: Number,
+  deductions: Number,
   actual_paid: Number,
-  pay_date: String,
+  paid_date: String,
   created_at: String,
   updated_at: String,
   synced: Number

@@ -439,10 +439,11 @@ function seedSetting(envKey, fallback) {
 }
 //#endregion
 //#region electron/db/migrations/index.ts
-var migrations = [{
-	name: "001_initial_schema",
-	up: (db) => {
-		db.exec(`
+var migrations = [
+	{
+		name: "001_initial_schema",
+		up: (db) => {
+			db.exec(`
         CREATE TABLE IF NOT EXISTS users (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           username TEXT UNIQUE NOT NULL,
@@ -547,11 +548,12 @@ var migrations = [{
           synced_at TEXT NOT NULL
         );
       `);
-	}
-}, {
-	name: "002_expenses_unique_constraint",
-	up: (db) => {
-		db.exec(`
+		}
+	},
+	{
+		name: "002_expenses_unique_constraint",
+		up: (db) => {
+			db.exec(`
         CREATE TABLE IF NOT EXISTS expenses_new (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           item TEXT NOT NULL,
@@ -572,8 +574,26 @@ var migrations = [{
 
         ALTER TABLE expenses_new RENAME TO expenses;
       `);
+		}
+	},
+	{
+		name: "003_add_updated_at_columns",
+		up: (db) => {
+			try {
+				db.exec("ALTER TABLE employees ADD COLUMN updated_at TEXT;");
+			} catch (e) {}
+			db.exec("UPDATE employees SET updated_at = created_at WHERE updated_at IS NULL;");
+			try {
+				db.exec("ALTER TABLE salary_payments ADD COLUMN updated_at TEXT;");
+			} catch (e) {}
+			db.exec("UPDATE salary_payments SET updated_at = (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')) WHERE updated_at IS NULL;");
+			try {
+				db.exec("ALTER TABLE expenses ADD COLUMN updated_at TEXT;");
+			} catch (e) {}
+			db.exec("UPDATE expenses SET updated_at = created_at WHERE updated_at IS NULL;");
+		}
 	}
-}];
+];
 function runMigrations(db) {
 	db.exec(`
     CREATE TABLE IF NOT EXISTS migrations (
@@ -7272,9 +7292,9 @@ ipcMain.handle("employees:add", async (_event, employeeInput) => {
 		const netSalary = Number(base_salary) + Number(housing) + Number(transport);
 		const now = (/* @__PURE__ */ new Date()).toISOString();
 		const result = db.prepare(`
-      INSERT INTO employees (name, role, base_salary, housing, transport, net_salary, is_active, created_at, synced)
-      VALUES (?, ?, ?, ?, ?, ?, 1, ?, 0)
-    `).run(name, role, Number(base_salary), Number(housing), Number(transport), netSalary, now);
+      INSERT INTO employees (name, role, base_salary, housing, transport, net_salary, is_active, created_at, updated_at, synced)
+      VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, 0)
+    `).run(name, role, Number(base_salary), Number(housing), Number(transport), netSalary, now, now);
 		const createdId = Number(result.lastInsertRowid);
 		return db.prepare("SELECT * FROM employees WHERE id = ?").get(createdId);
 	} catch (error) {
@@ -7297,9 +7317,9 @@ ipcMain.handle("employees:update", async (_event, { id, patch }) => {
 		const netSalary = base_salary + housing + transport;
 		db.prepare(`
       UPDATE employees
-      SET name = ?, role = ?, base_salary = ?, housing = ?, transport = ?, net_salary = ?, synced = 0
+      SET name = ?, role = ?, base_salary = ?, housing = ?, transport = ?, net_salary = ?, updated_at = ?, synced = 0
       WHERE id = ?
-    `).run(name, role, base_salary, housing, transport, netSalary, id);
+    `).run(name, role, base_salary, housing, transport, netSalary, (/* @__PURE__ */ new Date()).toISOString(), id);
 		return db.prepare("SELECT * FROM employees WHERE id = ?").get(id);
 	} catch (error) {
 		console.error("Failed to update employee:", error);
@@ -7311,7 +7331,7 @@ ipcMain.handle("employees:deactivate", async (_event, { id }) => {
 		requireAdmin();
 		const db = getDb();
 		if (!db.prepare("SELECT id FROM employees WHERE id = ?").get(id)) throw new Error("الموظف غير موجود / Employee not found");
-		db.prepare("UPDATE employees SET is_active = 0, synced = 0 WHERE id = ?").run(id);
+		db.prepare("UPDATE employees SET is_active = 0, updated_at = ?, synced = 0 WHERE id = ?").run((/* @__PURE__ */ new Date()).toISOString(), id);
 		return { ok: true };
 	} catch (error) {
 		console.error("Failed to deactivate employee:", error);
@@ -7356,17 +7376,19 @@ ipcMain.handle("salary:update", async (_event, { employee_id, month, year, bonus
 		const emp = db.prepare("SELECT net_salary FROM employees WHERE id = ?").get(employee_id);
 		if (!emp) throw new Error("الموظف غير موجود / Employee not found");
 		const actualPaid = Number(emp.net_salary) + Number(bonus) - Number(deductions);
+		const now = (/* @__PURE__ */ new Date()).toISOString();
 		db.prepare(`
-      INSERT INTO salary_payments (employee_id, month, year, bonus, deductions, actual_paid, paid_date, notes, synced)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
+      INSERT INTO salary_payments (employee_id, month, year, bonus, deductions, actual_paid, paid_date, notes, updated_at, synced)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
       ON CONFLICT(employee_id, month, year) DO UPDATE SET
         bonus = excluded.bonus,
         deductions = excluded.deductions,
         actual_paid = excluded.actual_paid,
         paid_date = excluded.paid_date,
         notes = excluded.notes,
+        updated_at = excluded.updated_at,
         synced = 0
-    `).run(employee_id, month, Number(year), Number(bonus), Number(deductions), actualPaid, paid_date, notes);
+    `).run(employee_id, month, Number(year), Number(bonus), Number(deductions), actualPaid, paid_date, notes, now);
 		return db.prepare(`
       SELECT s.*, s.paid_date as pay_date, e.name as employee_name, e.role as employee_role
       FROM salary_payments s
@@ -7444,14 +7466,15 @@ ipcMain.handle("expenses:update", async (_event, { item, month, year, amount, ca
 		if (isNaN(amountNum) || amountNum < 0) throw new Error("Invalid amount value");
 		const now = (/* @__PURE__ */ new Date()).toISOString();
 		db.prepare(`
-      INSERT INTO expenses (item, month, year, amount, category, notes, created_at, synced)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 0)
+      INSERT INTO expenses (item, month, year, amount, category, notes, created_at, updated_at, synced)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
       ON CONFLICT(item, month, year) DO UPDATE SET
         amount = excluded.amount,
         category = excluded.category,
         notes = excluded.notes,
+        updated_at = excluded.updated_at,
         synced = 0
-    `).run(item, month, Number(year), amountNum, category, notes, now);
+    `).run(item, month, Number(year), amountNum, category, notes, now, now);
 		return db.prepare("SELECT * FROM expenses WHERE item = ? AND month = ? AND year = ?").get(item, month, Number(year));
 	} catch (error) {
 		console.error("Failed to update expense:", error);
@@ -7475,9 +7498,9 @@ ipcMain.handle("expenses:addItem", async (_event, { item, category = null }) => 
 		const year = (/* @__PURE__ */ new Date()).getFullYear();
 		db.transaction(() => {
 			for (const month of arabicMonths$4) db.prepare(`
-          INSERT OR IGNORE INTO expenses (item, month, year, amount, category, notes, created_at, synced)
-          VALUES (?, ?, ?, 0, ?, NULL, ?, 0)
-        `).run(itemName, month, year, category, now);
+          INSERT OR IGNORE INTO expenses (item, month, year, amount, category, notes, created_at, updated_at, synced)
+          VALUES (?, ?, ?, 0, ?, NULL, ?, ?, 0)
+        `).run(itemName, month, year, category, now, now);
 		})();
 		return { ok: true };
 	} catch (error) {
@@ -11204,8 +11227,8 @@ var childSchema = new Schema({
 	national_id: String,
 	service: String,
 	unit: String,
-	monthly_fee: Number,
-	join_date: String,
+	price: Number,
+	reg_date: String,
 	notes: String,
 	is_active: Number,
 	created_at: String,
@@ -11222,6 +11245,9 @@ var paymentSchema = new Schema({
 	},
 	child_id: Number,
 	service: String,
+	unit: String,
+	quantity: Number,
+	price: Number,
 	month: String,
 	year: Number,
 	total: Number,
@@ -11249,6 +11275,7 @@ var employeeSchema = new Schema({
 	net_salary: Number,
 	is_active: Number,
 	created_at: String,
+	updated_at: String,
 	synced: Number
 }, sharedOptions);
 employeeSchema.index({ id: 1 }, { unique: true });
@@ -11263,9 +11290,9 @@ var salaryPaymentSchema = new Schema({
 	month: String,
 	year: Number,
 	bonus: Number,
-	deduction: Number,
+	deductions: Number,
 	actual_paid: Number,
-	pay_date: String,
+	paid_date: String,
 	created_at: String,
 	updated_at: String,
 	synced: Number
