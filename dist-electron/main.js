@@ -11139,7 +11139,7 @@ ipcMain.handle("storage:clear", async (_event, { confirm }) => {
 ipcMain.handle("storage:audit", async () => {
 	try {
 		requireAdmin();
-		return getDb().prepare("SELECT * FROM sync_log ORDER BY id DESC LIMIT 50").all();
+		return getDb().prepare("SELECT id, action, table_name AS entity_type, record_id, status, error, synced_at AS created_at FROM sync_log ORDER BY id DESC LIMIT 50").all();
 	} catch (error) {
 		console.error("storage:audit error:", error);
 		throw new Error(error.message || "Failed to retrieve audit log");
