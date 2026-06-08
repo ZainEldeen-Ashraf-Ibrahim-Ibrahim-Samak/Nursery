@@ -62,6 +62,33 @@ Records a hard deletion so it can propagate to other devices (FR-016).
 | Identity | the existing `key` column (string) is the Mongo identity, not an integer id |
 | Sync denylist | device-local keys are **excluded** from sync — at minimum `sync_mongo_uri` (Decision 7), so a device cannot overwrite another's connection string |
 
+## New entity: ImportedSnapshot (`imported_snapshots` table)
+
+Raw rows captured from non-relational workbook sheets (📊 داشبورد، 📄 كشف حساب) during full-workbook import (FR-023, FR-025). Stored as snapshots; the live dashboard/statement views continue to recompute from source data and are **not** driven by this table (spec edge case).
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | INTEGER PK AUTOINCREMENT | sync identity (== Mongo `id`) |
+| `sheet` | TEXT NOT NULL | source sheet name, e.g. `داشبورد`, `كشف حساب` |
+| `row_index` | INTEGER NOT NULL | 1-based source row within the sheet |
+| `data_json` | TEXT NOT NULL | the row's resolved cell values serialized as JSON |
+| `imported_at` | TEXT NOT NULL | ISO timestamp of the import |
+| `updated_at` | TEXT NOT NULL | ISO; drives conflict resolution |
+| `synced` | INTEGER DEFAULT 0 | sync state |
+
+**Constraints**: `UNIQUE(sheet, row_index)` — re-importing the same sheet upserts rather than duplicating. **Mongo**: collection `sync_imported_snapshots`. Deletions propagate via the shared `tombstones` table (`entity='imported_snapshots'`).
+
+## Import targets for the formerly-ignored sheets
+
+| Sheet | Import target | Notes |
+|-------|---------------|-------|
+| ⚙️ الإعدادات (Settings) | `settings` table (existing) | Upsert key/value; bump `updated_at`, `synced=0`. Device-local keys (e.g. `sync_mongo_uri`) are never overwritten. |
+| 🎯 تخطيط التارجت (Target Planning) | `settings` keys consumed by the derived targets module | `target_profit_pct`, `nursery_monthly`, `hosting_monthly`, `session_hourly`, etc. No `targets` table exists — targets are computed on read. |
+| 📊 داشبورد (Dashboard) | `imported_snapshots` (snapshot) | Stored verbatim; live dashboard keeps recomputing. |
+| 📄 كشف حساب (Account Statement) | `imported_snapshots` (snapshot) | Stored verbatim; live statements keep recomputing. |
+
+All four import paths surface a specific, actionable reason for any row that cannot be applied (FR-026); the reference workbook MUST import with **zero** row errors (SC-009).
+
 ## Synced entity coverage (`SYNC_ENTITIES` registry)
 
 | Entity | Table | Mongo model | Identity | New? |
@@ -75,6 +102,7 @@ Records a hard deletion so it can propagate to other devices (FR-016).
 | **users** | `users` | `sync_users` | `id` | **new** (hashed passwords only) |
 | **settings** | `settings` | `sync_settings` | `key` | **new** (with denylist) |
 | **tombstones** | `tombstones` | `sync_tombstones` | `id` | **new** |
+| **imported_snapshots** | `imported_snapshots` | `sync_imported_snapshots` | `id` | **new** (dashboard/statement snapshots) |
 
 ## Migrations (appended to the existing versioned runner)
 
@@ -84,8 +112,11 @@ Records a hard deletion so it can propagate to other devices (FR-016).
 | `005_payments_service_id` | Table-rebuild `payments` adding `service_id` and re-keying `UNIQUE(child_id, service_id, month, year)`; link each legacy payment to its child's backfilled enrollment. |
 | `006_tombstones` | Create `tombstones` (+ `UNIQUE(entity, record_id)`). |
 | `007_settings_sync_columns` | Add `updated_at` + `synced` to `settings`; initialize `updated_at`. |
+| `008_users_sync_columns` | Add sync columns to `users` (already applied). |
+| `009_backfill_missing_child_services` | Backfill enrollments for any children missing one (already applied). |
+| `010_imported_snapshots` | Create `imported_snapshots` (+ `UNIQUE(sheet, row_index)`). |
 
-All migrations are additive/rebuild-in-place and preserve existing data (Constitution guardrail).
+All migrations are additive/rebuild-in-place and preserve existing data (Constitution guardrail). Migrations `004`–`009` already exist in the runner; `010` is the only new one for this scope.
 
 ## Relationships (after change)
 

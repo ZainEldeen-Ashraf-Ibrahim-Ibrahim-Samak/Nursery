@@ -87,6 +87,15 @@ electron.contextBridge.exposeInMainWorld("api", {
 		pull: () => electron.ipcRenderer.invoke("sync:pull"),
 		status: () => electron.ipcRenderer.invoke("sync:status"),
 		autoSync: (args) => electron.ipcRenderer.invoke("sync:auto-sync", args)
+	},
+	/**
+	* Subscribe to long-running operation progress (push/pull/import/backup/restore).
+	* Returns an unsubscribe function. Payload: { op, phase, current, total, percent }.
+	*/
+	onProgress: (callback) => {
+		const handler = (_e, payload) => callback(payload);
+		electron.ipcRenderer.on("progress:update", handler);
+		return () => electron.ipcRenderer.removeListener("progress:update", handler);
 	}
 });
 //#endregion

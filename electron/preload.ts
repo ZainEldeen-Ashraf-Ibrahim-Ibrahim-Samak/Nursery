@@ -109,6 +109,24 @@ const api = {
     status: () => ipcRenderer.invoke('sync:status'),
     autoSync: (args: { enabled: boolean; intervalMinutes?: number }) =>
       ipcRenderer.invoke('sync:auto-sync', args),
+  },
+
+  /**
+   * Subscribe to long-running operation progress (push/pull/import/backup/restore).
+   * Returns an unsubscribe function. Payload: { op, phase, current, total, percent }.
+   */
+  onProgress: (
+    callback: (payload: {
+      op: 'push' | 'pull' | 'import' | 'backup' | 'restore'
+      phase: string
+      current: number
+      total: number
+      percent: number
+    }) => void
+  ) => {
+    const handler = (_e: unknown, payload: any) => callback(payload)
+    ipcRenderer.on('progress:update', handler)
+    return () => ipcRenderer.removeListener('progress:update', handler)
   }
 }
 

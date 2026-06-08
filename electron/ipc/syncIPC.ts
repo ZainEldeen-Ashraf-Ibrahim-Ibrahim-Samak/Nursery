@@ -2,6 +2,7 @@ import { ipcMain } from 'electron'
 import { getDb } from '../db/connection.js'
 import { applyCloudTombstones } from '../services/tombstones.js'
 import { requireAdmin } from './_guard.js'
+import { progressReporter } from './progress.js'
 import {
   connectMongo,
   disconnectMongo,
@@ -139,7 +140,7 @@ ipcMain.handle('sync:status', async () => {
  * sync:push — Push all unsynced records to MongoDB.
  * Admin only. Graceful: reports pushed/failed counts per entity.
  */
-ipcMain.handle('sync:push', async () => {
+ipcMain.handle('sync:push', async (event) => {
   try {
     requireAdmin()
     const db = getDb()
@@ -154,6 +155,17 @@ ipcMain.handle('sync:push', async () => {
 
     const results: Record<string, { pushed: number; failed: number }> = {}
     const now = new Date().toISOString()
+
+    // Total work = all unsynced rows across every entity, so the bar is determinate.
+    const report = progressReporter(event, 'push')
+    let totalWork = 0
+    for (const entity of SYNC_ENTITIES) {
+      let cq = `SELECT COUNT(*) AS c FROM ${entity.table} WHERE synced = 0`
+      if (entity.name === 'settings') cq += " AND key != 'sync_mongo_uri'"
+      totalWork += (db.prepare(cq).get() as any)?.c ?? 0
+    }
+    let done = 0
+    report(0, totalWork, 'starting')
 
     for (const entity of SYNC_ENTITIES) {
       let query = `SELECT * FROM ${entity.table} WHERE synced = 0`
@@ -189,10 +201,12 @@ ipcMain.handle('sync:push', async () => {
           logSync('push', entity.name, record.id, 'error', err.message)
           failed++
         }
+        report(++done, totalWork, entity.name)
       }
 
       results[entity.name] = { pushed, failed }
     }
+    report(totalWork, totalWork, 'done')
 
     return { results }
   } catch (error: any) {
@@ -207,7 +221,7 @@ ipcMain.handle('sync:push', async () => {
  * Applies conflict resolution (most-recent updated_at wins, id tie-break).
  * Admin only.
  */
-ipcMain.handle('sync:pull', async () => {
+ipcMain.handle('sync:pull', async (event) => {
   try {
     requireAdmin()
     const db = getDb()
@@ -218,6 +232,15 @@ ipcMain.handle('sync:pull', async () => {
       if (!mongoUri) throw new Error('No MongoDB URI configured.')
       await connectMongo(mongoUri)
     }
+
+    // Pre-count cloud documents so the progress bar is determinate.
+    const report = progressReporter(event, 'pull')
+    let totalWork = 0
+    for (const entity of SYNC_ENTITIES) {
+      try { totalWork += await entity.model.estimatedDocumentCount() } catch { /* ignore */ }
+    }
+    let done = 0
+    report(0, totalWork, 'starting')
 
     const results: Record<
       string,
@@ -323,6 +346,7 @@ ipcMain.handle('sync:pull', async () => {
               failed++
             }
           }
+          report(++done, totalWork, entity.name)
         }
       } catch (err: any) {
         // Whole-entity failure (e.g. the cloud query itself failed). Count it so
@@ -342,6 +366,7 @@ ipcMain.handle('sync:pull', async () => {
       results[entity.name] = { pulled, skipped, failed, errors }
     }
 
+    report(totalWork, totalWork, 'done')
     return { results }
   } catch (error: any) {
     logSync('pull', 'all', 'batch', 'error', error.message)

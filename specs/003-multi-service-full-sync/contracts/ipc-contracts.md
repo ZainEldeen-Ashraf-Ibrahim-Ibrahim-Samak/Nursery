@@ -52,6 +52,23 @@ Only the **changes** to the feature-001 IPC surface are listed (full surface liv
 - `settings` sync excludes device-local keys (at minimum `sync_mongo_uri`) per `data-model.md` (Decision 7).
 - All sync handlers fail gracefully when the cloud is unreachable, leaving local data intact (FR-021), and remain admin-only (FR-022).
 
+## Storage / Import (changed)
+
+| Channel | Args | Result | Access |
+|---------|------|--------|--------|
+| `storage:import` | `{ path? }` | `{ imported: ImportSummary }` | admin |
+| `storage:backup` | — | `{ path }` | admin |
+| `storage:restore` | `{ path? }` | `{ ok, restoredFrom }` | admin |
+
+- `storage:import` now imports **every** sheet of the workbook, including the four formerly-ignored sheets (FR-023): ⚙️ الإعدادات → `settings`; 🎯 تخطيط التارجت → the settings keys the derived targets module reads; 📊 داشبورد and 📄 كشف حساب → `imported_snapshots` (snapshot rows). `ImportSummary` keeps its existing per-entity `{ imported, skipped }` counts and `rowErrors` + `rowErrorDetails`; the reference workbook MUST import with `rowErrors === 0` (FR-026, SC-009). Any unmappable row surfaces a specific reason in `rowErrorDetails` rather than being silently dropped.
+- `storage:backup` runs `PRAGMA wal_checkpoint(TRUNCATE)` before copying `nursery.db` so the copied file is complete under WAL (FR-028). Restore remains a whole-file replace; a backup→restore round-trip yields identical per-table counts (SC-010).
+
+## Sync (imported data)
+
+- `imported_snapshots` is added to `SYNC_ENTITIES` (Mongo `sync_imported_snapshots`, integer-`id` identity), so it pushes/pulls and resolves conflicts like the other entities (FR-027). Its deletions propagate via the shared `tombstones` mechanism (`entity='imported_snapshots'`).
+- Imported `settings` (including target config) sync through the existing `settings` entity, minus the device-local denylist.
+- `sync:status` `pending` map gains an `imported_snapshots` count.
+
 ## Preload (`window.api`) additions
 
 - `childServices: { list, add, update, remove }` mapped 1:1 to the channels above.

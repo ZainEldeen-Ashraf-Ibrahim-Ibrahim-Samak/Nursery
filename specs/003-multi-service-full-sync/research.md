@@ -62,6 +62,38 @@ This feature is a brownfield extension. Research focused on *how the existing co
 - **Rationale**: The spec requires auto-sync to perform "the same full reconciliation as a manual sync". The current implementation can miss cloud-originated changes and any non-children local changes.
 - **Alternatives considered**: *Push-only auto-sync* — rejected: devices would not converge automatically.
 
+## Decision 10 — Import all four formerly-ignored sheets instead of skipping them
+
+- **Decision**: Remove the four sheets (📊 داشبورد، ⚙️ الإعدادات، 📄 كشف حساب، 🎯 تخطيط التارجت) from `isIgnoredSheet` in `importService.ts` and add a dedicated importer per sheet kind. Every sheet of `Nursery_V4_Final_5.xlsx` is now persisted (FR-023, SC-009).
+- **Rationale**: The clarified scope requires the full workbook to import with zero row errors and for all data to survive sync and backup. The four sheets were previously dropped, so their data never reached the DB.
+- **Alternatives considered**: *Keep ignoring dashboard/statement and import only settings/target* — rejected by the user's clarification ("All four as stored data").
+
+## Decision 11 — Targets and dashboard/statement are DERIVED; reconcile "store as data" accordingly
+
+- **Decision**: There is **no `targets`, `dashboard`, or `statement` table** — `target:get` (targetIPC), the dashboard, and child statements are all computed on read from `payments`/`expenses`/`salary_payments`/`settings`. Therefore:
+  - **Target Planning (🎯 تخطيط التارجت)** import = upsert the planning/pricing **settings keys** the targets module already consumes (`target_profit_pct`, `nursery_monthly`, `hosting_monthly`, `session_hourly`, …). This honors the clarification "reuse the existing targets module" — its inputs live in `settings`.
+  - **Dashboard (📊 داشبورد)** and **Account Statement (📄 كشف حساب)** rows are stored verbatim as snapshots (Decision 12); the live views keep recomputing and are **not** overridden (spec edge case).
+- **Rationale**: Honoring the literal "store all four" while not corrupting the single source of truth. Writing target config to `settings` makes the imported targets immediately effective in the existing derived module with no new table.
+- **Alternatives considered**: *Create real targets/dashboard/statement tables and have the app read them* — rejected: large, invasive rewrite of working derived modules for snapshot data that goes stale; violates YAGNI and the "snapshot, not source of truth" edge case.
+
+## Decision 12 — One generic `imported_snapshots` table for non-relational sheets
+
+- **Decision**: Add a single `imported_snapshots(id, sheet, row_index, data_json, imported_at, updated_at, synced)` table holding raw rows of the Dashboard and Account Statement sheets (and any future non-relational sheet), keyed `UNIQUE(sheet, row_index)`. One table, one Mongo model, one sync entity.
+- **Rationale**: These sheets have no stable relational schema; capturing them as JSON rows preserves the data for backup/sync without forcing a brittle column mapping, and keeps the change minimal (one table vs three).
+- **Alternatives considered**: *Three sheet-specific tables* — rejected (YAGNI); *store as settings blobs* — rejected (pollutes settings, breaks per-row identity needed for sync/tombstones).
+
+## Decision 13 — Imported data joins the full sync (push/pull + tombstones)
+
+- **Decision**: `settings` is already in `SYNC_ENTITIES` (so imported settings/target config syncs for free). Add `imported_snapshots` as a new sync entity (Mongo `sync_imported_snapshots`, integer-`id` identity) and support its deletions via the existing `tombstones` mechanism (FR-027).
+- **Rationale**: The clarification requires the newly imported data to push/pull and propagate deletions like every other entity. Reuses the Decision 6/7/8 machinery with one more entity.
+- **Alternatives considered**: *Local-only imported data* — rejected by the clarification.
+
+## Decision 14 — Backup checkpoints WAL; restore stays a whole-file copy (round-trip guarantee)
+
+- **Decision**: Keep `storage:backup`/`storage:restore` as whole-file SQLite copies (they already round-trip every table, including new ones), but run `PRAGMA wal_checkpoint(TRUNCATE)` **before** copying so all committed pages are folded into the `.db` file and nothing is stranded in `-wal`. A round-trip test asserts identical per-table counts (FR-028, SC-010).
+- **Rationale**: The DB runs in WAL mode (`journal_mode = WAL`); copying only `nursery.db` while recent commits live in `nursery.db-wal` would silently drop data, breaking the round-trip guarantee. Checkpointing closes that gap with no format change.
+- **Alternatives considered**: *Also copy the `-wal`/`-shm` sidecars* — rejected: fragile and version-sensitive; checkpointing is the canonical fix. *Logical (SQL dump) export* — rejected: larger change than needed; file copy already satisfies the requirement once checkpointed.
+
 ## Resolved unknowns
 
-All Technical Context items are concrete (brownfield code inspected); **no NEEDS CLARIFICATION markers remain**. The three spec ambiguities were already resolved in the `/speckit-clarify` session (sync model = per-record merge; service removal = hard delete + tombstone; combined status = derived roll-up) and are reflected above.
+All Technical Context items are concrete (brownfield code inspected); **no NEEDS CLARIFICATION markers remain**. The spec ambiguities were resolved across two `/speckit-clarify` sessions: (1) sync model = per-record merge, service removal = hard delete + tombstone, combined status = derived roll-up; (2) import all four ignored sheets as stored data, target config into the existing (settings-driven) targets module, imported data joins full sync + tombstones, success = zero row errors + backup round-trip. All are reflected above.

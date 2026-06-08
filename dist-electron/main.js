@@ -1,4 +1,4 @@
-import { n as getDb, r as initDb, t as closeDb } from "./connection-BvJpTvbB.js";
+import { n as getDb, r as initDb, t as closeDb } from "./connection-DNiMlhbf.js";
 import { createRequire } from "node:module";
 import path from "node:path";
 import nodeCrypto from "crypto";
@@ -715,6 +715,23 @@ var migrations = [
           AND cs.service = payments.service
         )
         WHERE service_id IS NULL;
+      `);
+		}
+	},
+	{
+		name: "010_imported_snapshots",
+		up: (db) => {
+			db.exec(`
+        CREATE TABLE IF NOT EXISTS imported_snapshots (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          sheet TEXT NOT NULL,
+          row_index INTEGER NOT NULL,
+          data_json TEXT NOT NULL,
+          imported_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          synced INTEGER DEFAULT 0,
+          UNIQUE(sheet, row_index)
+        );
       `);
 		}
 	}
@@ -11274,6 +11291,27 @@ ipcMain.handle("export:expenses", async (_event, { year, format, lang }) => {
 	}
 });
 //#endregion
+//#region electron/ipc/progress.ts
+/**
+* Build a progress reporter bound to the invoking renderer. Each call emits a
+* `progress:update` event carrying a 0–100 percent so the UI can show a real
+* progress bar instead of an indeterminate spinner.
+*/
+function progressReporter(event, op) {
+	return (current, total, phase = "") => {
+		const percent = total > 0 ? Math.min(100, Math.max(0, Math.round(current / total * 100))) : 0;
+		try {
+			event.sender.send("progress:update", {
+				op,
+				phase,
+				current,
+				total,
+				percent
+			});
+		} catch {}
+	};
+}
+//#endregion
 //#region electron/ipc/storageIPC.ts
 /**
 * storage:stats
@@ -11311,9 +11349,10 @@ ipcMain.handle("storage:stats", async () => {
 * Opens a save dialog and copies the current DB file to the chosen path.
 * Admin only.
 */
-ipcMain.handle("storage:backup", async () => {
+ipcMain.handle("storage:backup", async (event) => {
 	try {
 		requireAdmin();
+		const report = progressReporter(event, "backup");
 		const dbPath = path.join(app.getPath("userData"), "nursery.db");
 		const timestamp = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-").slice(0, 19);
 		const result = await dialog.showSaveDialog({
@@ -11324,7 +11363,11 @@ ipcMain.handle("storage:backup", async () => {
 			}]
 		});
 		if (result.canceled || !result.filePath) throw new Error("Backup cancelled");
+		report(1, 3, "checkpoint");
+		getDb().checkpoint();
+		report(2, 3, "copying");
 		fs.copyFileSync(dbPath, result.filePath);
+		report(3, 3, "done");
 		return { path: result.filePath };
 	} catch (error) {
 		console.error("storage:backup error:", error);
@@ -11336,9 +11379,10 @@ ipcMain.handle("storage:backup", async () => {
 * Opens a file picker and replaces the current DB with the selected backup.
 * Admin only.
 */
-ipcMain.handle("storage:restore", async (_event, { path: restorePath }) => {
+ipcMain.handle("storage:restore", async (event, { path: restorePath }) => {
 	try {
 		requireAdmin();
+		const report = progressReporter(event, "restore");
 		let sourcePath = restorePath;
 		if (!sourcePath) {
 			const result = await dialog.showOpenDialog({
@@ -11353,11 +11397,14 @@ ipcMain.handle("storage:restore", async (_event, { path: restorePath }) => {
 		}
 		if (!fs.existsSync(sourcePath)) throw new Error("Backup file not found");
 		const dbPath = path.join(app.getPath("userData"), "nursery.db");
+		report(1, 3, "safety backup");
 		const backupPath = `${dbPath}.pre-restore-${Date.now()}.bak`;
 		fs.copyFileSync(dbPath, backupPath);
+		report(2, 3, "restoring");
 		closeDb();
 		fs.copyFileSync(sourcePath, dbPath);
 		initDb();
+		report(3, 3, "done");
 		return {
 			ok: true,
 			restoredFrom: sourcePath
@@ -11372,7 +11419,7 @@ ipcMain.handle("storage:restore", async (_event, { path: restorePath }) => {
 * Opens an Excel workbook file picker and imports data from the original workbook format.
 * Admin only.
 */
-ipcMain.handle("storage:import", async (_event, args) => {
+ipcMain.handle("storage:import", async (event, args) => {
 	try {
 		requireAdmin();
 		let filePath = args?.path;
@@ -11387,8 +11434,8 @@ ipcMain.handle("storage:import", async (_event, args) => {
 			if (result.canceled || result.filePaths.length === 0) throw new Error("Import cancelled");
 			filePath = result.filePaths[0];
 		}
-		const { importFromWorkbook } = await import("./importService-BZLKQkNp.js");
-		return { imported: await importFromWorkbook(filePath) };
+		const { importFromWorkbook } = await import("./importService-CPbO9Omw.js");
+		return { imported: await importFromWorkbook(filePath, progressReporter(event, "import")) };
 	} catch (error) {
 		console.error("storage:import error:", error);
 		throw new Error(error.message || "Failed to import workbook");
@@ -11654,6 +11701,20 @@ var expenseSchema = new Schema({
 	synced: Number
 }, sharedOptions);
 var ExpenseModel = mongoose.models["sync_expenses"] || mongoose.model("sync_expenses", expenseSchema);
+var importedSnapshotSchema = new Schema({
+	id: {
+		type: Number,
+		required: true,
+		unique: true
+	},
+	sheet: String,
+	row_index: Number,
+	data_json: String,
+	imported_at: String,
+	updated_at: String,
+	synced: Number
+}, sharedOptions);
+var ImportedSnapshotModel = mongoose.models["sync_imported_snapshots"] || mongoose.model("sync_imported_snapshots", importedSnapshotSchema);
 var SYNC_ENTITIES = [
 	{
 		name: "children",
@@ -11694,6 +11755,11 @@ var SYNC_ENTITIES = [
 		name: "settings",
 		model: SettingModel,
 		table: "settings"
+	},
+	{
+		name: "imported_snapshots",
+		model: ImportedSnapshotModel,
+		table: "imported_snapshots"
 	},
 	{
 		name: "tombstones",
@@ -11793,7 +11859,7 @@ ipcMain.handle("sync:status", async () => {
 * sync:push — Push all unsynced records to MongoDB.
 * Admin only. Graceful: reports pushed/failed counts per entity.
 */
-ipcMain.handle("sync:push", async () => {
+ipcMain.handle("sync:push", async (event) => {
 	try {
 		requireAdmin();
 		const db = getDb();
@@ -11805,45 +11871,58 @@ ipcMain.handle("sync:push", async () => {
 		}
 		const results = {};
 		const now = (/* @__PURE__ */ new Date()).toISOString();
+		const report = progressReporter(event, "push");
+		let totalWork = 0;
+		for (const entity of SYNC_ENTITIES) {
+			let cq = `SELECT COUNT(*) AS c FROM ${entity.table} WHERE synced = 0`;
+			if (entity.name === "settings") cq += " AND key != 'sync_mongo_uri'";
+			totalWork += db.prepare(cq).get()?.c ?? 0;
+		}
+		let done = 0;
+		report(0, totalWork, "starting");
 		for (const entity of SYNC_ENTITIES) {
 			let query = `SELECT * FROM ${entity.table} WHERE synced = 0`;
 			if (entity.name === "settings") query += ` AND key != 'sync_mongo_uri'`;
 			const unsynced = db.prepare(query).all();
 			let pushed = 0;
 			let failed = 0;
-			for (const record of unsynced) try {
-				if (entity.name === "settings") {
-					await entity.model.findOneAndUpdate({ id: record.key }, {
-						...record,
-						id: record.key,
-						updated_at: record.updated_at || now
-					}, {
-						upsert: true,
-						returnDocument: "after"
-					});
-					db.prepare(`UPDATE ${entity.table} SET synced = 1 WHERE key = ?`).run(record.key);
-					logSync("push", entity.name, record.key, "success");
-				} else {
-					await entity.model.findOneAndUpdate({ id: record.id }, {
-						...record,
-						updated_at: record.updated_at || now
-					}, {
-						upsert: true,
-						returnDocument: "after"
-					});
-					db.prepare(`UPDATE ${entity.table} SET synced = 1 WHERE id = ?`).run(record.id);
-					logSync("push", entity.name, record.id, "success");
+			for (const record of unsynced) {
+				try {
+					if (entity.name === "settings") {
+						await entity.model.findOneAndUpdate({ id: record.key }, {
+							...record,
+							id: record.key,
+							updated_at: record.updated_at || now
+						}, {
+							upsert: true,
+							returnDocument: "after"
+						});
+						db.prepare(`UPDATE ${entity.table} SET synced = 1 WHERE key = ?`).run(record.key);
+						logSync("push", entity.name, record.key, "success");
+					} else {
+						await entity.model.findOneAndUpdate({ id: record.id }, {
+							...record,
+							updated_at: record.updated_at || now
+						}, {
+							upsert: true,
+							returnDocument: "after"
+						});
+						db.prepare(`UPDATE ${entity.table} SET synced = 1 WHERE id = ?`).run(record.id);
+						logSync("push", entity.name, record.id, "success");
+					}
+					pushed++;
+				} catch (err) {
+					logSync("push", entity.name, record.id, "error", err.message);
+					failed++;
 				}
-				pushed++;
-			} catch (err) {
-				logSync("push", entity.name, record.id, "error", err.message);
-				failed++;
+				report(++done, totalWork, entity.name);
 			}
 			results[entity.name] = {
 				pushed,
 				failed
 			};
 		}
+		report(totalWork, totalWork, "done");
 		return { results };
 	} catch (error) {
 		logSync("push", "all", "batch", "error", error.message);
@@ -11856,7 +11935,7 @@ ipcMain.handle("sync:push", async () => {
 * Applies conflict resolution (most-recent updated_at wins, id tie-break).
 * Admin only.
 */
-ipcMain.handle("sync:pull", async () => {
+ipcMain.handle("sync:pull", async (event) => {
 	try {
 		requireAdmin();
 		const db = getDb();
@@ -11866,6 +11945,13 @@ ipcMain.handle("sync:pull", async () => {
 			if (!mongoUri) throw new Error("No MongoDB URI configured.");
 			await connectMongo(mongoUri);
 		}
+		const report = progressReporter(event, "pull");
+		let totalWork = 0;
+		for (const entity of SYNC_ENTITIES) try {
+			totalWork += await entity.model.estimatedDocumentCount();
+		} catch {}
+		let done = 0;
+		report(0, totalWork, "starting");
 		const results = {};
 		for (const entity of SYNC_ENTITIES) {
 			let pulled = 0;
@@ -11940,6 +12026,7 @@ ipcMain.handle("sync:pull", async () => {
 							failed++;
 						}
 					}
+					report(++done, totalWork, entity.name);
 				}
 			} catch (err) {
 				logSync("pull", entity.name, "batch", "error", err.message);
@@ -11960,6 +12047,7 @@ ipcMain.handle("sync:pull", async () => {
 				errors
 			};
 		}
+		report(totalWork, totalWork, "done");
 		return { results };
 	} catch (error) {
 		logSync("pull", "all", "batch", "error", error.message);

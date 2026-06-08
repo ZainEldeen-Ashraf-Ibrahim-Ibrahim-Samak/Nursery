@@ -37,6 +37,8 @@ export interface ImportSummary {
   employees: EntityCount
   salaryPayments: EntityCount
   expenses: EntityCount
+  settings: EntityCount
+  snapshots: EntityCount
   sheetsProcessed: string[]
   sheetsIgnored: string[]
   year: number
@@ -183,6 +185,23 @@ function isExpensesSheet(name: string): boolean {
   return name.includes('مصروف') || name.toLowerCase().includes('expense')
 }
 
+// Previously-ignored sheets, now imported (FR-023).
+function isSettingsSheet(name: string): boolean {
+  return name.includes('إعداد') || name.includes('الإعداد') || name.toLowerCase().includes('setting')
+}
+
+function isTargetSheet(name: string): boolean {
+  return name.includes('تخطيط') || name.includes('تارجت') || name.toLowerCase().includes('target')
+}
+
+function isDashboardSheet(name: string): boolean {
+  return name.includes('داشبورد') || name.toLowerCase().includes('dashboard')
+}
+
+function isStatementSheet(name: string): boolean {
+  return name.includes('كشف حساب') || name.toLowerCase().includes('statement')
+}
+
 function monthOfSheet(name: string): number {
   return ARABIC_MONTHS.findIndex((m) => name.includes(m))
 }
@@ -205,7 +224,10 @@ function dataRows(sheet: ExcelJS.Worksheet): ExcelJS.Row[] {
 
 // ── Main import ───────────────────────────────────────────────────────────────
 
-export async function importFromWorkbook(filePath: string): Promise<ImportSummary> {
+export async function importFromWorkbook(
+  filePath: string,
+  onProgress?: (current: number, total: number, phase?: string) => void
+): Promise<ImportSummary> {
   const db = getDb()
   const workbook = new ExcelJS.Workbook()
   await workbook.xlsx.readFile(filePath)
@@ -213,12 +235,20 @@ export async function importFromWorkbook(filePath: string): Promise<ImportSummar
   const year = resolveImportYear()
   const now = new Date().toISOString()
 
+  // Progress is tracked per worksheet so the renderer can show a real bar.
+  const totalSheets = Math.max(1, workbook.worksheets.length)
+  let sheetsDone = 0
+  const tick = (phase: string) => onProgress?.(++sheetsDone, totalSheets, phase)
+  onProgress?.(0, totalSheets, 'starting')
+
   const summary: ImportSummary = {
     children: { imported: 0, skipped: 0 },
     payments: { imported: 0, skipped: 0 },
     employees: { imported: 0, skipped: 0 },
     salaryPayments: { imported: 0, skipped: 0 },
     expenses: { imported: 0, skipped: 0 },
+    settings: { imported: 0, skipped: 0 },
+    snapshots: { imported: 0, skipped: 0 },
     sheetsProcessed: [],
     sheetsIgnored: [],
     year,
@@ -289,6 +319,26 @@ export async function importFromWorkbook(filePath: string): Promise<ImportSummar
     VALUES (?, ?, ?, ?, NULL, NULL, ?, 0)
     ON CONFLICT(item, month, year) DO NOTHING
   `)
+  // Settings upsert — bump updated_at and reset synced so the change propagates.
+  // Device-local keys (e.g. the connection string) are never written by import.
+  const SETTINGS_IMPORT_DENYLIST = new Set(['sync_mongo_uri'])
+  const upsertSetting = db.prepare(`
+    INSERT INTO settings (key, value, updated_at, synced)
+    VALUES (?, ?, ?, 0)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at, synced = 0
+  `)
+  function setSetting(key: string, value: string | number): void {
+    if (SETTINGS_IMPORT_DENYLIST.has(key)) return
+    upsertSetting.run(key, String(value), now)
+    summary.settings.imported++
+  }
+  // Generic snapshot upsert for non-relational sheets (dashboard, statement).
+  const upsertSnapshot = db.prepare(`
+    INSERT INTO imported_snapshots (sheet, row_index, data_json, imported_at, updated_at, synced)
+    VALUES (?, ?, ?, ?, ?, 0)
+    ON CONFLICT(sheet, row_index) DO UPDATE SET
+      data_json = excluded.data_json, updated_at = excluded.updated_at, synced = 0
+  `)
 
   /** Ensure a child row exists for `name`; return its id (creating a placeholder). */
   function ensureChild(name: string, opts: {
@@ -345,12 +395,15 @@ export async function importFromWorkbook(filePath: string): Promise<ImportSummar
       }
     })
     importChildren()
+    tick(childSheet.name)
   }
 
   // ── 2. Monthly payment sheets ───────────────────────────────────────────────
   for (const ws of workbook.worksheets) {
     if (isIgnoredSheet(ws.name) || isChildrenSheet(ws.name) ||
-        isSalarySheet(ws.name) || isExpensesSheet(ws.name)) continue
+        isSalarySheet(ws.name) || isExpensesSheet(ws.name) ||
+        isSettingsSheet(ws.name) || isTargetSheet(ws.name) ||
+        isDashboardSheet(ws.name) || isStatementSheet(ws.name)) continue
     const monthIdx = monthOfSheet(ws.name)
     if (monthIdx < 0) continue
 
@@ -395,6 +448,7 @@ export async function importFromWorkbook(filePath: string): Promise<ImportSummar
       }
     })
     importMonth()
+    tick(ws.name)
   }
 
   // ── 3. Employees + salary payments ──────────────────────────────────────────
@@ -447,6 +501,7 @@ export async function importFromWorkbook(filePath: string): Promise<ImportSummar
       }
     })
     importSalaries()
+    tick(salarySheet.name)
   }
 
   // ── 4. Expenses ─────────────────────────────────────────────────────────────
@@ -472,12 +527,87 @@ export async function importFromWorkbook(filePath: string): Promise<ImportSummar
       }
     })
     importExpenses()
+    tick(expensesSheet.name)
   }
+
+  // ── 5. Settings (⚙️ الإعدادات) ──────────────────────────────────────────────
+  // Pricing/profit table: col B(2)=label, C(3)=hourly, D(4)=daily, E(5)=monthly.
+  // Map the recognized rows to the setting keys the app/targets module consume.
+  const settingsSheet = workbook.worksheets.find((ws) => isSettingsSheet(ws.name))
+  if (settingsSheet) {
+    summary.sheetsProcessed.push(settingsSheet.name)
+    const importSettings = db.transaction(() => {
+      settingsSheet.eachRow({ includeEmpty: false }, (row, r) => {
+        try {
+          const label = toStr(cellAt(row, 2))
+          if (!label) return
+          const hourly = toNum(cellAt(row, 3))
+          const monthly = toNum(cellAt(row, 5))
+          // The sheet repeats the service labels in a second, formula-driven block
+          // whose cells have no cached result (resolve to 0). Only write positive
+          // values so those resultless rows never clobber the real input prices.
+          if (label.includes('حضانة')) { if (monthly > 0) setSetting('nursery_monthly', monthly) }
+          else if (label.includes('استضافة')) { if (monthly > 0) setSetting('hosting_monthly', monthly) }
+          else if (label.includes('جلسة')) { if (hourly > 0) setSetting('session_hourly', hourly) }
+          else if (label.includes('نسبة الربح')) { if (hourly > 0) setSetting('target_profit_pct', hourly) }
+        } catch (err) {
+          recordRowError(settingsSheet.name, r, '', err)
+        }
+      })
+    })
+    importSettings()
+    tick(settingsSheet.name)
+  }
+
+  // ── 6. Target Planning (🎯 تخطيط التارجت) ────────────────────────────────────
+  // The targets module is derived from settings; the only durable config here is
+  // the profit ratio (col E(5)=نسبة الربح on the monthly rows). Persist it as a setting.
+  const targetSheet = workbook.worksheets.find((ws) => isTargetSheet(ws.name))
+  if (targetSheet) {
+    summary.sheetsProcessed.push(targetSheet.name)
+    const importTarget = db.transaction(() => {
+      for (const row of dataRows(targetSheet)) {
+        const pct = toNum(cellAt(row, 5))
+        if (pct > 0 && pct < 1) { setSetting('target_profit_pct', pct); break }
+      }
+    })
+    importTarget()
+    tick(targetSheet.name)
+  }
+
+  // ── 7. Dashboard & Account Statement snapshots ──────────────────────────────
+  // Non-relational aggregate sheets: persist each populated row verbatim as a
+  // snapshot. The live dashboard/statement views keep recomputing (spec edge case).
+  const colCount = (ws: ExcelJS.Worksheet) => Math.max(1, ws.columnCount)
+  function snapshotSheet(ws: ExcelJS.Worksheet): void {
+    summary.sheetsProcessed.push(ws.name)
+    const cols = colCount(ws)
+    const run = db.transaction(() => {
+      ws.eachRow({ includeEmpty: false }, (row, r) => {
+        try {
+          const values: unknown[] = []
+          for (let c = 1; c <= cols; c++) values.push(resolveCellValue(row.getCell(c).value) ?? null)
+          if (values.every((v) => v === null || v === '')) return
+          upsertSnapshot.run(ws.name, r, JSON.stringify(values), now, now)
+          summary.snapshots.imported++
+        } catch (err) {
+          recordRowError(ws.name, r, '', err)
+        }
+      })
+    })
+    run()
+    tick(ws.name)
+  }
+  const dashboardSheet = workbook.worksheets.find((ws) => isDashboardSheet(ws.name))
+  if (dashboardSheet) snapshotSheet(dashboardSheet)
+  const statementSheet = workbook.worksheets.find((ws) => isStatementSheet(ws.name))
+  if (statementSheet) snapshotSheet(statementSheet)
 
   // Record ignored sheets for the summary.
   summary.sheetsIgnored = workbook.worksheets
     .map((ws) => ws.name)
     .filter((n) => !summary.sheetsProcessed.includes(n))
 
+  onProgress?.(totalSheets, totalSheets, 'done')
   return summary
 }

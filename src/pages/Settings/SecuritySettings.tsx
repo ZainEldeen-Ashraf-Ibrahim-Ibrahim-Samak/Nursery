@@ -170,7 +170,7 @@ export default function SecuritySettings() {
           </div>
         </div>
 
-        <Button onClick={handleChangePassword} disabled={pwSaving}>
+        <Button onClick={handleChangePassword} disabled={pwSaving} className="w-full sm:w-auto mt-2">
           {pwSaving ? (isAr ? 'جارٍ الحفظ...' : 'Saving...') : isAr ? 'تغيير كلمة المرور' : 'Change Password'}
         </Button>
       </Card>

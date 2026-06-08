@@ -3,6 +3,7 @@ import path from 'node:path'
 import fs from 'node:fs'
 import { getDb, closeDb, initDb } from '../db/connection.js'
 import { requireAdmin } from './_guard.js'
+import { progressReporter } from './progress.js'
 
 /**
  * storage:stats
@@ -46,10 +47,11 @@ ipcMain.handle('storage:stats', async () => {
  * Opens a save dialog and copies the current DB file to the chosen path.
  * Admin only.
  */
-ipcMain.handle('storage:backup', async () => {
+ipcMain.handle('storage:backup', async (event) => {
   try {
     requireAdmin()
 
+    const report = progressReporter(event, 'backup')
     const dbPath = path.join(app.getPath('userData'), 'nursery.db')
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
 
@@ -62,7 +64,14 @@ ipcMain.handle('storage:backup', async () => {
       throw new Error('Backup cancelled')
     }
 
+    // Fold committed WAL pages into the .db file so the copy is complete
+    // (the DB runs in WAL mode; recent commits may live in nursery.db-wal).
+    report(1, 3, 'checkpoint')
+    getDb().checkpoint()
+
+    report(2, 3, 'copying')
     fs.copyFileSync(dbPath, result.filePath)
+    report(3, 3, 'done')
     return { path: result.filePath }
   } catch (error: any) {
     console.error('storage:backup error:', error)
@@ -75,10 +84,11 @@ ipcMain.handle('storage:backup', async () => {
  * Opens a file picker and replaces the current DB with the selected backup.
  * Admin only.
  */
-ipcMain.handle('storage:restore', async (_event, { path: restorePath }) => {
+ipcMain.handle('storage:restore', async (event, { path: restorePath }) => {
   try {
     requireAdmin()
 
+    const report = progressReporter(event, 'restore')
     let sourcePath = restorePath
 
     if (!sourcePath) {
@@ -101,13 +111,16 @@ ipcMain.handle('storage:restore', async (_event, { path: restorePath }) => {
     const dbPath = path.join(app.getPath('userData'), 'nursery.db')
 
     // Create a current backup before restoring
+    report(1, 3, 'safety backup')
     const backupPath = `${dbPath}.pre-restore-${Date.now()}.bak`
     fs.copyFileSync(dbPath, backupPath)
 
     // Close current DB, copy backup over, reopen
+    report(2, 3, 'restoring')
     closeDb()
     fs.copyFileSync(sourcePath, dbPath)
     initDb()
+    report(3, 3, 'done')
 
     return { ok: true, restoredFrom: sourcePath }
   } catch (error: any) {
@@ -121,7 +134,7 @@ ipcMain.handle('storage:restore', async (_event, { path: restorePath }) => {
  * Opens an Excel workbook file picker and imports data from the original workbook format.
  * Admin only.
  */
-ipcMain.handle('storage:import', async (_event, args) => {
+ipcMain.handle('storage:import', async (event, args) => {
   try {
     requireAdmin()
 
@@ -142,7 +155,7 @@ ipcMain.handle('storage:import', async (_event, args) => {
 
     // Dynamic import to avoid circular dependencies
     const { importFromWorkbook } = await import('../services/importService.js')
-    const summary = await importFromWorkbook(filePath)
+    const summary = await importFromWorkbook(filePath, progressReporter(event, 'import'))
 
     return { imported: summary }
   } catch (error: any) {

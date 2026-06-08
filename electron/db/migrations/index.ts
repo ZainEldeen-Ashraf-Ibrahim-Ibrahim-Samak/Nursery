@@ -307,6 +307,26 @@ const migrations: Migration[] = [
         WHERE service_id IS NULL;
       `)
     }
+  },
+  {
+    name: '010_imported_snapshots',
+    up: (db) => {
+      // Generic snapshot store for non-relational workbook sheets imported verbatim
+      // (📊 داشبورد، 📄 كشف حساب). These are snapshots only — the live dashboard and
+      // statement views keep recomputing from source data and are not driven by this table.
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS imported_snapshots (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          sheet TEXT NOT NULL,
+          row_index INTEGER NOT NULL,
+          data_json TEXT NOT NULL,
+          imported_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          synced INTEGER DEFAULT 0,
+          UNIQUE(sheet, row_index)
+        );
+      `)
+    }
   }
 ]
 

@@ -37,6 +37,18 @@ export class Db {
     this.raw.exec(sql)
   }
 
+  /**
+   * Fold all committed WAL pages back into the main `.db` file so a plain
+   * file copy (backup) is complete. Safe to call any time; ignored on error.
+   */
+  checkpoint(): void {
+    try {
+      this.raw.exec('PRAGMA wal_checkpoint(TRUNCATE)')
+    } catch {
+      // Best-effort; a failed checkpoint must not block a backup.
+    }
+  }
+
   /** Mirror better-sqlite3's `pragma('key = value')` via an exec'd PRAGMA statement. */
   pragma(statement: string): void {
     this.raw.exec(`PRAGMA ${statement}`)

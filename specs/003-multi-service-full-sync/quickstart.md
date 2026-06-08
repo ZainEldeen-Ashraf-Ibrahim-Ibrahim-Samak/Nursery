@@ -10,7 +10,7 @@ npm run dev          # Vite + Electron in watch mode
 npm run build
 ```
 
-On first launch after pulling this branch, the migration runner applies `004`–`007` automatically (logged to the main-process console). Existing single-service children are backfilled into one `child_services` enrollment each; existing payments are linked to that enrollment.
+On first launch after pulling this branch, the migration runner applies `004`–`010` automatically (logged to the main-process console). Existing single-service children are backfilled into one `child_services` enrollment each; existing payments are linked to that enrollment; and `010_imported_snapshots` adds the snapshot table used by full-workbook import.
 
 ## Verify multi-service enrollment (User Story 1)
 
@@ -43,6 +43,16 @@ Use two app instances pointed at separate local DBs but the **same** MongoDB URI
    - Expect: a clear failure message; local data unchanged.
 
 \* `sync_mongo_uri` is intentionally **not** synced, so each device keeps its own connection string.
+
+## Verify full-workbook import + backup round-trip (User Story 3)
+
+1. Log in as **admin** → **Storage → Import from Excel**, select `Nursery_V4_Final_5.xlsx`.
+   - Expect: import completes with **0 row errors** (the "Why rows failed" section is empty), and the summary shows data for **all** sheets — including ⚙️ الإعدادات، 🎯 تخطيط التارجت، 📊 داشبورد، 📄 كشف حساب — with **no** "Ignored sheets" line for those four.
+2. Check that target config took effect: open **Target Planning** and confirm the profit % / pricing reflect the imported values (they are read from `settings`).
+3. **Storage → Backup**, save the `.db` file. Then **Storage → Restore** that same file.
+   - Expect: every table's record count is **identical** before and after (round-trip), and the app is fully usable after restore.
+4. Configure cloud sync and **Push**, then **Pull** on a second device.
+   - Expect: imported settings, target config, and dashboard/statement snapshots all appear on the second device.
 
 ## Automated checks
 

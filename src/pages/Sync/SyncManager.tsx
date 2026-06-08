@@ -6,6 +6,8 @@ import { Button } from '../../components/ui/Button.js'
 import { Alert } from '../../components/ui/Alert.js'
 import { Badge } from '../../components/ui/Badge.js'
 import { Input } from '../../components/ui/Input.js'
+import { ProgressBar } from '../../components/ui/ProgressBar.js'
+import { useProgress } from '../../hooks/useProgress.js'
 
 export default function SyncManager() {
   const { i18n } = useTranslation()
@@ -32,6 +34,10 @@ export default function SyncManager() {
 
   const [mongoUri, setMongoUri] = useState('')
   const [autoInterval, setAutoInterval] = useState('30')
+  const { get: getProgress, reset: resetProgress } = useProgress()
+
+  const handlePush = () => { resetProgress('push'); push() }
+  const handlePull = () => { resetProgress('pull'); pull() }
 
   useEffect(() => {
     fetchStatus()
@@ -183,13 +189,24 @@ export default function SyncManager() {
 
           <Button
             variant="primary"
-            onClick={push}
+            onClick={handlePush}
             isLoading={isPushing}
             disabled={!isConnected}
             className="w-full"
           >
             ⬆️ {isAr ? 'رفع البيانات' : 'Push Data'}
           </Button>
+
+          {isPushing && (() => {
+            const p = getProgress('push')
+            return (
+              <ProgressBar
+                percent={p.percent}
+                label={isAr ? 'جارٍ الرفع...' : 'Pushing...'}
+                detail={p.total > 0 ? `${p.current}/${p.total}` : undefined}
+              />
+            )
+          })()}
 
           {lastPushResults && (
             <div className="bg-emerald-50 rounded-xl p-3 space-y-1 text-xs">
@@ -228,13 +245,24 @@ export default function SyncManager() {
 
           <Button
             variant="outline"
-            onClick={pull}
+            onClick={handlePull}
             isLoading={isPulling}
             disabled={!isConnected}
             className="w-full"
           >
             ⬇️ {isAr ? 'سحب البيانات' : 'Pull Data'}
           </Button>
+
+          {isPulling && (() => {
+            const p = getProgress('pull')
+            return (
+              <ProgressBar
+                percent={p.percent}
+                label={isAr ? 'جارٍ السحب...' : 'Pulling...'}
+                detail={p.total > 0 ? `${p.current}/${p.total}` : undefined}
+              />
+            )
+          })()}
 
           {lastPullResults && (
             <div className="bg-blue-50 rounded-xl p-3 space-y-1 text-xs">

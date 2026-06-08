@@ -257,6 +257,21 @@ const expenseSchema = new Schema({
 export const ExpenseModel: Model<any> = mongoose.models['sync_expenses'] ||
   mongoose.model('sync_expenses', expenseSchema)
 
+// ── Imported Snapshots (dashboard / statement raw rows) ────────────────────────
+
+const importedSnapshotSchema = new Schema({
+  id: { type: Number, required: true, unique: true },
+  sheet: String,
+  row_index: Number,
+  data_json: String,
+  imported_at: String,
+  updated_at: String,
+  synced: Number
+}, sharedOptions)
+
+export const ImportedSnapshotModel: Model<any> = mongoose.models['sync_imported_snapshots'] ||
+  mongoose.model('sync_imported_snapshots', importedSnapshotSchema)
+
 // ── Entity registry ───────────────────────────────────────────────────────────
 
 export const SYNC_ENTITIES: {
@@ -272,5 +287,6 @@ export const SYNC_ENTITIES: {
   { name: 'expenses', model: ExpenseModel, table: 'expenses' },
   { name: 'users', model: UserModel, table: 'users' },
   { name: 'settings', model: SettingModel, table: 'settings' },
+  { name: 'imported_snapshots', model: ImportedSnapshotModel, table: 'imported_snapshots' },
   { name: 'tombstones', model: TombstoneModel, table: 'tombstones' }
 ]

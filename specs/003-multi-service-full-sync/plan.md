@@ -6,12 +6,15 @@
 
 ## Summary
 
-Two enhancements to the existing Nursery & Autism Center Management System:
+Three enhancements to the existing Nursery & Autism Center Management System:
 
 1. **Multi-service enrollment** — a child may be enrolled in more than one service at once, each service carrying its own unit/quantity/price. The monthly payment sheet bills one line per enrolled service, statuses roll up per child, and statements/dashboard/exports become service-aware.
 2. **Full-database synchronization** — a sync reconciles the *entire* local SQLite database (all data types, now including service enrollments, users, and settings) with the MongoDB cloud target, propagates deletions via tombstones, and converges every device on the same complete data set.
+3. **Full-workbook import + backup round-trip** — the importer ingests **every** sheet of `Nursery_V4_Final_5.xlsx`, including the four previously *ignored* sheets (📊 داشبورد، ⚙️ الإعدادات، 📄 كشف حساب، 🎯 تخطيط التارجت), with **zero row errors**; the imported data joins the full sync; and a local backup→restore reproduces every table identically.
 
 **Technical approach**: Extend the established Electron main-process data layer rather than introduce new architecture. Add a `child_services` (service enrollment) table and re-key `payments` on `(child_id, service_id, month, year)`; backfill existing single-service children into one enrollment each via a versioned migration. Make `payments:generate` iterate a child's active enrollments. Add a derived per-child status roll-up in `payments:get` (each line keeps its own status). For sync, add a uniform `tombstones` table and a `sync_tombstones` Mongo collection so hard deletes propagate; extend `SYNC_ENTITIES` to include `child_services`, `users`, and `settings`; and make auto-sync run a full push+pull reconciliation. Per-record merge with most-recent-change-wins already exists and is reused.
+
+For the **full-workbook import**, stop treating the four sheets as ignored and route each to the right store: **Settings (⚙️ الإعدادات)** upserts into the existing `settings` table; **Target Planning (🎯 تخطيط التارجت)** writes the planning/pricing **settings keys** the existing *derived* targets module already reads (`target_profit_pct`, `nursery_monthly`, …) — there is no `targets` table, targets are computed on read, so "reuse the targets module" means feeding its settings inputs. **Dashboard (📊 داشبورد)** and **Account Statement (📄 كشف حساب)** are non-relational aggregate sheets, so their rows are captured verbatim in one generic `imported_snapshots` table (`sheet`, `row_index`, `data_json`) as snapshots that do **not** override the live recomputed views (spec edge case). `imported_snapshots` joins `SYNC_ENTITIES` (+ tombstones) so it propagates like every other entity. Backup stays a whole-file SQLite copy (which already round-trips any new table) but gains a **WAL checkpoint** before copy so no committed pages are stranded in the `-wal` file. The per-row error reporting already added to `importService` makes the zero-row-error target verifiable.
 
 ## Technical Context
 
@@ -21,7 +24,7 @@ Two enhancements to the existing Nursery & Autism Center Management System:
 
 **Storage**: Local SQLite file (`node:sqlite`) as system of record; MongoDB Atlas as the cloud reconciliation target. Integer SQLite `id` is reused as the Mongo `_id`/identity for deterministic conflict resolution (existing convention in `mongoSync.ts`).
 
-**Testing**: Vitest for main-process business logic — payment calc (unchanged), new per-child status roll-up, migration backfill correctness, and sync reconciliation (conflict + tombstone application). Playwright smoke flow for: add multi-service child → generate month → record per-service payments. Contract check that the new/changed IPC surface matches the documented contract.
+**Testing**: Vitest for main-process business logic — payment calc (unchanged), new per-child status roll-up, migration backfill correctness, sync reconciliation (conflict + tombstone application), **full-workbook import of `Nursery_V4_Final_5.xlsx` asserting zero `rowErrors` and that all four formerly-ignored sheets are persisted (SC-009)**, and a **backup→restore round-trip asserting identical per-table counts (SC-010)**. Playwright smoke flow for: add multi-service child → generate month → record per-service payments. Contract check that the new/changed IPC surface matches the documented contract.
 
 **Target Platform**: Windows 11 primary; cross-platform packaging via electron-builder (Windows/.exe, macOS/.dmg, Linux).
 
@@ -44,7 +47,7 @@ Self-imposed guardrails (carried from feature 001, still honored here):
 - **No volatile storage**: all persistent data in SQLite, never `localStorage`.
 - **Security defaults**: context isolation on, node integration off; passwords stay hashed (the `users` rows added to sync carry already-hashed passwords); sync/admin IPC handlers re-check role.
 - **Backward-compatible migrations**: new tables/columns added via the existing versioned migration runner; existing data backfilled, never dropped.
-- **Simplicity / YAGNI**: reuse the existing per-record merge engine; add the *minimum* (one enrollment table, one tombstones table, three new sync entities) rather than a new sync framework.
+- **Simplicity / YAGNI**: reuse the existing per-record merge engine; add the *minimum* (one enrollment table, one tombstones table, plus a single generic `imported_snapshots` table instead of three sheet-specific tables) rather than a new sync framework. Targets/dashboard/statement stay **derived** for display — imported rows are snapshots only, never a second source of truth.
 
 **Gate result**: PASS (no violations; Complexity Tracking left empty).
 
@@ -73,15 +76,20 @@ electron/
 │   └── migrations/
 │       └── index.ts             # ADD migrations: 004_child_services (+ backfill),
 │                                #   005_payments_service_id (rebuild + re-key uniqueness),
-│                                #   006_tombstones, 007_settings_sync_columns
+│                                #   006_tombstones, 007_settings_sync_columns,
+│                                #   008_users_sync_columns, 009_backfill_missing_child_services,
+│                                #   010_imported_snapshots (NEW: generic sheet-snapshot table)
 ├── ipc/
 │   ├── childrenIPC.ts           # child add/update now manages 1..N service enrollments
 │   ├── childServicesIPC.ts      # NEW: list/add/remove a child's service enrollments
 │   ├── paymentsIPC.ts           # generate one row per active enrollment; get returns per-child status roll-up
-│   └── syncIPC.ts               # push/pull tombstones; full push+pull auto-sync
+│   ├── syncIPC.ts               # push/pull tombstones; full push+pull auto-sync; +imported_snapshots
+│   └── storageIPC.ts            # backup checkpoints WAL before copy (round-trip guarantee)
 ├── services/
-│   └── mongoSync.ts             # ADD ChildServiceModel, UserModel, SettingModel, TombstoneModel;
-│                                #   extend SYNC_ENTITIES
+│   ├── importService.ts         # stop ignoring the 4 sheets: Settings→settings,
+│   │                            #   Target→settings keys, Dashboard/Statement→imported_snapshots
+│   └── mongoSync.ts             # ADD ChildServiceModel, UserModel, SettingModel, TombstoneModel,
+│                                #   ImportedSnapshotModel; extend SYNC_ENTITIES
 └── preload.ts                   # expose new childServices.* methods on window.api
 
 src/
@@ -91,7 +99,8 @@ src/
 └── store/                       # children/payments stores updated for the new shapes
 
 tests/
-├── unit/                        # vitest: status roll-up, migration backfill, tombstone reconciliation
+├── unit/                        # vitest: status roll-up, migration backfill, tombstone reconciliation,
+│                                #   full-workbook import (zero rowErrors), backup→restore round-trip
 └── e2e/                         # playwright: multi-service child → generate → per-service pay
 ```
 

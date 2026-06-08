@@ -15,6 +15,10 @@
 - Q: When a device syncs, how should the complete data set be reconciled across all devices? → A: Per-record merge — each record reconciled by version/last-modified time with most-recent-change-wins on the same record, and deletions tracked via tombstones, so concurrent edits to different records are all preserved.
 - Q: When an admin removes a service from a child, what should happen to that enrollment? → A: Hard delete — the enrollment row is removed and a tombstone propagates the deletion to other devices; previously recorded payment lines for that service are retained in history.
 - Q: How should a multi-service child's overall monthly payment status be displayed when their services differ? → A: Derived roll-up — "paid" only when all service lines are paid, "partial" when some are paid/owed, "unpaid" when none are paid; each service line still keeps its own status.
+- Q: Which of the currently ignored workbook sheets (📊 داشبورد، ⚙️ الإعدادات، 📄 كشف حساب، 🎯 تخطيط التارجت) should the importer load as stored records? → A: All four — every sheet in Nursery_V4_Final_5.xlsx is imported and persisted as records, including Dashboard and Account Statement.
+- Q: Where should Target Planning (🎯 تخطيط التارجت) data be stored on import? → A: The existing targets table/module (targetIPC), reusing its schema rather than a new entity.
+- Q: Should the newly imported data (settings, targets, dashboard, account statement) participate in the full-database sync? → A: Yes — added to the synced entity set so it pushes/pulls, resolves conflicts, and propagates deletions via tombstones like every other entity.
+- Q: What defines a "successful" import of Nursery_V4_Final_5.xlsx for backup/restore acceptance? → A: Import completes with zero row errors across all sheets, and a local backup→restore round-trips every table identically.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -66,6 +70,8 @@ An administrator works on more than one device. When they trigger a sync (manual
 - What happens when a large local database is synced for the first time to a fresh device? (The full data set transfers and the device converges to the complete state; progress/outcome is reported.)
 - How does the system handle a sync interrupted partway (connection drops mid-transfer)? (The data set converges on the next successful sync; no partial state is treated as final.)
 - What happens when a record exists in the cloud but its referenced parent (e.g., a service line whose child) has not yet arrived locally? (Relationships are preserved so dependent records are applied consistently, not orphaned.)
+- What happens when an imported Dashboard or Account Statement row (a stored aggregate) disagrees with values recomputed from children/payments? (The imported rows are persisted and synced as-is; recomputed views remain the live source for display, and the stored import is treated as a snapshot, not overriding live calculations.)
+- What happens when the workbook contains a sheet or row that cannot be mapped to a table? (The import surfaces a specific reason for that row/sheet rather than silently skipping it, so the zero-row-error target is verifiable.)
 
 ## Requirements *(mandatory)*
 
@@ -88,7 +94,7 @@ An administrator works on more than one device. When they trigger a sync (manual
 
 **Full-Database Synchronization**
 
-- **FR-012**: System MUST, on a sync, reconcile the entire local database across all data types (children, service enrollments, payments, salaries and salary payments, expenses, settings, and users) rather than a partial subset.
+- **FR-012**: System MUST, on a sync, reconcile the entire local database across all data types (children, service enrollments, payments, salaries and salary payments, expenses, settings, users, targets, dashboard records, and account-statement records) rather than a partial subset.
 - **FR-013**: System MUST upload all local changes since the last successful sync to the cloud when an administrator pushes or an automatic sync runs.
 - **FR-014**: System MUST apply all cloud changes to the local database when a device syncs, so the device converges to the complete, current data set.
 - **FR-015**: System MUST ensure that any two devices which have each completed a sync converge to the same complete set of records for every data type.
@@ -101,12 +107,24 @@ An administrator works on more than one device. When they trigger a sync (manual
 - **FR-021**: System MUST fail synchronization gracefully when the cloud is unreachable, leaving local data intact and reporting the failure.
 - **FR-022**: System MUST restrict synchronization controls to administrators.
 
+**Full-Workbook Import & Backup Round-Trip**
+
+- **FR-023**: System MUST import **every** sheet of the reference workbook `Nursery_V4_Final_5.xlsx`, including the sheets previously ignored — 📊 داشبورد (Dashboard), ⚙️ الإعدادات (Settings), 📄 كشف حساب (Account Statement), and 🎯 تخطيط التارجت (Target Planning) — and persist each as stored records rather than skipping them.
+- **FR-024**: System MUST import Target Planning (🎯 تخطيط التارجت) rows into the existing targets table/module, reusing its schema and validation rather than introducing a parallel structure.
+- **FR-025**: System MUST import Settings (⚙️ الإعدادات) into the settings store, and Dashboard (📊 داشبورد) and Account Statement (📄 كشف حساب) into dedicated storage so their imported rows are retained.
+- **FR-026**: System MUST complete an import of `Nursery_V4_Final_5.xlsx` with **zero row errors** across all sheets; any row that cannot be applied MUST surface a specific, actionable reason rather than being silently dropped.
+- **FR-027**: System MUST include the newly imported data types (settings, targets, dashboard, account statement) in the full-database synchronization (FR-012) so they push, pull, resolve conflicts, and propagate deletions via tombstones identically to the other entities.
+- **FR-028**: System MUST ensure a local backup captures all data tables and that restoring that backup reproduces every table identically (a verifiable round-trip), with the full system — including the newly imported sheets — usable after restore.
+
 ### Key Entities *(include if feature involves data)*
 
 - **Child**: An enrolled child (as defined in the base system) now associated with one or more service enrollments instead of a single service. Core attributes unchanged: name, guardian, contact details, national ID, registration date, notes, active flag.
 - **Service Enrollment**: A link between a child and a single service the child attends, carrying the per-service billing details (service, unit, quantity basis, price, active flag). A child has one or more of these; each is unique per service for that child.
 - **Payment Line**: A monthly billing record now scoped to a child's specific service enrollment rather than the child as a whole. Attributes: associated child, associated service enrollment, month, year, unit, quantity, price, total, paid, balance, status. The child's monthly figures aggregate these lines.
 - **Sync State**: Per-record synchronization metadata used to drive full reconciliation: change/version marker, last-modified time, deletion marker, and applied/pending status. Spans every synced data type.
+- **Target Plan**: A target-planning record imported from the 🎯 تخطيط التارجت sheet into the existing targets table; carries the center's planning/target figures and is service- and period-aware as defined by the existing targets module.
+- **Settings Record**: A configuration key/value imported from the ⚙️ الإعدادات sheet into the settings store (e.g., pricing defaults), synced across devices.
+- **Dashboard Record / Account-Statement Record**: Imported rows from the 📊 داشبورد and 📄 كشف حساب sheets, persisted as stored records and included in sync and backup round-trips.
 
 ## Success Criteria *(mandatory)*
 
@@ -120,6 +138,9 @@ An administrator works on more than one device. When they trigger a sync (manual
 - **SC-006**: A record deleted on one device is absent on every other device after they sync, in 100% of cases.
 - **SC-007**: A first-time sync of a database containing on the order of 100 children with multiple services completes and leaves the receiving device with the complete data set, with its outcome reported to the user.
 - **SC-008**: When the cloud is unreachable, an attempted sync reports a failure and leaves local data unchanged in 100% of cases.
+- **SC-009**: Importing `Nursery_V4_Final_5.xlsx` completes with zero row errors across all sheets — including 📊 داشبورد، ⚙️ الإعدادات، 📄 كشف حساب، 🎯 تخطيط التارجت — and every sheet's data is persisted.
+- **SC-010**: After importing the workbook, creating a local backup and then restoring it yields identical record counts and contents for every table (verified round-trip), and the full system is usable afterward.
+- **SC-011**: Imported settings, targets, dashboard, and account-statement data propagate to other devices via push/pull and converge identically, the same as children and payments.
 
 ## Assumptions
 

@@ -5,6 +5,8 @@ import { Button } from '../../components/ui/Button.js'
 import { Alert } from '../../components/ui/Alert.js'
 import { Badge } from '../../components/ui/Badge.js'
 import { Modal } from '../../components/ui/Modal.js'
+import { ProgressBar } from '../../components/ui/ProgressBar.js'
+import { useProgress } from '../../hooks/useProgress.js'
 
 interface StorageStats {
   counts: {
@@ -34,6 +36,8 @@ interface ImportSummary {
   employees: { imported: number; skipped: number }
   salaryPayments: { imported: number; skipped: number }
   expenses: { imported: number; skipped: number }
+  settings: { imported: number; skipped: number }
+  snapshots: { imported: number; skipped: number }
   sheetsProcessed: string[]
   sheetsIgnored: string[]
   year: number
@@ -66,6 +70,7 @@ export default function StorageManager() {
   const [importResult, setImportResult] = useState<ImportSummary | null>(null)
   const [showClearConfirm, setShowClearConfirm] = useState(false)
   const [isClearing, setIsClearing] = useState(false)
+  const { get: getProgress, reset: resetProgress } = useProgress()
 
   const loadStats = async () => {
     setIsLoading(true)
@@ -91,6 +96,7 @@ export default function StorageManager() {
 
   const handleBackup = async () => {
     setIsBackingUp(true)
+    resetProgress('backup')
     setError(null)
     try {
       const result = await window.api.storage.backup()
@@ -110,6 +116,7 @@ export default function StorageManager() {
 
   const handleRestore = async () => {
     setIsRestoring(true)
+    resetProgress('restore')
     setError(null)
     try {
       await window.api.storage.restore({})
@@ -128,6 +135,7 @@ export default function StorageManager() {
 
   const handleImport = async () => {
     setIsImporting(true)
+    resetProgress('import')
     setError(null)
     setImportResult(null)
     try {
@@ -238,6 +246,9 @@ export default function StorageManager() {
           <Button variant="primary" onClick={handleBackup} isLoading={isBackingUp} className="w-full">
             📥 {isAr ? 'حفظ نسخة احتياطية...' : 'Create Backup...'}
           </Button>
+          {isBackingUp && (
+            <ProgressBar percent={getProgress('backup').percent} label={isAr ? 'جارٍ النسخ الاحتياطي...' : 'Backing up...'} />
+          )}
         </Card>
 
         {/* Restore */}
@@ -254,6 +265,9 @@ export default function StorageManager() {
           <Button variant="outline" onClick={handleRestore} isLoading={isRestoring} className="w-full">
             🔄 {isAr ? 'استعادة من نسخة...' : 'Restore from Backup...'}
           </Button>
+          {isRestoring && (
+            <ProgressBar percent={getProgress('restore').percent} label={isAr ? 'جارٍ الاستعادة...' : 'Restoring...'} />
+          )}
         </Card>
 
         {/* Import */}
@@ -272,6 +286,16 @@ export default function StorageManager() {
           <Button variant="outline" onClick={handleImport} isLoading={isImporting} className="w-full">
             📊 {isAr ? 'استيراد من Excel...' : 'Import from Excel...'}
           </Button>
+          {isImporting && (() => {
+            const p = getProgress('import')
+            return (
+              <ProgressBar
+                percent={p.percent}
+                label={isAr ? 'جارٍ استيراد الأوراق...' : 'Importing sheets...'}
+                detail={p.total > 0 ? `${p.current}/${p.total}` : undefined}
+              />
+            )
+          })()}
 
           {importResult && (
             <div className="bg-emerald-50 rounded-xl p-3 space-y-1.5 text-xs">
@@ -285,6 +309,8 @@ export default function StorageManager() {
                 ['employees', isAr ? 'موظفون' : 'employees'],
                 ['salaryPayments', isAr ? 'رواتب' : 'salary payments'],
                 ['expenses', isAr ? 'مصروفات' : 'expenses'],
+                ['settings', isAr ? 'الإعدادات' : 'settings'],
+                ['snapshots', isAr ? 'لقطات (داشبورد/كشف حساب)' : 'snapshots (dashboard/statement)'],
               ].map(([key, label]) => {
                 const stat = importResult[key as keyof ImportSummary] as { imported: number; skipped: number }
                 if (!stat || typeof stat !== 'object') return null

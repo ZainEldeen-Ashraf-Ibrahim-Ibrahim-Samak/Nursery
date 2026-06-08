@@ -64,8 +64,9 @@ describe('importFromWorkbook — contract', () => {
     // Expenses: 2 items × 12 months = 24
     expect(summary.expenses.imported).toBe(24)
 
-    // Sheets classification
-    expect(summary.sheetsIgnored).toContain('📊 داشبورد')
+    // Sheets classification — the dashboard sheet is now imported as a snapshot
+    // (no longer ignored) per the full-workbook import scope.
+    expect(summary.sheetsProcessed).toContain('📊 داشبورد')
     expect(summary.sheetsProcessed).toContain('👶 بيانات الأطفال')
   })
 
