@@ -1,4 +1,4 @@
-import { n as getDb, r as initDb, t as closeDb } from "./connection-87fvLz8b.js";
+import { n as getDb, r as initDb, t as closeDb } from "./connection-BvJpTvbB.js";
 import { createRequire } from "node:module";
 import path from "node:path";
 import nodeCrypto from "crypto";
@@ -581,16 +581,141 @@ var migrations = [
 		up: (db) => {
 			try {
 				db.exec("ALTER TABLE employees ADD COLUMN updated_at TEXT;");
-			} catch (e) {}
+			} catch {}
 			db.exec("UPDATE employees SET updated_at = created_at WHERE updated_at IS NULL;");
 			try {
 				db.exec("ALTER TABLE salary_payments ADD COLUMN updated_at TEXT;");
-			} catch (e) {}
+			} catch {}
 			db.exec("UPDATE salary_payments SET updated_at = (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')) WHERE updated_at IS NULL;");
 			try {
 				db.exec("ALTER TABLE expenses ADD COLUMN updated_at TEXT;");
-			} catch (e) {}
+			} catch {}
 			db.exec("UPDATE expenses SET updated_at = created_at WHERE updated_at IS NULL;");
+		}
+	},
+	{
+		name: "004_child_services",
+		up: (db) => {
+			db.exec(`
+        CREATE TABLE IF NOT EXISTS child_services (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          child_id INTEGER NOT NULL,
+          service TEXT NOT NULL,
+          unit TEXT NOT NULL,
+          price REAL NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          synced INTEGER DEFAULT 0,
+          FOREIGN KEY (child_id) REFERENCES children (id) ON DELETE CASCADE,
+          UNIQUE (child_id, service)
+        );
+
+        INSERT INTO child_services (child_id, service, unit, price, created_at, updated_at, synced)
+        SELECT id, service, unit, price, created_at, updated_at, 0 FROM children;
+      `);
+		}
+	},
+	{
+		name: "005_payments_service_id",
+		up: (db) => {
+			db.exec(`
+        CREATE TABLE IF NOT EXISTS payments_new (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          child_id INTEGER NOT NULL,
+          service_id INTEGER,
+          month TEXT NOT NULL,
+          year INTEGER NOT NULL,
+          service TEXT NOT NULL,
+          unit TEXT NOT NULL,
+          quantity REAL DEFAULT 1,
+          price REAL NOT NULL,
+          total REAL NOT NULL,
+          paid REAL DEFAULT 0,
+          balance REAL NOT NULL,
+          status TEXT NOT NULL,
+          notes TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          synced INTEGER DEFAULT 0,
+          FOREIGN KEY (child_id) REFERENCES children (id) ON DELETE CASCADE,
+          FOREIGN KEY (service_id) REFERENCES child_services (id),
+          UNIQUE (child_id, service_id, month, year)
+        );
+
+        INSERT INTO payments_new (
+          id, child_id, month, year, service, unit, quantity, price, total, paid, balance, status, notes, created_at, updated_at, synced
+        )
+        SELECT id, child_id, month, year, service, unit, quantity, price, total, paid, balance, status, notes, created_at, updated_at, synced
+        FROM payments;
+
+        UPDATE payments_new
+        SET service_id = (
+          SELECT id FROM child_services 
+          WHERE child_services.child_id = payments_new.child_id 
+          AND child_services.service = payments_new.service
+        );
+
+        DROP TABLE payments;
+        ALTER TABLE payments_new RENAME TO payments;
+      `);
+		}
+	},
+	{
+		name: "006_tombstones",
+		up: (db) => {
+			db.exec(`
+        CREATE TABLE IF NOT EXISTS tombstones (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          entity TEXT NOT NULL,
+          record_id INTEGER NOT NULL,
+          created_at TEXT NOT NULL,
+          synced INTEGER DEFAULT 0,
+          UNIQUE(entity, record_id)
+        );
+      `);
+		}
+	},
+	{
+		name: "007_settings_sync_columns",
+		up: (db) => {
+			try {
+				db.exec("ALTER TABLE settings ADD COLUMN updated_at TEXT;");
+			} catch {}
+			try {
+				db.exec("ALTER TABLE settings ADD COLUMN synced INTEGER DEFAULT 0;");
+			} catch {}
+			db.exec("UPDATE settings SET updated_at = (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')) WHERE updated_at IS NULL;");
+		}
+	},
+	{
+		name: "008_users_sync_columns",
+		up: (db) => {
+			try {
+				db.exec("ALTER TABLE users ADD COLUMN updated_at TEXT;");
+			} catch {}
+			try {
+				db.exec("ALTER TABLE users ADD COLUMN synced INTEGER DEFAULT 0;");
+			} catch {}
+			db.exec("UPDATE users SET updated_at = created_at WHERE updated_at IS NULL;");
+		}
+	},
+	{
+		name: "009_backfill_missing_child_services",
+		up: (db) => {
+			db.exec(`
+        INSERT INTO child_services (child_id, service, unit, price, created_at, updated_at, synced)
+        SELECT id, service, unit, price, created_at, updated_at, 0
+        FROM children
+        WHERE id NOT IN (SELECT child_id FROM child_services);
+
+        UPDATE payments
+        SET service_id = (
+          SELECT cs.id FROM child_services cs
+          WHERE cs.child_id = payments.child_id
+          AND cs.service = payments.service
+        )
+        WHERE service_id IS NULL;
+      `);
 		}
 	}
 ];
@@ -6965,12 +7090,14 @@ function getChildStatement(child, existingPayments, currentDate) {
 	const paymentMap = /* @__PURE__ */ new Map();
 	for (const p of existingPayments) {
 		const key = `${p.year}-${p.month}`;
-		paymentMap.set(key, p);
+		if (!paymentMap.has(key)) paymentMap.set(key, []);
+		paymentMap.get(key).push(p);
 	}
-	const rows = statementMonths.map(({ month, year }) => {
+	const rows = [];
+	for (const { month, year } of statementMonths) {
 		const key = `${year}-${month}`;
-		const existing = paymentMap.get(key);
-		if (existing) return {
+		const existingList = paymentMap.get(key);
+		if (existingList && existingList.length > 0) for (const existing of existingList) rows.push({
 			month,
 			year,
 			service: existing.service,
@@ -6982,8 +7109,8 @@ function getChildStatement(child, existingPayments, currentDate) {
 			balance: existing.balance,
 			status: existing.status,
 			notes: existing.notes || ""
-		};
-		else return {
+		});
+		else rows.push({
 			month,
 			year,
 			service: child.service,
@@ -6995,8 +7122,8 @@ function getChildStatement(child, existingPayments, currentDate) {
 			balance: 0,
 			status: "unpaid",
 			notes: ""
-		};
-	});
+		});
+	}
 	rows.sort((a, b) => {
 		if (a.year !== b.year) return b.year - a.year;
 		const idxA = arabicMonths.indexOf(a.month);
@@ -7033,12 +7160,12 @@ function getChildStatement(child, existingPayments, currentDate) {
 }
 //#endregion
 //#region electron/ipc/childrenIPC.ts
-function checkAuth$3() {
+function checkAuth$4() {
 	if (!getCurrentUser()) throw new Error("UNAUTHORIZED: يجب تسجيل الدخول أولاً / Unauthorized");
 }
 ipcMain.handle("children:get", async (_event, { search, service, activeOnly }) => {
 	try {
-		checkAuth$3();
+		checkAuth$4();
 		const db = getDb();
 		let query = "SELECT * FROM children WHERE 1=1";
 		const params = [];
@@ -7048,12 +7175,14 @@ ipcMain.handle("children:get", async (_event, { search, service, activeOnly }) =
 			params.push(searchPattern, searchPattern, searchPattern, searchPattern, searchPattern);
 		}
 		if (service) {
-			query += " AND service = ?";
+			query += " AND id IN (SELECT child_id FROM child_services WHERE service = ?)";
 			params.push(service);
 		}
 		if (activeOnly !== false) query += " AND is_active = 1";
 		query += " ORDER BY name ASC";
-		return db.prepare(query).all(...params);
+		const rows = db.prepare(query).all(...params);
+		for (const row of rows) row.services = db.prepare("SELECT * FROM child_services WHERE child_id = ?").all(row.id);
+		return rows;
 	} catch (error) {
 		console.error("Failed to get children:", error);
 		throw new Error(error.message || "Failed to get children");
@@ -7063,18 +7192,32 @@ ipcMain.handle("children:add", async (_event, childInput) => {
 	try {
 		requireAdmin();
 		const db = getDb();
-		const { name, guardian, guardian_phone, child_phone, national_id, service, unit, price, reg_date, notes } = childInput;
-		if (!name || !guardian || !guardian_phone || !service || !unit || price === void 0 || !reg_date) throw new Error("جميع الحقول الإلزامية مطلوبة / Missing required fields");
+		const { name, guardian, guardian_phone, child_phone, national_id, reg_date, notes, services } = childInput;
+		const enrollments = services || (childInput.service ? [{
+			service: childInput.service,
+			unit: childInput.unit,
+			price: childInput.price
+		}] : []);
+		if (!name || !guardian || !guardian_phone || enrollments.length === 0 || !reg_date) throw new Error("جميع الحقول الإلزامية مطلوبة / Missing required fields");
+		if (new Set(enrollments.map((s) => s.service)).size < enrollments.length) throw new Error("لا يمكن إضافة نفس الخدمة أكثر من مرة / Cannot add duplicate services");
 		const now = (/* @__PURE__ */ new Date()).toISOString();
-		const result = db.prepare(`
-      INSERT INTO children (
-        name, guardian, guardian_phone, child_phone, national_id, 
-        service, unit, price, reg_date, notes, 
-        is_active, created_at, updated_at, synced
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, 0)
-    `).run(name, guardian, guardian_phone, child_phone || null, national_id || null, service, unit, price, reg_date, notes || null, now, now);
-		const createdId = Number(result.lastInsertRowid);
-		return db.prepare("SELECT * FROM children WHERE id = ?").get(createdId);
+		const createdId = db.transaction(() => {
+			const first = enrollments[0];
+			const result = db.prepare(`
+        INSERT INTO children (
+          name, guardian, guardian_phone, child_phone, national_id, 
+          service, unit, price, reg_date, notes, 
+          is_active, created_at, updated_at, synced
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, 0)
+      `).run(name, guardian, guardian_phone, child_phone || null, national_id || null, first.service, first.unit, first.price, reg_date, notes || null, now, now);
+			const childId = Number(result.lastInsertRowid);
+			const insertSvc = db.prepare(`INSERT INTO child_services (child_id, service, unit, price, created_at, updated_at, synced) VALUES (?, ?, ?, ?, ?, ?, 0)`);
+			for (const s of enrollments) insertSvc.run(childId, s.service, s.unit, s.price, now, now);
+			return childId;
+		})();
+		const createdChild = db.prepare("SELECT * FROM children WHERE id = ?").get(createdId);
+		createdChild.services = db.prepare("SELECT * FROM child_services WHERE child_id = ?").all(createdId);
+		return createdChild;
 	} catch (error) {
 		console.error("Failed to add child:", error);
 		throw new Error(error.message || "Failed to add child");
@@ -7086,31 +7229,48 @@ ipcMain.handle("children:update", async (_event, { id, patch }) => {
 		const db = getDb();
 		if (!id || !patch) throw new Error("Child ID and patch data are required");
 		if (!db.prepare("SELECT id FROM children WHERE id = ?").get(id)) throw new Error("الطفل غير موجود / Child not found");
-		let query = "UPDATE children SET ";
-		const params = [];
-		for (const key of [
-			"name",
-			"guardian",
-			"guardian_phone",
-			"child_phone",
-			"national_id",
-			"service",
-			"unit",
-			"price",
-			"reg_date",
-			"notes",
-			"is_active"
-		]) if (patch[key] !== void 0) {
-			query += `${key} = ?, `;
-			params.push(patch[key]);
-		}
-		if (params.length === 0) return db.prepare("SELECT * FROM children WHERE id = ?").get(id);
-		query += "updated_at = ?, synced = 0";
-		params.push((/* @__PURE__ */ new Date()).toISOString());
-		query += " WHERE id = ?";
-		params.push(id);
-		db.prepare(query).run(...params);
-		return db.prepare("SELECT * FROM children WHERE id = ?").get(id);
+		db.transaction(() => {
+			const enrollments = patch.services;
+			if (enrollments) {
+				if (enrollments.length === 0) throw new Error("يجب اختيار خدمة واحدة على الأقل / At least one service is required");
+				if (new Set(enrollments.map((s) => s.service)).size < enrollments.length) throw new Error("لا يمكن إضافة نفس الخدمة أكثر من مرة / Cannot add duplicate services");
+				patch.service = enrollments[0].service;
+				patch.unit = enrollments[0].unit;
+				patch.price = enrollments[0].price;
+			}
+			let query = "UPDATE children SET ";
+			const params = [];
+			for (const key of [
+				"name",
+				"guardian",
+				"guardian_phone",
+				"child_phone",
+				"national_id",
+				"service",
+				"unit",
+				"price",
+				"reg_date",
+				"notes",
+				"is_active"
+			]) if (patch[key] !== void 0) {
+				query += `${key} = ?, `;
+				params.push(patch[key]);
+			}
+			const now = (/* @__PURE__ */ new Date()).toISOString();
+			if (params.length > 0) {
+				query += "updated_at = ?, synced = 0 WHERE id = ?";
+				params.push(now, id);
+				db.prepare(query).run(...params);
+			}
+			if (enrollments) {
+				db.prepare("DELETE FROM child_services WHERE child_id = ?").run(id);
+				const insertSvc = db.prepare(`INSERT INTO child_services (child_id, service, unit, price, created_at, updated_at, synced) VALUES (?, ?, ?, ?, ?, ?, 0)`);
+				for (const s of enrollments) insertSvc.run(id, s.service, s.unit, s.price, now, now);
+			}
+		})();
+		const updatedChild = db.prepare("SELECT * FROM children WHERE id = ?").get(id);
+		updatedChild.services = db.prepare("SELECT * FROM child_services WHERE child_id = ?").all(id);
+		return updatedChild;
 	} catch (error) {
 		console.error("Failed to update child:", error);
 		throw new Error(error.message || "Failed to update child");
@@ -7130,7 +7290,7 @@ ipcMain.handle("children:deactivate", async (_event, { id }) => {
 });
 ipcMain.handle("children:statement", async (_event, { childId }) => {
 	try {
-		checkAuth$3();
+		checkAuth$4();
 		if (!childId) throw new Error("Child ID is required");
 		const db = getDb();
 		const child = db.prepare("SELECT * FROM children WHERE id = ?").get(childId);
@@ -7139,6 +7299,98 @@ ipcMain.handle("children:statement", async (_event, { childId }) => {
 	} catch (error) {
 		console.error("Failed to get child statement:", error);
 		throw new Error(error.message || "Failed to get child statement");
+	}
+});
+//#endregion
+//#region electron/services/tombstones.ts
+function recordLocalTombstone(db, entity, recordId) {
+	db.prepare(`
+    INSERT OR IGNORE INTO tombstones (entity, record_id, created_at, synced)
+    VALUES (?, ?, ?, 0)
+  `).run(entity, recordId, (/* @__PURE__ */ new Date()).toISOString());
+}
+function applyCloudTombstones(db, cloudTombstones) {
+	const insertTombstone = db.prepare(`
+    INSERT OR IGNORE INTO tombstones (entity, record_id, created_at, synced)
+    VALUES (?, ?, ?, 1)
+  `);
+	for (const tombstone of cloudTombstones) {
+		if ([
+			"children",
+			"child_services",
+			"payments",
+			"expenses",
+			"employees",
+			"salary_payments"
+		].includes(tombstone.entity)) db.prepare(`DELETE FROM ${tombstone.entity} WHERE id = ?`).run(tombstone.record_id);
+		insertTombstone.run(tombstone.entity, tombstone.record_id, (/* @__PURE__ */ new Date()).toISOString());
+	}
+}
+//#endregion
+//#region electron/ipc/childServicesIPC.ts
+function checkAuth$3() {
+	if (!getCurrentUser()) throw new Error("UNAUTHORIZED: يجب تسجيل الدخول أولاً / Unauthorized");
+}
+ipcMain.handle("childServices:list", async (_event, { childId }) => {
+	try {
+		checkAuth$3();
+		const db = getDb();
+		if (!childId) throw new Error("childId is required");
+		return db.prepare("SELECT * FROM child_services WHERE child_id = ?").all(childId);
+	} catch (error) {
+		console.error("Failed to get child services:", error);
+		throw new Error(error.message || "Failed to get child services");
+	}
+});
+ipcMain.handle("childServices:add", async (_event, { childId, service, unit, price }) => {
+	try {
+		requireAdmin();
+		const db = getDb();
+		if (!childId || !service || !unit || price === void 0) throw new Error("جميع الحقول الإلزامية مطلوبة / Missing required fields");
+		if (db.prepare("SELECT id FROM child_services WHERE child_id = ? AND service = ?").get(childId, service)) throw new Error("هذه الخدمة مضافة بالفعل للطفل / Service already enrolled");
+		const now = (/* @__PURE__ */ new Date()).toISOString();
+		const result = db.prepare(`
+      INSERT INTO child_services (child_id, service, unit, price, created_at, updated_at, synced)
+      VALUES (?, ?, ?, ?, ?, ?, 0)
+    `).run(childId, service, unit, price, now, now);
+		return db.prepare("SELECT * FROM child_services WHERE id = ?").get(result.lastInsertRowid);
+	} catch (error) {
+		console.error("Failed to add child service:", error);
+		throw new Error(error.message || "Failed to add child service");
+	}
+});
+ipcMain.handle("childServices:update", async (_event, { id, patch }) => {
+	try {
+		requireAdmin();
+		const db = getDb();
+		if (!id || !patch) throw new Error("ID and patch are required");
+		let query = "UPDATE child_services SET ";
+		const params = [];
+		for (const key of ["unit", "price"]) if (patch[key] !== void 0) {
+			query += `${key} = ?, `;
+			params.push(patch[key]);
+		}
+		if (params.length === 0) return db.prepare("SELECT * FROM child_services WHERE id = ?").get(id);
+		query += "updated_at = ?, synced = 0 WHERE id = ?";
+		params.push((/* @__PURE__ */ new Date()).toISOString(), id);
+		db.prepare(query).run(...params);
+		return db.prepare("SELECT * FROM child_services WHERE id = ?").get(id);
+	} catch (error) {
+		console.error("Failed to update child service:", error);
+		throw new Error(error.message || "Failed to update child service");
+	}
+});
+ipcMain.handle("childServices:remove", async (_event, { id }) => {
+	try {
+		requireAdmin();
+		const db = getDb();
+		if (!id) throw new Error("ID is required");
+		db.prepare("DELETE FROM child_services WHERE id = ?").run(id);
+		recordLocalTombstone(db, "child_services", id);
+		return { ok: true };
+	} catch (error) {
+		console.error("Failed to remove child service:", error);
+		throw new Error(error.message || "Failed to remove child service");
 	}
 });
 //#endregion
@@ -7154,6 +7406,14 @@ function calculatePayment(quantity, price, paid) {
 		balance,
 		status
 	};
+}
+function calculateChildStatusRollup(payments) {
+	if (payments.length === 0) return "unpaid";
+	const allPaid = payments.every((p) => p.status === "paid");
+	const allUnpaid = payments.every((p) => p.status === "unpaid");
+	if (allPaid) return "paid";
+	if (allUnpaid) return "unpaid";
+	return "partial";
 }
 function checkAuth$2() {
 	if (!getCurrentUser()) throw new Error("UNAUTHORIZED: يجب تسجيل الدخول أولاً / Unauthorized");
@@ -7173,13 +7433,35 @@ ipcMain.handle("payments:get", async (_event, { month, year }) => {
 		let totalInvoiced = 0;
 		let totalCollected = 0;
 		let arrears = 0;
+		const childMap = /* @__PURE__ */ new Map();
 		for (const p of payments) {
 			totalInvoiced += p.total;
 			totalCollected += p.paid;
 			if (p.balance > 0) arrears += p.balance;
+			if (!childMap.has(p.child_id)) childMap.set(p.child_id, {
+				child_id: p.child_id,
+				child_name: p.child_name,
+				services: [],
+				totalInvoiced: 0,
+				totalCollected: 0,
+				balance: 0,
+				status: "unpaid"
+			});
+			const rollUp = childMap.get(p.child_id);
+			rollUp.services.push(p);
+			rollUp.totalInvoiced += p.total;
+			rollUp.totalCollected += p.paid;
+			rollUp.balance += p.balance;
+		}
+		for (const rollUp of childMap.values()) {
+			rollUp.status = calculateChildStatusRollup(rollUp.services);
+			rollUp.totalInvoiced = Number(rollUp.totalInvoiced.toFixed(2));
+			rollUp.totalCollected = Number(rollUp.totalCollected.toFixed(2));
+			rollUp.balance = Number(rollUp.balance.toFixed(2));
 		}
 		return {
 			payments,
+			byChild: Array.from(childMap.values()).sort((a, b) => a.child_name.localeCompare(b.child_name)),
 			summary: {
 				totalInvoiced: Number(totalInvoiced.toFixed(2)),
 				totalCollected: Number(totalCollected.toFixed(2)),
@@ -7196,20 +7478,25 @@ ipcMain.handle("payments:generate", async (_event, { month, year }) => {
 		checkAuth$2();
 		const db = getDb();
 		if (!month || !year) throw new Error("Month and year are required");
-		const activeChildren = db.prepare("SELECT * FROM children WHERE is_active = 1").all();
+		const activeEnrollments = db.prepare(`
+      SELECT cs.* 
+      FROM child_services cs
+      JOIN children c ON cs.child_id = c.id
+      WHERE c.is_active = 1
+    `).all();
 		let createdCount = 0;
 		const now = (/* @__PURE__ */ new Date()).toISOString();
-		const checkStmt = db.prepare("SELECT id FROM payments WHERE child_id = ? AND month = ? AND year = ?");
+		const checkStmt = db.prepare("SELECT id FROM payments WHERE child_id = ? AND service_id = ? AND month = ? AND year = ?");
 		const insertStmt = db.prepare(`
       INSERT INTO payments (
-        child_id, month, year, service, unit, quantity, price, total, paid, balance, status, created_at, updated_at, synced
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, 0)
+        child_id, service_id, month, year, service, unit, quantity, price, total, paid, balance, status, created_at, updated_at, synced
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, 0)
     `);
 		db.transaction(() => {
-			for (const child of activeChildren) if (!checkStmt.get(child.id, month, year)) {
+			for (const enrollment of activeEnrollments) if (!checkStmt.get(enrollment.child_id, enrollment.id, month, year)) {
 				const quantity = 1;
-				const { total, balance, status } = calculatePayment(quantity, child.price, 0);
-				insertStmt.run(child.id, month, year, child.service, child.unit, quantity, child.price, total, balance, status, now, now);
+				const { total, balance, status } = calculatePayment(quantity, enrollment.price, 0);
+				insertStmt.run(enrollment.child_id, enrollment.id, month, year, enrollment.service, enrollment.unit, quantity, enrollment.price, total, balance, status, now, now);
 				createdCount++;
 			}
 		})();
@@ -11100,7 +11387,7 @@ ipcMain.handle("storage:import", async (_event, args) => {
 			if (result.canceled || result.filePaths.length === 0) throw new Error("Import cancelled");
 			filePath = result.filePaths[0];
 		}
-		const { importFromWorkbook } = await import("./importService-cLa7WluD.js");
+		const { importFromWorkbook } = await import("./importService-BZLKQkNp.js");
 		return { imported: await importFromWorkbook(filePath) };
 	} catch (error) {
 		console.error("storage:import error:", error);
@@ -11259,6 +11546,61 @@ var paymentSchema = new Schema({
 	synced: Number
 }, sharedOptions);
 var PaymentModel = mongoose.models["sync_payments"] || mongoose.model("sync_payments", paymentSchema);
+var childServiceSchema = new Schema({
+	id: {
+		type: Number,
+		required: true,
+		unique: true
+	},
+	child_id: Number,
+	service: String,
+	unit: String,
+	price: Number,
+	created_at: String,
+	updated_at: String,
+	synced: Number
+}, sharedOptions);
+var ChildServiceModel = mongoose.models["sync_child_services"] || mongoose.model("sync_child_services", childServiceSchema);
+var userSchema = new Schema({
+	id: {
+		type: Number,
+		required: true,
+		unique: true
+	},
+	username: String,
+	password: String,
+	role: String,
+	name: String,
+	is_active: Number,
+	created_at: String,
+	updated_at: String,
+	synced: Number
+}, sharedOptions);
+var UserModel = mongoose.models["sync_users"] || mongoose.model("sync_users", userSchema);
+var settingSchema = new Schema({
+	id: {
+		type: String,
+		required: true,
+		unique: true
+	},
+	key: String,
+	value: String,
+	updated_at: String,
+	synced: Number
+}, sharedOptions);
+var SettingModel = mongoose.models["sync_settings"] || mongoose.model("sync_settings", settingSchema);
+var tombstoneSchema = new Schema({
+	id: {
+		type: Number,
+		required: true,
+		unique: true
+	},
+	entity: String,
+	record_id: Number,
+	created_at: String,
+	synced: Number
+}, sharedOptions);
+var TombstoneModel = mongoose.models["sync_tombstones"] || mongoose.model("sync_tombstones", tombstoneSchema);
 var employeeSchema = new Schema({
 	id: {
 		type: Number,
@@ -11319,6 +11661,11 @@ var SYNC_ENTITIES = [
 		table: "children"
 	},
 	{
+		name: "child_services",
+		model: ChildServiceModel,
+		table: "child_services"
+	},
+	{
 		name: "payments",
 		model: PaymentModel,
 		table: "payments"
@@ -11337,6 +11684,21 @@ var SYNC_ENTITIES = [
 		name: "expenses",
 		model: ExpenseModel,
 		table: "expenses"
+	},
+	{
+		name: "users",
+		model: UserModel,
+		table: "users"
+	},
+	{
+		name: "settings",
+		model: SettingModel,
+		table: "settings"
+	},
+	{
+		name: "tombstones",
+		model: TombstoneModel,
+		table: "tombstones"
 	}
 ];
 //#endregion
@@ -11411,12 +11773,16 @@ ipcMain.handle("sync:status", async () => {
 		}
 		const mongoUri = getMongoUri();
 		const lastLogRow = db.prepare("SELECT synced_at AS created_at, status, action FROM sync_log ORDER BY id DESC LIMIT 1").get();
+		const autoIntervalRow = db.prepare("SELECT value FROM settings WHERE key = 'sync_auto_interval'").get();
+		const savedInterval = Number(autoIntervalRow?.value ?? 0);
 		return {
 			connected,
 			error,
 			uri: mongoUri ? "***configured***" : null,
 			pending,
-			lastSync: lastLogRow || null
+			lastSync: lastLogRow || null,
+			autoSyncEnabled: savedInterval > 0,
+			autoSyncIntervalMinutes: savedInterval > 0 ? savedInterval : 30
 		};
 	} catch (error) {
 		console.error("sync:status error:", error);
@@ -11440,19 +11806,34 @@ ipcMain.handle("sync:push", async () => {
 		const results = {};
 		const now = (/* @__PURE__ */ new Date()).toISOString();
 		for (const entity of SYNC_ENTITIES) {
-			const unsynced = db.prepare(`SELECT * FROM ${entity.table} WHERE synced = 0`).all();
+			let query = `SELECT * FROM ${entity.table} WHERE synced = 0`;
+			if (entity.name === "settings") query += ` AND key != 'sync_mongo_uri'`;
+			const unsynced = db.prepare(query).all();
 			let pushed = 0;
 			let failed = 0;
 			for (const record of unsynced) try {
-				await entity.model.findOneAndUpdate({ id: record.id }, {
-					...record,
-					updated_at: record.updated_at || now
-				}, {
-					upsert: true,
-					new: true
-				});
-				db.prepare(`UPDATE ${entity.table} SET synced = 1 WHERE id = ?`).run(record.id);
-				logSync("push", entity.name, record.id, "success");
+				if (entity.name === "settings") {
+					await entity.model.findOneAndUpdate({ id: record.key }, {
+						...record,
+						id: record.key,
+						updated_at: record.updated_at || now
+					}, {
+						upsert: true,
+						returnDocument: "after"
+					});
+					db.prepare(`UPDATE ${entity.table} SET synced = 1 WHERE key = ?`).run(record.key);
+					logSync("push", entity.name, record.key, "success");
+				} else {
+					await entity.model.findOneAndUpdate({ id: record.id }, {
+						...record,
+						updated_at: record.updated_at || now
+					}, {
+						upsert: true,
+						returnDocument: "after"
+					});
+					db.prepare(`UPDATE ${entity.table} SET synced = 1 WHERE id = ?`).run(record.id);
+					logSync("push", entity.name, record.id, "success");
+				}
 				pushed++;
 			} catch (err) {
 				logSync("push", entity.name, record.id, "error", err.message);
@@ -11490,43 +11871,93 @@ ipcMain.handle("sync:pull", async () => {
 			let pulled = 0;
 			let skipped = 0;
 			let failed = 0;
+			let orphanSkipped = 0;
+			const errors = [];
+			/** Record a pull failure with its reason (logged + returned to the UI). */
+			const noteError = (recordId, err) => {
+				const message = err instanceof Error ? err.message : String(err);
+				if (errors.length < 25) errors.push({
+					recordId: String(recordId),
+					message
+				});
+				console.error(`[sync:pull] ${entity.name} record=${recordId}: ${message}`);
+			};
 			try {
 				const cloudRecords = await entity.model.find({}).lean();
 				for (const cloud of cloudRecords) {
 					const cloudRecord = cloud;
 					try {
-						const local = db.prepare(`SELECT * FROM ${entity.table} WHERE id = ?`).get(cloudRecord.id);
+						if (entity.name === "tombstones") {
+							if (!db.prepare(`SELECT * FROM tombstones WHERE entity = ? AND record_id = ?`).get(cloudRecord.entity, cloudRecord.record_id)) {
+								applyCloudTombstones(db, [cloudRecord]);
+								logSync("pull-tombstone", entity.name, `${cloudRecord.entity}:${cloudRecord.record_id}`, "success");
+								pulled++;
+							} else {
+								logSync("pull-skip", entity.name, `${cloudRecord.entity}:${cloudRecord.record_id}`, "skipped");
+								skipped++;
+							}
+							continue;
+						}
+						let local;
+						if (entity.name === "settings") local = db.prepare(`SELECT * FROM settings WHERE key = ?`).get(cloudRecord.id);
+						else local = db.prepare(`SELECT * FROM ${entity.table} WHERE id = ?`).get(cloudRecord.id);
 						if (!local) {
-							const columns = Object.keys(cloudRecord).filter((k) => k !== "_id");
+							const columns = Object.keys(cloudRecord).filter((k) => k !== "_id" && k !== "__v");
 							const placeholders = columns.map(() => "?").join(", ");
 							const values = columns.map((c) => cloudRecord[c]);
+							if (entity.name === "settings") {
+								const keyIndex = columns.indexOf("id");
+								if (keyIndex !== -1) columns[keyIndex] = "key";
+							}
 							db.prepare(`INSERT OR IGNORE INTO ${entity.table} (${columns.join(", ")}) VALUES (${placeholders})`).run(...values);
 							logSync("pull-insert", entity.name, cloudRecord.id, "success");
 							pulled++;
-						} else if (resolveConflict(local, cloudRecord) === "cloud") {
-							const columns = Object.keys(cloudRecord).filter((k) => k !== "_id" && k !== "id");
-							const setClause = columns.map((c) => `${c} = ?`).join(", ");
-							const values = columns.map((c) => cloudRecord[c]);
-							values.push(cloudRecord.id);
-							db.prepare(`UPDATE ${entity.table} SET ${setClause}, synced = 1 WHERE id = ?`).run(...values);
-							logSync("pull-update", entity.name, cloudRecord.id, "success");
-							pulled++;
 						} else {
-							logSync("pull-skip", entity.name, cloudRecord.id, "skipped");
-							skipped++;
+							if (entity.name === "settings") local.id = local.key;
+							if (resolveConflict(local, cloudRecord) === "cloud") {
+								const columns = Object.keys(cloudRecord).filter((k) => k !== "_id" && k !== "id" && k !== "__v");
+								const setClause = columns.map((c) => `${c} = ?`).join(", ");
+								const values = columns.map((c) => cloudRecord[c]);
+								values.push(cloudRecord.id);
+								if (entity.name === "settings") db.prepare(`UPDATE ${entity.table} SET ${setClause}, synced = 1 WHERE key = ?`).run(...values);
+								else db.prepare(`UPDATE ${entity.table} SET ${setClause}, synced = 1 WHERE id = ?`).run(...values);
+								logSync("pull-update", entity.name, cloudRecord.id, "success");
+								pulled++;
+							} else {
+								logSync("pull-skip", entity.name, cloudRecord.id, "skipped");
+								skipped++;
+							}
 						}
 					} catch (err) {
-						logSync("pull", entity.name, cloudRecord.id, "error", err.message);
-						failed++;
+						const message = err instanceof Error ? err.message : String(err);
+						if (/FOREIGN KEY/i.test(message)) {
+							orphanSkipped++;
+							skipped++;
+							logSync("pull", entity.name, cloudRecord.id, "skipped-orphan", message);
+						} else {
+							logSync("pull", entity.name, cloudRecord.id, "error", message);
+							noteError(cloudRecord.id, err);
+							failed++;
+						}
 					}
 				}
 			} catch (err) {
 				logSync("pull", entity.name, "batch", "error", err.message);
+				noteError("batch", err);
+				failed++;
+			}
+			if (orphanSkipped > 0) {
+				console.warn(`[sync:pull] ${entity.name}: skipped ${orphanSkipped} orphaned cloud row(s) (missing parent record)`);
+				if (errors.length < 25) errors.push({
+					recordId: "orphans",
+					message: `${orphanSkipped} skipped — reference a missing parent record (stale cloud data)`
+				});
 			}
 			results[entity.name] = {
 				pulled,
 				skipped,
-				failed
+				failed,
+				errors
 			};
 		}
 		return { results };
@@ -11543,10 +11974,10 @@ function startAutoSync(intervalMs) {
 		const { connected } = getConnectionStatus();
 		if (!connected) return;
 		try {
-			if ((getDb().prepare("SELECT COUNT(*) as c FROM children WHERE synced = 0").get()?.c ?? 0) > 0) {
-				const handler = ipcMain.listeners?.("sync:push")?.[0];
-				if (typeof handler === "function") await handler({});
-			}
+			const pushHandler = ipcMain.listeners?.("sync:push")?.[0];
+			if (typeof pushHandler === "function") await pushHandler({});
+			const pullHandler = ipcMain.listeners?.("sync:pull")?.[0];
+			if (typeof pullHandler === "function") await pullHandler({});
 		} catch (err) {
 			console.error("Auto-sync error:", err);
 		}

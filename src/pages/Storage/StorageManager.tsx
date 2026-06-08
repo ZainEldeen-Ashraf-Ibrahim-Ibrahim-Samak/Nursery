@@ -38,6 +38,7 @@ interface ImportSummary {
   sheetsIgnored: string[]
   year: number
   rowErrors: number
+  rowErrorDetails?: { sheet: string; row: number; name: string; message: string }[]
 }
 
 function formatBytes(bytes: number): string {
@@ -302,6 +303,20 @@ export default function StorageManager() {
                   <span>{isAr ? 'صفوف متجاهَلة' : 'rows skipped (errors)'}</span>
                   <span className="font-semibold">{importResult.rowErrors}</span>
                 </div>
+              )}
+              {importResult.rowErrorDetails && importResult.rowErrorDetails.length > 0 && (
+                <details className="pt-1 border-t border-emerald-100">
+                  <summary className="cursor-pointer text-amber-600">
+                    {isAr ? 'تفاصيل أسباب الفشل' : 'Why rows failed'}
+                  </summary>
+                  <ul className="mt-1 space-y-0.5 text-xs text-slate-500 ltr:text-left rtl:text-right">
+                    {importResult.rowErrorDetails.map((e, i) => (
+                      <li key={i} className="font-mono break-all">
+                        [{e.sheet} #{e.row}] {e.name && `"${e.name}" — `}{e.message}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
               )}
               {importResult.sheetsIgnored?.length > 0 && (
                 <p className="text-slate-400 pt-1 border-t border-emerald-100">

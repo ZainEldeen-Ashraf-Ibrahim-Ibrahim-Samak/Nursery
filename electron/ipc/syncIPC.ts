@@ -1,5 +1,6 @@
 import { ipcMain } from 'electron'
 import { getDb } from '../db/connection.js'
+import { applyCloudTombstones } from '../services/tombstones.js'
 import { requireAdmin } from './_guard.js'
 import {
   connectMongo,
@@ -17,7 +18,7 @@ interface SyncRecord {
   [key: string]: any
 }
 
-function resolveConflict(local: SyncRecord, cloud: SyncRecord): 'local' | 'cloud' {
+export function resolveConflict(local: SyncRecord, cloud: SyncRecord): 'local' | 'cloud' {
   const localTs = local.updated_at ? new Date(local.updated_at).getTime() : 0
   const cloudTs = cloud.updated_at ? new Date(cloud.updated_at).getTime() : 0
 
@@ -114,12 +115,19 @@ ipcMain.handle('sync:status', async () => {
     const mongoUri = getMongoUri()
     const lastLogRow = db.prepare('SELECT synced_at AS created_at, status, action FROM sync_log ORDER BY id DESC LIMIT 1').get() as any
 
+    // Saved auto-sync state so the UI reflects it after a restart instead of
+    // defaulting to "Off" (the timer itself is resumed in main.ts on startup).
+    const autoIntervalRow = db.prepare("SELECT value FROM settings WHERE key = 'sync_auto_interval'").get() as any
+    const savedInterval = Number(autoIntervalRow?.value ?? 0)
+
     return {
       connected,
       error,
       uri: mongoUri ? '***configured***' : null,
       pending,
-      lastSync: lastLogRow || null
+      lastSync: lastLogRow || null,
+      autoSyncEnabled: savedInterval > 0,
+      autoSyncIntervalMinutes: savedInterval > 0 ? savedInterval : 30
     }
   } catch (error: any) {
     console.error('sync:status error:', error)
@@ -148,20 +156,34 @@ ipcMain.handle('sync:push', async () => {
     const now = new Date().toISOString()
 
     for (const entity of SYNC_ENTITIES) {
-      const unsynced = db.prepare(`SELECT * FROM ${entity.table} WHERE synced = 0`).all() as SyncRecord[]
+      let query = `SELECT * FROM ${entity.table} WHERE synced = 0`
+      if (entity.name === 'settings') {
+        query += ` AND key != 'sync_mongo_uri'`
+      }
+      
+      const unsynced = db.prepare(query).all() as SyncRecord[]
       let pushed = 0
       let failed = 0
 
       for (const record of unsynced) {
         try {
-          await entity.model.findOneAndUpdate(
-            { id: record.id },
-            { ...record, updated_at: record.updated_at || now },
-            { upsert: true, new: true }
-          )
-
-          db.prepare(`UPDATE ${entity.table} SET synced = 1 WHERE id = ?`).run(record.id)
-          logSync('push', entity.name, record.id, 'success')
+          if (entity.name === 'settings') {
+            await entity.model.findOneAndUpdate(
+              { id: record.key }, // use key as id for mongo
+              { ...record, id: record.key, updated_at: record.updated_at || now },
+              { upsert: true, returnDocument: 'after' }
+            )
+            db.prepare(`UPDATE ${entity.table} SET synced = 1 WHERE key = ?`).run(record.key)
+            logSync('push', entity.name, record.key, 'success')
+          } else {
+            await entity.model.findOneAndUpdate(
+              { id: record.id },
+              { ...record, updated_at: record.updated_at || now },
+              { upsert: true, returnDocument: 'after' }
+            )
+            db.prepare(`UPDATE ${entity.table} SET synced = 1 WHERE id = ?`).run(record.id)
+            logSync('push', entity.name, record.id, 'success')
+          }
           pushed++
         } catch (err: any) {
           logSync('push', entity.name, record.id, 'error', err.message)
@@ -197,12 +219,24 @@ ipcMain.handle('sync:pull', async () => {
       await connectMongo(mongoUri)
     }
 
-    const results: Record<string, { pulled: number; skipped: number; failed: number }> = {}
+    const results: Record<
+      string,
+      { pulled: number; skipped: number; failed: number; errors: { recordId: string; message: string }[] }
+    > = {}
 
     for (const entity of SYNC_ENTITIES) {
       let pulled = 0
       let skipped = 0
       let failed = 0
+      let orphanSkipped = 0
+      const errors: { recordId: string; message: string }[] = []
+
+      /** Record a pull failure with its reason (logged + returned to the UI). */
+      const noteError = (recordId: string | number, err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err)
+        if (errors.length < 25) errors.push({ recordId: String(recordId), message })
+        console.error(`[sync:pull] ${entity.name} record=${recordId}: ${message}`)
+      }
 
       try {
         const cloudRecords = await entity.model.find({}).lean()
@@ -210,28 +244,62 @@ ipcMain.handle('sync:pull', async () => {
         for (const cloud of cloudRecords) {
           const cloudRecord = cloud as SyncRecord
           try {
-            const local = db.prepare(`SELECT * FROM ${entity.table} WHERE id = ?`).get(cloudRecord.id) as SyncRecord | undefined
+            if (entity.name === 'tombstones') {
+              // Apply tombstone logic
+              const local = db.prepare(`SELECT * FROM tombstones WHERE entity = ? AND record_id = ?`).get(cloudRecord.entity, cloudRecord.record_id)
+              if (!local) {
+                applyCloudTombstones(db, [cloudRecord as any])
+                logSync('pull-tombstone', entity.name, `${cloudRecord.entity}:${cloudRecord.record_id}`, 'success')
+                pulled++
+              } else {
+                logSync('pull-skip', entity.name, `${cloudRecord.entity}:${cloudRecord.record_id}`, 'skipped')
+                skipped++
+              }
+              continue
+            }
+
+            let local: SyncRecord | undefined
+            if (entity.name === 'settings') {
+              local = db.prepare(`SELECT * FROM settings WHERE key = ?`).get(cloudRecord.id) as SyncRecord | undefined
+            } else {
+              local = db.prepare(`SELECT * FROM ${entity.table} WHERE id = ?`).get(cloudRecord.id) as SyncRecord | undefined
+            }
 
             if (!local) {
               // New record from cloud — insert it
-              const columns = Object.keys(cloudRecord).filter((k) => k !== '_id')
+              const columns = Object.keys(cloudRecord).filter((k) => k !== '_id' && k !== '__v')
               const placeholders = columns.map(() => '?').join(', ')
               const values = columns.map((c) => cloudRecord[c])
+
+              // Ensure `id` is mapped to `key` for settings
+              if (entity.name === 'settings') {
+                 const keyIndex = columns.indexOf('id')
+                 if (keyIndex !== -1) columns[keyIndex] = 'key'
+              }
 
               db.prepare(`INSERT OR IGNORE INTO ${entity.table} (${columns.join(', ')}) VALUES (${placeholders})`).run(...values)
               logSync('pull-insert', entity.name, cloudRecord.id, 'success')
               pulled++
             } else {
               // Conflict check
+              // for settings, local uses `key`, let's map it to `id` for resolveConflict
+              if (entity.name === 'settings') {
+                 local.id = local.key as any
+              }
+              
               const winner = resolveConflict(local, cloudRecord)
               if (winner === 'cloud') {
                 // Update local with cloud data
-                const columns = Object.keys(cloudRecord).filter((k) => k !== '_id' && k !== 'id')
+                const columns = Object.keys(cloudRecord).filter((k) => k !== '_id' && k !== 'id' && k !== '__v')
                 const setClause = columns.map((c) => `${c} = ?`).join(', ')
                 const values = columns.map((c) => cloudRecord[c])
                 values.push(cloudRecord.id)
 
-                db.prepare(`UPDATE ${entity.table} SET ${setClause}, synced = 1 WHERE id = ?`).run(...values)
+                if (entity.name === 'settings') {
+                   db.prepare(`UPDATE ${entity.table} SET ${setClause}, synced = 1 WHERE key = ?`).run(...values)
+                } else {
+                   db.prepare(`UPDATE ${entity.table} SET ${setClause}, synced = 1 WHERE id = ?`).run(...values)
+                }
                 logSync('pull-update', entity.name, cloudRecord.id, 'success')
                 pulled++
               } else {
@@ -240,15 +308,38 @@ ipcMain.handle('sync:pull', async () => {
               }
             }
           } catch (err: any) {
-            logSync('pull', entity.name, cloudRecord.id, 'error', err.message)
-            failed++
+            const message = err instanceof Error ? err.message : String(err)
+            // A FOREIGN KEY failure means the cloud row references a parent
+            // (e.g. a child) that doesn't exist — stale/orphaned cloud data.
+            // It can never be applied, so skip it quietly instead of flooding
+            // the log and the UI with one "failed" per orphan.
+            if (/FOREIGN KEY/i.test(message)) {
+              orphanSkipped++
+              skipped++
+              logSync('pull', entity.name, cloudRecord.id, 'skipped-orphan', message)
+            } else {
+              logSync('pull', entity.name, cloudRecord.id, 'error', message)
+              noteError(cloudRecord.id, err)
+              failed++
+            }
           }
         }
       } catch (err: any) {
+        // Whole-entity failure (e.g. the cloud query itself failed). Count it so
+        // the UI shows a non-zero "failed" and explains why instead of silently 0.
         logSync('pull', entity.name, 'batch', 'error', err.message)
+        noteError('batch', err)
+        failed++
       }
 
-      results[entity.name] = { pulled, skipped, failed }
+      if (orphanSkipped > 0) {
+        console.warn(`[sync:pull] ${entity.name}: skipped ${orphanSkipped} orphaned cloud row(s) (missing parent record)`)
+        if (errors.length < 25) {
+          errors.push({ recordId: 'orphans', message: `${orphanSkipped} skipped — reference a missing parent record (stale cloud data)` })
+        }
+      }
+
+      results[entity.name] = { pulled, skipped, failed, errors }
     }
 
     return { results }
@@ -271,14 +362,16 @@ export function startAutoSync(intervalMs: number): void {
     if (!connected) return
 
     try {
-      const db = getDb()
-      const unsynced = db.prepare("SELECT COUNT(*) as c FROM children WHERE synced = 0").get() as any
-      if ((unsynced?.c ?? 0) > 0) {
-        // Trigger push via ipcMain internally
-        const handler = ipcMain.listeners?.('sync:push')?.[0]
-        if (typeof handler === 'function') {
-          await (handler as any)({} as any)
-        }
+      // Trigger push via ipcMain internally
+      const pushHandler = ipcMain.listeners?.('sync:push')?.[0]
+      if (typeof pushHandler === 'function') {
+        await (pushHandler as any)({} as any)
+      }
+
+      // Trigger pull via ipcMain internally
+      const pullHandler = ipcMain.listeners?.('sync:pull')?.[0]
+      if (typeof pullHandler === 'function') {
+        await (pullHandler as any)({} as any)
       }
     } catch (err) {
       console.error('Auto-sync error:', err)

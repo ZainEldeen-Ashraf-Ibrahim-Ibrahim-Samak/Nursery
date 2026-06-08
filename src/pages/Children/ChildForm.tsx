@@ -9,6 +9,13 @@ import { Card } from '../../components/ui/Card.js'
 import { Alert } from '../../components/ui/Alert.js'
 import type { ServiceType, UnitType } from '../../types/index.js'
 
+
+interface ServiceRow {
+  service: ServiceType
+  unit: UnitType
+  price: number
+}
+
 export default function ChildForm() {
   const { t, i18n } = useTranslation()
   const navigate = useNavigate()
@@ -24,11 +31,9 @@ export default function ChildForm() {
     guardian_phone: '',
     child_phone: '',
     national_id: '',
-    service: 'حضانة' as ServiceType,
-    unit: 'شهر' as UnitType,
-    price: 0,
     reg_date: new Date().toISOString().split('T')[0],
     notes: '',
+    services: [{ service: 'حضانة' as ServiceType, unit: 'شهر' as UnitType, price: 0 }] as ServiceRow[]
   })
 
   const [formErrors, setFormErrors] = useState<Record<string, string>>({})
@@ -53,28 +58,28 @@ export default function ChildForm() {
   useEffect(() => {
     if (isEdit) {
       setIsLoadingChild(true)
-      // First ensure children are loaded in the store
       const loadChild = async () => {
         let child = children.find((c) => c.id === Number(id))
         if (!child) {
           await fetchChildren()
-          // Re-retrieve from store
           const currentStore = useChildrenStore.getState()
           child = currentStore.children.find((c) => c.id === Number(id))
         }
 
         if (child) {
+          const loadedServices = child.services && child.services.length > 0 
+            ? child.services.map(s => ({ service: s.service, unit: s.unit, price: s.price }))
+            : [{ service: child.service, unit: child.unit, price: child.price }]
+
           setFormData({
             name: child.name,
             guardian: child.guardian,
             guardian_phone: child.guardian_phone,
             child_phone: child.child_phone || '',
             national_id: child.national_id || '',
-            service: child.service,
-            unit: child.unit,
-            price: child.price,
             reg_date: child.reg_date,
             notes: child.notes || '',
+            services: loadedServices
           })
         }
         setIsLoadingChild(false)
@@ -83,47 +88,61 @@ export default function ChildForm() {
     }
   }, [id, isEdit, fetchChildren])
 
-  // Automatically update default price when service/unit changes
-  useEffect(() => {
-    // Skip auto-pricing on load when editing to avoid overwriting existing custom price
-    if (isEdit && isLoadingChild) return
+  const handleAddService = () => {
+    setFormData(prev => ({
+      ...prev,
+      services: [...prev.services, { service: 'استضافة', unit: 'يوم', price: 0 }]
+    }))
+  }
 
-    let priceKey = ''
-    const { service, unit } = formData
+  const handleRemoveService = (index: number) => {
+    setFormData(prev => ({
+      ...prev,
+      services: prev.services.filter((_, i) => i !== index)
+    }))
+  }
 
-    if (service === 'حضانة') {
-      if (unit === 'شهر') priceKey = 'nursery_monthly'
-      if (unit === 'يوم') priceKey = 'nursery_daily'
-      if (unit === 'ساعة') priceKey = 'nursery_hourly'
-    } else if (service === 'استضافة') {
-      if (unit === 'شهر') priceKey = 'hosting_monthly'
-      if (unit === 'يوم') priceKey = 'hosting_daily'
-      if (unit === 'ساعة') priceKey = 'hosting_hourly'
-    } else if (service === 'جلسة') {
-      if (unit === 'جلسة' || unit === 'ساعة') priceKey = 'session_hourly'
-      if (unit === 'يوم') priceKey = 'session_daily'
-    }
+  const handleServiceChange = (index: number, field: keyof ServiceRow, value: any) => {
+    setFormData(prev => {
+      const newServices = [...prev.services]
+      const row = { ...newServices[index], [field]: value }
+      
+      // Auto-update unit if service changes to session
+      if (field === 'service' && value === 'جلسة' && row.unit !== 'جلسة' && row.unit !== 'يوم') {
+        row.unit = 'جلسة'
+      }
 
-    if (priceKey && settings[priceKey] !== undefined) {
-      setFormData((prev) => ({
-        ...prev,
-        price: Number(settings[priceKey]),
-      }))
-    }
-  }, [formData.service, formData.unit, settings, isEdit, isLoadingChild])
+      // Auto-price if service or unit changes
+      if (field === 'service' || field === 'unit') {
+        let priceKey = ''
+        if (row.service === 'حضانة') {
+          if (row.unit === 'شهر') priceKey = 'nursery_monthly'
+          if (row.unit === 'يوم') priceKey = 'nursery_daily'
+          if (row.unit === 'ساعة') priceKey = 'nursery_hourly'
+        } else if (row.service === 'استضافة') {
+          if (row.unit === 'شهر') priceKey = 'hosting_monthly'
+          if (row.unit === 'يوم') priceKey = 'hosting_daily'
+          if (row.unit === 'ساعة') priceKey = 'hosting_hourly'
+        } else if (row.service === 'جلسة') {
+          if (row.unit === 'جلسة' || row.unit === 'ساعة') priceKey = 'session_hourly'
+          if (row.unit === 'يوم') priceKey = 'session_daily'
+        }
+        if (priceKey && settings[priceKey] !== undefined) {
+          row.price = Number(settings[priceKey])
+        }
+      }
+
+      newServices[index] = row
+      return { ...prev, services: newServices }
+    })
+  }
 
   // Form Validation
   const validateForm = () => {
     const errors: Record<string, string> = {}
 
-    if (!formData.name.trim()) {
-      errors.name = i18n.language === 'ar' ? 'اسم الطفل مطلوب' : 'Child name is required'
-    }
-
-    if (!formData.guardian.trim()) {
-      errors.guardian = i18n.language === 'ar' ? 'اسم ولي الأمر مطلوب' : 'Guardian name is required'
-    }
-
+    if (!formData.name.trim()) errors.name = i18n.language === 'ar' ? 'اسم الطفل مطلوب' : 'Child name is required'
+    if (!formData.guardian.trim()) errors.guardian = i18n.language === 'ar' ? 'اسم ولي الأمر مطلوب' : 'Guardian name is required'
     if (!formData.guardian_phone.trim()) {
       errors.guardian_phone = i18n.language === 'ar' ? 'رقم هاتف ولي الأمر مطلوب' : 'Guardian phone is required'
     } else if (!/^\+?[0-9\s-]{8,15}$/.test(formData.guardian_phone)) {
@@ -133,17 +152,26 @@ export default function ChildForm() {
     if (formData.child_phone.trim() && !/^\+?[0-9\s-]{8,15}$/.test(formData.child_phone)) {
       errors.child_phone = i18n.language === 'ar' ? 'رقم هاتف الطفل غير صالح' : 'Invalid child phone number'
     }
-
     if (formData.national_id.trim() && !/^[0-9]{14}$/.test(formData.national_id)) {
       errors.national_id = i18n.language === 'ar' ? 'الرقم القومي يجب أن يتكون من 14 رقماً' : 'National ID must be exactly 14 digits'
     }
-
-    if (formData.price < 0) {
-      errors.price = i18n.language === 'ar' ? 'السعر لا يمكن أن يكون سالباً' : 'Price cannot be negative'
-    }
-
     if (!formData.reg_date) {
       errors.reg_date = i18n.language === 'ar' ? 'تاريخ التسجيل مطلوب' : 'Registration date is required'
+    }
+
+    if (formData.services.length === 0) {
+      errors.services = i18n.language === 'ar' ? 'يجب اختيار خدمة واحدة على الأقل' : 'At least one service is required'
+    } else {
+      const seen = new Set()
+      let hasDupes = false
+      let invalidPrice = false
+      for (const s of formData.services) {
+        if (seen.has(s.service)) hasDupes = true
+        seen.add(s.service)
+        if (s.price < 0) invalidPrice = true
+      }
+      if (hasDupes) errors.services = i18n.language === 'ar' ? 'لا يمكن إضافة نفس الخدمة أكثر من مرة' : 'Cannot add duplicate services'
+      if (invalidPrice) errors.services = i18n.language === 'ar' ? 'السعر لا يمكن أن يكون سالباً' : 'Price cannot be negative'
     }
 
     setFormErrors(errors)
@@ -159,40 +187,23 @@ export default function ChildForm() {
 
     setIsSubmitting(true)
     try {
+      const payload: any = {
+        name: formData.name.trim(),
+        guardian: formData.guardian.trim(),
+        guardian_phone: formData.guardian_phone.trim(),
+        child_phone: formData.child_phone.trim() || null,
+        national_id: formData.national_id.trim() || null,
+        reg_date: formData.reg_date,
+        notes: formData.notes.trim() || null,
+        services: formData.services
+      }
+
       if (isEdit) {
-        const patch = {
-          name: formData.name.trim(),
-          guardian: formData.guardian.trim(),
-          guardian_phone: formData.guardian_phone.trim(),
-          child_phone: formData.child_phone.trim() || null,
-          national_id: formData.national_id.trim() || null,
-          service: formData.service,
-          unit: formData.unit,
-          price: formData.price,
-          reg_date: formData.reg_date,
-          notes: formData.notes.trim() || null,
-        }
-        const result = await updateChild(Number(id), patch)
-        if (result) {
-          navigate('/children')
-        }
+        const result = await updateChild(Number(id), payload)
+        if (result) navigate('/children')
       } else {
-        const childInput = {
-          name: formData.name.trim(),
-          guardian: formData.guardian.trim(),
-          guardian_phone: formData.guardian_phone.trim(),
-          child_phone: formData.child_phone.trim() || null,
-          national_id: formData.national_id.trim() || null,
-          service: formData.service,
-          unit: formData.unit,
-          price: formData.price,
-          reg_date: formData.reg_date,
-          notes: formData.notes.trim() || null,
-        }
-        const result = await addChild(childInput)
-        if (result) {
-          navigate('/children')
-        }
+        const result = await addChild(payload)
+        if (result) navigate('/children')
       }
     } catch (err) {
       console.error('Submit child failed:', err)
@@ -200,18 +211,6 @@ export default function ChildForm() {
       setIsSubmitting(false)
     }
   }
-
-  // Adjust unit choices based on service type
-  const unitOptions = formData.service === 'جلسة'
-    ? [
-        { value: 'جلسة', label: t('units.session') },
-        { value: 'يوم', label: t('units.day') },
-      ]
-    : [
-        { value: 'شهر', label: t('units.month') },
-        { value: 'يوم', label: t('units.day') },
-        { value: 'ساعة', label: t('units.hour') },
-      ]
 
   if (isLoadingChild) {
     return (
@@ -244,7 +243,6 @@ export default function ChildForm() {
       <form onSubmit={handleSubmit} className="space-y-6">
         <Card className="p-6 space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* Child Name */}
             <div className="space-y-1.5">
               <label className="text-sm font-semibold text-slate-700">
                 {t('child_name')} <span className="text-red-500">*</span>
@@ -257,7 +255,6 @@ export default function ChildForm() {
               />
             </div>
 
-            {/* Guardian Name */}
             <div className="space-y-1.5">
               <label className="text-sm font-semibold text-slate-700">
                 {t('guardian')} <span className="text-red-500">*</span>
@@ -270,7 +267,6 @@ export default function ChildForm() {
               />
             </div>
 
-            {/* Guardian Phone */}
             <div className="space-y-1.5">
               <label className="text-sm font-semibold text-slate-700">
                 {t('guardian_phone')} <span className="text-red-500">*</span>
@@ -283,7 +279,6 @@ export default function ChildForm() {
               />
             </div>
 
-            {/* Child Phone (Optional) */}
             <div className="space-y-1.5">
               <label className="text-sm font-semibold text-slate-700">
                 {t('child_phone')} <span className="text-xs text-slate-400 font-normal">({i18n.language === 'ar' ? 'اختياري' : 'Optional'})</span>
@@ -296,7 +291,6 @@ export default function ChildForm() {
               />
             </div>
 
-            {/* National ID (Optional) */}
             <div className="space-y-1.5">
               <label className="text-sm font-semibold text-slate-700">
                 {t('national_id')} <span className="text-xs text-slate-400 font-normal">({i18n.language === 'ar' ? '14 رقماً، اختياري' : '14 digits, optional'})</span>
@@ -310,7 +304,6 @@ export default function ChildForm() {
               />
             </div>
 
-            {/* Registration Date */}
             <div className="space-y-1.5">
               <label className="text-sm font-semibold text-slate-700">
                 {t('reg_date')} <span className="text-red-500">*</span>
@@ -322,62 +315,85 @@ export default function ChildForm() {
                 error={formErrors.reg_date}
               />
             </div>
+          </div>
 
-            {/* Service Dropdown */}
-            <div className="space-y-1.5">
-              <label className="text-sm font-semibold text-slate-700">
-                {t('service')} <span className="text-red-500">*</span>
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <label className="text-lg font-bold text-slate-800">
+                {i18n.language === 'ar' ? 'الخدمات المشترك بها' : 'Enrolled Services'}
               </label>
-              <Select
-                value={formData.service}
-                onChange={(e) => {
-                  const newService = e.target.value as ServiceType
-                  // Adjust unit default if switching to session
-                  const newUnit = newService === 'جلسة' ? 'جلسة' as UnitType : 'شهر' as UnitType
-                  setFormData((prev) => ({ ...prev, service: newService, unit: newUnit }))
-                }}
-                options={[
-                  { value: 'حضانة', label: t('services.nursery') },
-                  { value: 'استضافة', label: t('services.hosting') },
-                  { value: 'جلسة', label: t('services.session') },
-                ]}
-              />
+              <Button type="button" variant="outline" size="sm" onClick={handleAddService}>
+                <span className="ml-1">➕</span>
+                {i18n.language === 'ar' ? 'إضافة خدمة' : 'Add Service'}
+              </Button>
             </div>
+            
+            {formErrors.services && (
+              <p className="text-sm text-red-500 font-medium">{formErrors.services}</p>
+            )}
 
-            {/* Unit Dropdown */}
-            <div className="space-y-1.5">
-              <label className="text-sm font-semibold text-slate-700">
-                {t('unit')} <span className="text-red-500">*</span>
-              </label>
-              <Select
-                value={formData.unit}
-                onChange={(e) => setFormData((prev) => ({ ...prev, unit: e.target.value as UnitType }))}
-                options={unitOptions}
-              />
-            </div>
+            <div className="space-y-3">
+              {formData.services.map((row, index) => {
+                const unitOptions = row.service === 'جلسة'
+                  ? [
+                      { value: 'جلسة', label: t('units.session') },
+                      { value: 'يوم', label: t('units.day') },
+                    ]
+                  : [
+                      { value: 'شهر', label: t('units.month') },
+                      { value: 'يوم', label: t('units.day') },
+                      { value: 'ساعة', label: t('units.hour') },
+                    ]
 
-            {/* Price (Editable, defaulted) */}
-            <div className="space-y-1.5">
-              <label className="text-sm font-semibold text-slate-700">
-                {t('price')} (EGP) <span className="text-red-500">*</span>
-              </label>
-              <Input
-                type="number"
-                value={formData.price}
-                onChange={(e) => setFormData((prev) => ({ ...prev, price: Number(e.target.value) }))}
-                error={formErrors.price}
-                min={0}
-                placeholder="0.00"
-              />
-              <span className="text-xs text-slate-400">
-                {i18n.language === 'ar'
-                  ? 'يتم تعبئة السعر تلقائياً بناءً على إعدادات التسعير الافتراضية، ويمكنك تعديله لهذا الطفل فقط.'
-                  : 'Pre-filled from pricing defaults, but customizable for this child.'}
-              </span>
+                return (
+                  <div key={index} className="flex flex-col md:flex-row gap-3 items-end p-4 bg-slate-50 border border-slate-200 rounded-lg">
+                    <div className="flex-1 space-y-1.5 w-full">
+                      <label className="text-xs font-semibold text-slate-500">{t('service')}</label>
+                      <Select
+                        value={row.service}
+                        onChange={(e) => handleServiceChange(index, 'service', e.target.value)}
+                        options={[
+                          { value: 'حضانة', label: t('services.nursery') },
+                          { value: 'استضافة', label: t('services.hosting') },
+                          { value: 'جلسة', label: t('services.session') },
+                        ]}
+                      />
+                    </div>
+                    <div className="flex-1 space-y-1.5 w-full">
+                      <label className="text-xs font-semibold text-slate-500">{t('unit')}</label>
+                      <Select
+                        value={row.unit}
+                        onChange={(e) => handleServiceChange(index, 'unit', e.target.value)}
+                        options={unitOptions}
+                      />
+                    </div>
+                    <div className="flex-1 space-y-1.5 w-full">
+                      <label className="text-xs font-semibold text-slate-500">{t('price')} (EGP)</label>
+                      <Input
+                        type="number"
+                        min={0}
+                        value={row.price}
+                        onChange={(e) => handleServiceChange(index, 'price', Number(e.target.value))}
+                      />
+                    </div>
+                    {formData.services.length > 1 && (
+                      <div className="pb-1">
+                        <Button 
+                          type="button" 
+                          variant="ghost" 
+                          className="text-red-500 hover:text-red-700 hover:bg-red-50 p-2"
+                          onClick={() => handleRemoveService(index)}
+                        >
+                          🗑️
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
             </div>
           </div>
 
-          {/* Notes */}
           <div className="space-y-1.5">
             <label className="text-sm font-semibold text-slate-700">
               {t('notes')}
@@ -392,9 +408,8 @@ export default function ChildForm() {
           </div>
         </Card>
 
-        {/* Buttons */}
         <div className="flex justify-end gap-3">
-          <Button variant="outline" onClick={() => navigate('/children')} disabled={isSubmitting}>
+          <Button type="button" variant="outline" onClick={() => navigate('/children')} disabled={isSubmitting}>
             {t('cancel')}
           </Button>
           <Button type="submit" variant="primary" isLoading={isSubmitting}>

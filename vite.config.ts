@@ -1,9 +1,15 @@
+/// <reference types="vitest/config" />
 import { defineConfig } from 'vite'
+import { configDefaults } from 'vitest/config'
 import path from 'node:path'
 import react from '@vitejs/plugin-react'
 import electron from 'vite-plugin-electron'
 
 export default defineConfig({
+  // Playwright owns tests/e2e (run via `npm run test:e2e`); keep them out of Vitest.
+  test: {
+    exclude: [...configDefaults.exclude, 'tests/e2e/**'],
+  },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),

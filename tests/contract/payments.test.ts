@@ -68,6 +68,13 @@ describe('Payments IPC Contract tests', () => {
         (2, 'طفل 2', 'ولي 2', '011', 'استضافة', 'يوم', 150, '2026-01-01', '2026-06-06', '2026-06-06', 0) -- Inactive
     `).run()
 
+    db.prepare(`
+      INSERT INTO child_services (child_id, service, unit, price, created_at, updated_at)
+      VALUES 
+        (1, 'حضانة', 'شهر', 2500, '2026-06-06', '2026-06-06'),
+        (2, 'استضافة', 'يوم', 150, '2026-06-06', '2026-06-06')
+    `).run()
+
     employeeSession()
 
     // Generate for June 2026
@@ -105,8 +112,13 @@ describe('Payments IPC Contract tests', () => {
     `).run()
 
     db.prepare(`
-      INSERT INTO payments (id, child_id, month, year, service, unit, quantity, price, total, paid, balance, status, created_at, updated_at, synced)
-      VALUES (100, 10, 'يونيو', 2026, 'حضانة', 'شهر', 1, 2000, 2000, 0, 2000, 'unpaid', '2026-06-06', '2026-06-06', 1)
+      INSERT INTO child_services (id, child_id, service, unit, price, created_at, updated_at)
+      VALUES (10, 10, 'حضانة', 'شهر', 2000, '2026-06-06', '2026-06-06')
+    `).run()
+
+    db.prepare(`
+      INSERT INTO payments (id, child_id, service_id, month, year, service, unit, quantity, price, total, paid, balance, status, created_at, updated_at, synced)
+      VALUES (100, 10, 10, 'يونيو', 2026, 'حضانة', 'شهر', 1, 2000, 2000, 0, 2000, 'unpaid', '2026-06-06', '2026-06-06', 1)
     `).run()
 
     employeeSession()
@@ -140,10 +152,17 @@ describe('Payments IPC Contract tests', () => {
     `).run()
 
     db.prepare(`
-      INSERT INTO payments (id, child_id, month, year, service, unit, quantity, price, total, paid, balance, status, created_at, updated_at, synced)
+      INSERT INTO child_services (id, child_id, service, unit, price, created_at, updated_at)
       VALUES 
-        (200, 20, 'يونيو', 2026, 'حضانة', 'شهر', 1, 2000, 2000, 500, 1500, 'partial', '2026-06-06', '2026-06-06', 1),
-        (201, 21, 'يونيو', 2026, 'حضانة', 'شهر', 1, 1500, 1500, 0, 1500, 'unpaid', '2026-06-06', '2026-06-06', 1)
+        (20, 20, 'حضانة', 'شهر', 2000, '2026-06-06', '2026-06-06'),
+        (21, 21, 'حضانة', 'شهر', 1500, '2026-06-06', '2026-06-06')
+    `).run()
+
+    db.prepare(`
+      INSERT INTO payments (id, child_id, service_id, month, year, service, unit, quantity, price, total, paid, balance, status, created_at, updated_at, synced)
+      VALUES 
+        (200, 20, 20, 'يونيو', 2026, 'حضانة', 'شهر', 1, 2000, 2000, 500, 1500, 'partial', '2026-06-06', '2026-06-06', 1),
+        (201, 21, 21, 'يونيو', 2026, 'حضانة', 'شهر', 1, 1500, 1500, 0, 1500, 'unpaid', '2026-06-06', '2026-06-06', 1)
     `).run()
 
     adminSession()

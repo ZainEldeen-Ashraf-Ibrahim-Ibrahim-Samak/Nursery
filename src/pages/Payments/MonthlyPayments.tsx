@@ -8,6 +8,7 @@ import { Stat } from '../../components/ui/Stat.js'
 import { Button } from '../../components/ui/Button.js'
 import { Select } from '../../components/ui/Select.js'
 import { Alert } from '../../components/ui/Alert.js'
+import React from 'react'
 
 const arabicMonths = [
   'يناير',
@@ -47,6 +48,7 @@ export default function MonthlyPayments() {
 
   const {
     payments,
+    byChild,
     summary,
     isLoading,
     error,
@@ -144,6 +146,12 @@ export default function MonthlyPayments() {
       style: 'currency',
       currency: 'EGP',
     }).format(amount)
+  }
+
+  const getStatusBadge = (status: string) => {
+    if (status === 'paid') return <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700 ring-1 ring-inset ring-emerald-600/20">{t('paid', 'Paid')}</span>
+    if (status === 'partial') return <span className="inline-flex items-center rounded-full bg-amber-50 px-2 py-1 text-xs font-medium text-amber-700 ring-1 ring-inset ring-amber-600/20">{t('partial', 'Partial')}</span>
+    return <span className="inline-flex items-center rounded-full bg-red-50 px-2 py-1 text-xs font-medium text-red-700 ring-1 ring-inset ring-red-600/10">{t('unpaid', 'Unpaid')}</span>
   }
 
   // Export handlers
@@ -319,15 +327,79 @@ export default function MonthlyPayments() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-slate-700">
-                  {payments.map((payment) => (
-                    <PaymentRow
-                      key={payment.id}
-                      payment={payment}
-                      isSelected={selectedIds.includes(payment.id)}
-                      onToggleSelect={() => handleToggleSelectRow(payment.id)}
-                      onUpdate={handleUpdateRow}
-                    />
-                  ))}
+                  {byChild && byChild.length > 0 ? byChild.map((childGroup) => {
+                    const childPaymentIds = childGroup.services.map((s: any) => s.id)
+                    const isAllSelected = childPaymentIds.every((id: number) => selectedIds.includes(id))
+                    
+                    const handleToggleChildSelect = () => {
+                      if (isAllSelected) {
+                        setSelectedIds(prev => prev.filter(id => !childPaymentIds.includes(id)))
+                      } else {
+                        setSelectedIds(prev => [...new Set([...prev, ...childPaymentIds])])
+                      }
+                    }
+
+                    return (
+                      <React.Fragment key={childGroup.child_id}>
+                        <tr className="bg-slate-50/50 border-t-2 border-slate-200">
+                          <td className="px-4 py-3 text-center">
+                            <input
+                              type="checkbox"
+                              checked={isAllSelected && childPaymentIds.length > 0}
+                              onChange={handleToggleChildSelect}
+                              className="h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary cursor-pointer"
+                            />
+                          </td>
+                          <td className="px-4 py-3 font-bold text-slate-900 whitespace-nowrap text-start">
+                            {childGroup.child_name}
+                          </td>
+                          <td className="px-4 py-3 text-xs text-slate-500 font-semibold" colSpan={3}>
+                            {i18n.language === 'ar' ? `إجمالي الطفل (${childGroup.services.length} خدمات)` : `Child Total (${childGroup.services.length} services)`}
+                          </td>
+                          <td className="px-4 py-3 font-mono font-bold text-slate-800 whitespace-nowrap text-start">
+                            {formatCurrency(childGroup.totalInvoiced)}
+                          </td>
+                          <td className="px-4 py-3 font-mono font-bold text-slate-800 whitespace-nowrap text-start">
+                            {formatCurrency(childGroup.totalCollected)}
+                          </td>
+                          <td className="px-4 py-3 font-mono whitespace-nowrap text-start">
+                            {childGroup.balance < 0 ? (
+                              <span className="text-emerald-600 font-bold">
+                                {formatCurrency(Math.abs(childGroup.balance))} ({i18n.language === 'ar' ? 'رصيد' : 'Credit'})
+                              </span>
+                            ) : childGroup.balance > 0 ? (
+                              <span className="text-red-600 font-bold">{formatCurrency(childGroup.balance)}</span>
+                            ) : (
+                              <span className="text-slate-400 font-bold">0.00</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 whitespace-nowrap text-start">
+                            {getStatusBadge(childGroup.status)}
+                          </td>
+                          <td colSpan={2}></td>
+                        </tr>
+                        {childGroup.services.map((payment: any) => (
+                          <PaymentRow
+                            key={payment.id}
+                            payment={payment}
+                            isSelected={selectedIds.includes(payment.id)}
+                            onToggleSelect={() => handleToggleSelectRow(payment.id)}
+                            onUpdate={handleUpdateRow}
+                          />
+                        ))}
+                      </React.Fragment>
+                    )
+                  }) : (
+                    payments.map((payment) => (
+                      <PaymentRow
+                        key={payment.id}
+                        payment={payment}
+                        isSelected={selectedIds.includes(payment.id)}
+                        onToggleSelect={() => handleToggleSelectRow(payment.id)}
+                        onUpdate={handleUpdateRow}
+                      />
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>

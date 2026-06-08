@@ -23,6 +23,12 @@ const api = {
     deactivate: (args: any) => ipcRenderer.invoke('children:deactivate', args),
     statement: (args: { childId: number }) => ipcRenderer.invoke('children:statement', args),
   },
+  childServices: {
+    list: (args: { childId: number }) => ipcRenderer.invoke('childServices:list', args),
+    add: (args: any) => ipcRenderer.invoke('childServices:add', args),
+    update: (args: any) => ipcRenderer.invoke('childServices:update', args),
+    remove: (args: { id: number }) => ipcRenderer.invoke('childServices:remove', args),
+  },
 
   // Payments
   payments: {

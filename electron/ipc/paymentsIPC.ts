@@ -24,6 +24,15 @@ export function calculatePayment(quantity: number, price: number, paid: number):
   return { total, balance, status }
 }
 
+export function calculateChildStatusRollup(payments: { status: PaymentStatus }[]): PaymentStatus {
+  if (payments.length === 0) return 'unpaid'
+  const allPaid = payments.every(p => p.status === 'paid')
+  const allUnpaid = payments.every(p => p.status === 'unpaid')
+  if (allPaid) return 'paid'
+  if (allUnpaid) return 'unpaid'
+  return 'partial'
+}
+
 function checkAuth() {
   const user = getCurrentUser()
   if (!user) {
@@ -54,16 +63,44 @@ ipcMain.handle('payments:get', async (_event, { month, year }) => {
     let totalCollected = 0
     let arrears = 0
     
+    const childMap = new Map<number, any>()
+    
     for (const p of payments) {
       totalInvoiced += p.total
       totalCollected += p.paid
       if (p.balance > 0) {
         arrears += p.balance
       }
+      
+      if (!childMap.has(p.child_id)) {
+        childMap.set(p.child_id, {
+          child_id: p.child_id,
+          child_name: p.child_name,
+          services: [],
+          totalInvoiced: 0,
+          totalCollected: 0,
+          balance: 0,
+          status: 'unpaid'
+        })
+      }
+      
+      const rollUp = childMap.get(p.child_id)
+      rollUp.services.push(p)
+      rollUp.totalInvoiced += p.total
+      rollUp.totalCollected += p.paid
+      rollUp.balance += p.balance
+    }
+    
+    for (const rollUp of childMap.values()) {
+      rollUp.status = calculateChildStatusRollup(rollUp.services)
+      rollUp.totalInvoiced = Number(rollUp.totalInvoiced.toFixed(2))
+      rollUp.totalCollected = Number(rollUp.totalCollected.toFixed(2))
+      rollUp.balance = Number(rollUp.balance.toFixed(2))
     }
     
     return {
       payments,
+      byChild: Array.from(childMap.values()).sort((a, b) => a.child_name.localeCompare(b.child_name)),
       summary: {
         totalInvoiced: Number(totalInvoiced.toFixed(2)),
         totalCollected: Number(totalCollected.toFixed(2)),
@@ -85,34 +122,40 @@ ipcMain.handle('payments:generate', async (_event, { month, year }) => {
       throw new Error('Month and year are required')
     }
     
-    // Fetch all active children
-    const activeChildren = db.prepare('SELECT * FROM children WHERE is_active = 1').all() as any[]
+    // Fetch all active enrollments for active children
+    const activeEnrollments = db.prepare(`
+      SELECT cs.* 
+      FROM child_services cs
+      JOIN children c ON cs.child_id = c.id
+      WHERE c.is_active = 1
+    `).all() as any[]
     
     let createdCount = 0
     const now = new Date().toISOString()
     
-    const checkStmt = db.prepare('SELECT id FROM payments WHERE child_id = ? AND month = ? AND year = ?')
+    const checkStmt = db.prepare('SELECT id FROM payments WHERE child_id = ? AND service_id = ? AND month = ? AND year = ?')
     const insertStmt = db.prepare(`
       INSERT INTO payments (
-        child_id, month, year, service, unit, quantity, price, total, paid, balance, status, created_at, updated_at, synced
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, 0)
+        child_id, service_id, month, year, service, unit, quantity, price, total, paid, balance, status, created_at, updated_at, synced
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, 0)
     `)
     
     const transaction = db.transaction(() => {
-      for (const child of activeChildren) {
-        const existing = checkStmt.get(child.id, month, year)
+      for (const enrollment of activeEnrollments) {
+        const existing = checkStmt.get(enrollment.child_id, enrollment.id, month, year)
         if (!existing) {
           const quantity = 1
-          const { total, balance, status } = calculatePayment(quantity, child.price, 0)
+          const { total, balance, status } = calculatePayment(quantity, enrollment.price, 0)
           
           insertStmt.run(
-            child.id,
+            enrollment.child_id,
+            enrollment.id,
             month,
             year,
-            child.service,
-            child.unit,
+            enrollment.service,
+            enrollment.unit,
             quantity,
-            child.price,
+            enrollment.price,
             total,
             balance,
             status,

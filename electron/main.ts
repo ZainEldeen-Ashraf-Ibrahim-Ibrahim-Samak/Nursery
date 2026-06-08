@@ -11,6 +11,7 @@ import { seedDatabase } from './db/seed.js'
 // Import IPC modules to register handlers
 import './ipc/authIPC.js'
 import './ipc/childrenIPC.js'
+import './ipc/childServicesIPC.js'
 import './ipc/paymentsIPC.js'
 import './ipc/salariesIPC.js'
 import './ipc/expensesIPC.js'

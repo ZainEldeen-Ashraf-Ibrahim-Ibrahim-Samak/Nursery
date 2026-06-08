@@ -42,31 +42,46 @@ export function getChildStatement(child: any, existingPayments: any[], currentDa
     }
   }
 
-  const paymentMap = new Map<string, any>()
+  const paymentMap = new Map<string, any[]>()
   for (const p of existingPayments) {
     const key = `${p.year}-${p.month}`
-    paymentMap.set(key, p)
+    if (!paymentMap.has(key)) {
+      paymentMap.set(key, [])
+    }
+    paymentMap.get(key)!.push(p)
   }
 
-  const rows = statementMonths.map(({ month, year }) => {
+  const rows: any[] = []
+  
+  for (const { month, year } of statementMonths) {
     const key = `${year}-${month}`
-    const existing = paymentMap.get(key)
-    if (existing) {
-      return {
-        month,
-        year,
-        service: existing.service,
-        unit: existing.unit,
-        quantity: existing.quantity,
-        price: existing.price,
-        total: existing.total,
-        paid: existing.paid,
-        balance: existing.balance,
-        status: existing.status,
-        notes: existing.notes || ''
+    const existingList = paymentMap.get(key)
+    
+    if (existingList && existingList.length > 0) {
+      for (const existing of existingList) {
+        rows.push({
+          month,
+          year,
+          service: existing.service,
+          unit: existing.unit,
+          quantity: existing.quantity,
+          price: existing.price,
+          total: existing.total,
+          paid: existing.paid,
+          balance: existing.balance,
+          status: existing.status,
+          notes: existing.notes || ''
+        })
       }
     } else {
-      return {
+      // Create empty placeholder rows for each active enrollment of the child
+      // However, we don't have child_services here directly. We just have child.service.
+      // But actually, we only need placeholders if we want to show unpaid expected amounts.
+      // Since we don't have the child_services array passed in getChildStatement, 
+      // maybe we should just create a placeholder using the child's default service?
+      // Or we can fetch child_services in the calling code.
+      // For now, if there's no payment, we just insert the default child service as a placeholder.
+      rows.push({
         month,
         year,
         service: child.service,
@@ -76,11 +91,11 @@ export function getChildStatement(child: any, existingPayments: any[], currentDa
         total: 0,
         paid: 0,
         balance: 0,
-        status: 'unpaid' as const,
+        status: 'unpaid',
         notes: ''
-      }
+      })
     }
-  })
+  }
 
   // Sort reverse chronological
   rows.sort((a, b) => {

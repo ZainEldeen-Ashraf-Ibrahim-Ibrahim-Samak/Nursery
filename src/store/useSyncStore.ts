@@ -17,7 +17,13 @@ interface SyncStatus {
 }
 
 interface PushPullResults {
-  [entityName: string]: { pushed?: number; pulled?: number; skipped?: number; failed?: number }
+  [entityName: string]: {
+    pushed?: number
+    pulled?: number
+    skipped?: number
+    failed?: number
+    errors?: { recordId: string; message: string }[]
+  }
 }
 
 interface SyncState {
@@ -65,7 +71,16 @@ export const useSyncStore = create<SyncState>((set, get) => ({
     set({ isLoading: true, error: null })
     try {
       const result = await window.api.sync.status()
-      set({ status: result, isLoading: false })
+      // Rehydrate the auto-sync toggle from the persisted setting so it survives
+      // an app restart instead of always showing "Off".
+      const next: any = { status: result, isLoading: false }
+      if (typeof result?.autoSyncEnabled === 'boolean') {
+        next.autoSyncEnabled = result.autoSyncEnabled
+        if (result.autoSyncIntervalMinutes) {
+          next.autoSyncIntervalMinutes = result.autoSyncIntervalMinutes
+        }
+      }
+      set(next)
     } catch (err: any) {
       set({ error: handleError(err), isLoading: false })
     }

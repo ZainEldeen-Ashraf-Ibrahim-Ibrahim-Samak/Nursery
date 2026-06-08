@@ -29,7 +29,7 @@ description: "Task list for Multi-Service Enrollment & Full-Database Sync"
 
 **Purpose**: Confirm test tooling is ready for the new tests.
 
-- [ ] T001 [P] Verify Vitest and Playwright configs run (add `tests/unit/` and `tests/e2e/` dirs if missing); confirm `npx vitest run` and `npx playwright test` execute against the current branch
+- [X] T001 [P] Verify Vitest and Playwright configs run (add `tests/unit/` and `tests/e2e/` dirs if missing); confirm `npx vitest run` and `npx playwright test` execute against the current branch
 
 ---
 
@@ -39,7 +39,7 @@ description: "Task list for Multi-Service Enrollment & Full-Database Sync"
 
 **⚠️ CRITICAL**: Complete before starting either user story.
 
-- [ ] T002 Add `ServiceEnrollment` type, extend `Child` with `services: ServiceEnrollment[]`, and add `service_id?: number` to `Payment` in `src/types/index.ts`
+- [X] T002 Add `ServiceEnrollment` type, extend `Child` with `services: ServiceEnrollment[]`, and add `service_id?: number` to `Payment` in `src/types/index.ts`
 
 **Checkpoint**: Shared types available — US1 and US2 can begin.
 
@@ -53,21 +53,21 @@ description: "Task list for Multi-Service Enrollment & Full-Database Sync"
 
 ### Tests for User Story 1 ⚠️ (write first, ensure they FAIL)
 
-- [ ] T003 [P] [US1] Unit test: migrations 004/005 backfill — every existing child gets exactly one `child_services` row and every legacy payment links to it, in `tests/unit/migration-backfill.test.ts`
-- [ ] T004 [P] [US1] Unit test: per-child status roll-up (all paid→paid, some→partial, none→unpaid) and combined totals, in `tests/unit/status-rollup.test.ts`
-- [ ] T005 [P] [US1] E2E: add multi-service child → generate month → record per-service payment, in `tests/e2e/multi-service.spec.ts`
+- [X] T003 [P] [US1] Unit test: migrations 004/005 backfill — every existing child gets exactly one `child_services` row and every legacy payment links to it, in `tests/unit/migration-backfill.test.ts`
+- [X] T004 [P] [US1] Unit test: per-child status roll-up (all paid→paid, some→partial, none→unpaid) and combined totals, in `tests/unit/status-rollup.test.ts`
+- [X] T005 [P] [US1] E2E: add multi-service child → generate month → record per-service payment, in `tests/e2e/multi-service.spec.ts`
 
 ### Implementation for User Story 1
 
-- [ ] T006 [US1] Add migration `004_child_services` (create table with `UNIQUE(child_id, service)`, FK `child_id`→`children` ON DELETE CASCADE; backfill one enrollment per existing child from its `service/unit/price`) in `electron/db/migrations/index.ts`
-- [ ] T007 [US1] Add migration `005_payments_service_id` (table-rebuild `payments`: add `service_id` FK→`child_services` WITHOUT cascade, nullable; re-key `UNIQUE(child_id, service_id, month, year)`; link each legacy payment to its child's backfilled enrollment) in `electron/db/migrations/index.ts` (depends on T006, same file → sequential)
-- [ ] T008 [P] [US1] Create `childServicesIPC.ts` with `childServices:list/add/update/remove` (add rejects duplicate `(childId, service)`; remove hard-deletes the row) in `electron/ipc/childServicesIPC.ts`
-- [ ] T009 [US1] Update `children:add` (require ≥1 enrollment, reject duplicate services), `children:update` (manage `patch.services`), and `children:get` (attach `services[]`; `service` filter matches any enrollment) in `electron/ipc/childrenIPC.ts`
-- [ ] T010 [US1] Update `payments:generate` to insert one row per active enrollment (snapshot service/unit/price, populate `service_id`, idempotent on `(child_id, service_id, month, year)`) and `payments:get` to add the `byChild` roll-up array, in `electron/ipc/paymentsIPC.ts`
-- [ ] T011 [US1] Register `childServicesIPC` and expose `childServices.{list,add,update,remove}` on `window.api` in `electron/preload.ts` (and main process IPC registration entry point)
-- [ ] T012 [P] [US1] Children add/edit page: multi-select services with a per-service unit/price editor (add/remove rows), in `src/pages/Children*.tsx` + relevant `src/store/` children store
-- [ ] T013 [P] [US1] Payments page: group lines by child, show each line's own status plus the derived child-level status and combined totals, in `src/pages/Payments*.tsx` + `src/store/` payments store
-- [ ] T014 [US1] Make per-child statement and Excel/PDF export service-aware (list each service per month, combined totals) in `electron/services/statementService.ts` and `electron/services/exportService.ts`
+- [X] T006 [US1] Add migration `004_child_services` (create table with `UNIQUE(child_id, service)`, FK `child_id`→`children` ON DELETE CASCADE; backfill one enrollment per existing child from its `service/unit/price`) in `electron/db/migrations/index.ts`
+- [X] T007 [US1] Add migration `005_payments_service_id` (table-rebuild `payments`: add `service_id` FK→`child_services` WITHOUT cascade, nullable; re-key `UNIQUE(child_id, service_id, month, year)`; link each legacy payment to its child's backfilled enrollment) in `electron/db/migrations/index.ts` (depends on T006, same file → sequential)
+- [X] T008 [P] [US1] Create `childServicesIPC.ts` with `childServices:list/add/update/remove` (add rejects duplicate `(childId, service)`; remove hard-deletes the row) in `electron/ipc/childServicesIPC.ts`
+- [X] T009 [US1] Update `children:add` (require ≥1 enrollment, reject duplicate services), `children:update` (manage `patch.services`), and `children:get` (attach `services[]`; `service` filter matches any enrollment) in `electron/ipc/childrenIPC.ts`
+- [X] T010 [US1] Update `payments:generate` to insert one row per active enrollment (snapshot service/unit/price, populate `service_id`, idempotent on `(child_id, service_id, month, year)`) and `payments:get` to add the `byChild` roll-up array, in `electron/ipc/paymentsIPC.ts`
+- [X] T011 [US1] Register `childServicesIPC` and expose `childServices.{list,add,update,remove}` on `window.api` in `electron/preload.ts` (and main process IPC registration entry point)
+- [X] T012 [P] [US1] Children add/edit page: multi-select services with a per-service unit/price editor (add/remove rows), in `src/pages/Children*.tsx` + relevant `src/store/` children store
+- [X] T013 [P] [US1] Payments page: group lines by child, show each line's own status plus the derived child-level status and combined totals, in `src/pages/Payments*.tsx` + `src/store/` payments store
+- [X] T014 [US1] Make per-child statement and Excel/PDF export service-aware (list each service per month, combined totals) in `electron/services/statementService.ts` and `electron/services/exportService.ts`
 
 **Checkpoint**: US1 fully functional and independently testable (no sync required).
 
@@ -86,13 +86,13 @@ description: "Task list for Multi-Service Enrollment & Full-Database Sync"
 
 ### Implementation for User Story 2
 
-- [ ] T017 [US2] Add migration `006_tombstones` (create `tombstones` with `UNIQUE(entity, record_id)`) in `electron/db/migrations/index.ts`
-- [ ] T018 [US2] Add migration `007_settings_sync_columns` (add `updated_at` + `synced` to `settings`, initialize `updated_at`) in `electron/db/migrations/index.ts` (after T017, same file → sequential)
-- [ ] T019 [US2] Add a tombstone-write helper and call it from `childServices:remove` so removals write `tombstones(entity='child_services', record_id)` in `electron/ipc/childServicesIPC.ts` (+ helper in `electron/services/mongoSync.ts` or a small `electron/services/tombstones.ts`)
-- [ ] T020 [US2] Add Mongoose models `sync_child_services`, `sync_users`, `sync_settings` (key identity), `sync_tombstones`, and extend `SYNC_ENTITIES` in `electron/services/mongoSync.ts`
-- [ ] T021 [US2] Update `sync:push` to also push unsynced tombstones and the new entities, applying the settings denylist (exclude `sync_mongo_uri`), in `electron/ipc/syncIPC.ts`
-- [ ] T022 [US2] Update `sync:pull` to apply cloud tombstones (delete matching local rows, record applied) and order application children → child_services → payments for referential consistency, in `electron/ipc/syncIPC.ts` (after T021, same file → sequential)
-- [ ] T023 [US2] Update `startAutoSync` to run full push+pull each interval, and add the new entities/tombstones to `sync:status` pending counts, in `electron/ipc/syncIPC.ts` (after T022, same file → sequential)
+- [X] T017 [US2] Add migration `006_tombstones` (create `tombstones` with `UNIQUE(entity, record_id)`) in `electron/db/migrations/index.ts`
+- [X] T018 [US2] Add migration `007_settings_sync_columns` (add `updated_at` + `synced` to `settings`, initialize `updated_at`) in `electron/db/migrations/index.ts` (after T017, same file → sequential)
+- [X] T019 [US2] Add a tombstone-write helper and call it from `childServices:remove` so removals write `tombstones(entity='child_services', record_id)` in `electron/ipc/childServicesIPC.ts` (+ helper in `electron/services/mongoSync.ts` or a small `electron/services/tombstones.ts`)
+- [X] T020 [US2] Add Mongoose models `sync_child_services`, `sync_users`, `sync_settings` (key identity), `sync_tombstones`, and extend `SYNC_ENTITIES` in `electron/services/mongoSync.ts`
+- [X] T021 [US2] Update `sync:push` to also push unsynced tombstones and the new entities, applying the settings denylist (exclude `sync_mongo_uri`), in `electron/ipc/syncIPC.ts`
+- [X] T022 [US2] Update `sync:pull` to apply cloud tombstones (delete matching local rows, record applied) and order application children → child_services → payments for referential consistency, in `electron/ipc/syncIPC.ts` (after T021, same file → sequential)
+- [X] T023 [US2] Update `startAutoSync` to run full push+pull each interval, and add the new entities/tombstones to `sync:status` pending counts, in `electron/ipc/syncIPC.ts` (after T022, same file → sequential)
 
 **Checkpoint**: US1 AND US2 both work; devices converge including deletions.
 
@@ -100,9 +100,9 @@ description: "Task list for Multi-Service Enrollment & Full-Database Sync"
 
 ## Phase 5: Polish & Cross-Cutting Concerns
 
-- [ ] T024 [P] Run the `quickstart.md` multi-service and two-device sync verification steps; record results
-- [ ] T025 [P] Reconcile `contracts/ipc-contracts.md` and `CLAUDE.md` with any implementation drift
-- [ ] T026 Full test pass: `npx vitest run` and `npx playwright test` green on the branch
+- [X] T024 [P] Run the `quickstart.md` multi-service and two-device sync verification steps; record results
+- [X] T025 [P] Reconcile `contracts/ipc-contracts.md` and `CLAUDE.md` with any implementation drift
+- [X] T026 Full test pass: `npx vitest run` and `npx playwright test` green on the branch
 
 ---
 

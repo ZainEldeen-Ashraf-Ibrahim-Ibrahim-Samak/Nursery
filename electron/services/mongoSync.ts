@@ -139,6 +139,68 @@ const paymentSchema = new Schema({
 export const PaymentModel: Model<any> = mongoose.models['sync_payments'] ||
   mongoose.model('sync_payments', paymentSchema)
 
+// ── Child Services ─────────────────────────────────────────────────────────────
+
+const childServiceSchema = new Schema({
+  id: { type: Number, required: true, unique: true },
+  child_id: Number,
+  service: String,
+  unit: String,
+  price: Number,
+  created_at: String,
+  updated_at: String,
+  synced: Number
+}, sharedOptions)
+
+export const ChildServiceModel: Model<any> = mongoose.models['sync_child_services'] ||
+  mongoose.model('sync_child_services', childServiceSchema)
+
+// ── Users ────────────────────────────────────────────────────────────────────
+
+const userSchema = new Schema({
+  id: { type: Number, required: true, unique: true },
+  username: String,
+  password: String, // Hashed
+  role: String,
+  name: String,
+  is_active: Number,
+  created_at: String,
+  updated_at: String,
+  synced: Number
+}, sharedOptions)
+
+export const UserModel: Model<any> = mongoose.models['sync_users'] ||
+  mongoose.model('sync_users', userSchema)
+
+// ── Settings ──────────────────────────────────────────────────────────────────
+
+const settingSchema = new Schema({
+  // Using id because sync logic expects an id field. 
+  // Wait, settings table has `key` as PRIMARY KEY. 
+  // The task says "sync_settings (key identity)". We'll use `id` as the key.
+  id: { type: String, required: true, unique: true }, // 'id' maps to SQLite 'key'
+  key: String,
+  value: String,
+  updated_at: String,
+  synced: Number
+}, sharedOptions)
+
+export const SettingModel: Model<any> = mongoose.models['sync_settings'] ||
+  mongoose.model('sync_settings', settingSchema)
+
+// ── Tombstones ────────────────────────────────────────────────────────────────
+
+const tombstoneSchema = new Schema({
+  id: { type: Number, required: true, unique: true },
+  entity: String,
+  record_id: Number,
+  created_at: String,
+  synced: Number
+}, sharedOptions)
+
+export const TombstoneModel: Model<any> = mongoose.models['sync_tombstones'] ||
+  mongoose.model('sync_tombstones', tombstoneSchema)
+
 // ── Employees ─────────────────────────────────────────────────────────────────
 
 const employeeSchema = new Schema({
@@ -203,8 +265,12 @@ export const SYNC_ENTITIES: {
   table: string
 }[] = [
   { name: 'children', model: ChildModel, table: 'children' },
+  { name: 'child_services', model: ChildServiceModel, table: 'child_services' },
   { name: 'payments', model: PaymentModel, table: 'payments' },
   { name: 'employees', model: EmployeeModel, table: 'employees' },
   { name: 'salary_payments', model: SalaryPaymentModel, table: 'salary_payments' },
-  { name: 'expenses', model: ExpenseModel, table: 'expenses' }
+  { name: 'expenses', model: ExpenseModel, table: 'expenses' },
+  { name: 'users', model: UserModel, table: 'users' },
+  { name: 'settings', model: SettingModel, table: 'settings' },
+  { name: 'tombstones', model: TombstoneModel, table: 'tombstones' }
 ]

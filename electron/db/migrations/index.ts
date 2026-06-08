@@ -149,7 +149,7 @@ const migrations: Migration[] = [
       // Add updated_at column to employees
       try {
         db.exec('ALTER TABLE employees ADD COLUMN updated_at TEXT;')
-      } catch (e) {
+      } catch {
         // Ignore if already exists
       }
       db.exec("UPDATE employees SET updated_at = created_at WHERE updated_at IS NULL;")
@@ -157,7 +157,7 @@ const migrations: Migration[] = [
       // Add updated_at column to salary_payments
       try {
         db.exec('ALTER TABLE salary_payments ADD COLUMN updated_at TEXT;')
-      } catch (e) {
+      } catch {
         // Ignore if already exists
       }
       db.exec("UPDATE salary_payments SET updated_at = (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')) WHERE updated_at IS NULL;")
@@ -165,10 +165,147 @@ const migrations: Migration[] = [
       // Add updated_at column to expenses
       try {
         db.exec('ALTER TABLE expenses ADD COLUMN updated_at TEXT;')
-      } catch (e) {
+      } catch {
         // Ignore if already exists
       }
       db.exec("UPDATE expenses SET updated_at = created_at WHERE updated_at IS NULL;")
+    }
+  },
+  {
+    name: '004_child_services',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS child_services (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          child_id INTEGER NOT NULL,
+          service TEXT NOT NULL,
+          unit TEXT NOT NULL,
+          price REAL NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          synced INTEGER DEFAULT 0,
+          FOREIGN KEY (child_id) REFERENCES children (id) ON DELETE CASCADE,
+          UNIQUE (child_id, service)
+        );
+
+        INSERT INTO child_services (child_id, service, unit, price, created_at, updated_at, synced)
+        SELECT id, service, unit, price, created_at, updated_at, 0 FROM children;
+      `)
+    }
+  },
+  {
+    name: '005_payments_service_id',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS payments_new (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          child_id INTEGER NOT NULL,
+          service_id INTEGER,
+          month TEXT NOT NULL,
+          year INTEGER NOT NULL,
+          service TEXT NOT NULL,
+          unit TEXT NOT NULL,
+          quantity REAL DEFAULT 1,
+          price REAL NOT NULL,
+          total REAL NOT NULL,
+          paid REAL DEFAULT 0,
+          balance REAL NOT NULL,
+          status TEXT NOT NULL,
+          notes TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          synced INTEGER DEFAULT 0,
+          FOREIGN KEY (child_id) REFERENCES children (id) ON DELETE CASCADE,
+          FOREIGN KEY (service_id) REFERENCES child_services (id),
+          UNIQUE (child_id, service_id, month, year)
+        );
+
+        INSERT INTO payments_new (
+          id, child_id, month, year, service, unit, quantity, price, total, paid, balance, status, notes, created_at, updated_at, synced
+        )
+        SELECT id, child_id, month, year, service, unit, quantity, price, total, paid, balance, status, notes, created_at, updated_at, synced
+        FROM payments;
+
+        UPDATE payments_new
+        SET service_id = (
+          SELECT id FROM child_services 
+          WHERE child_services.child_id = payments_new.child_id 
+          AND child_services.service = payments_new.service
+        );
+
+        DROP TABLE payments;
+        ALTER TABLE payments_new RENAME TO payments;
+      `)
+    }
+  },
+  {
+    name: '006_tombstones',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS tombstones (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          entity TEXT NOT NULL,
+          record_id INTEGER NOT NULL,
+          created_at TEXT NOT NULL,
+          synced INTEGER DEFAULT 0,
+          UNIQUE(entity, record_id)
+        );
+      `)
+    }
+  },
+  {
+    name: '007_settings_sync_columns',
+    up: (db) => {
+      try {
+        db.exec('ALTER TABLE settings ADD COLUMN updated_at TEXT;')
+      } catch {
+        // Ignore if already exists
+      }
+      try {
+        db.exec('ALTER TABLE settings ADD COLUMN synced INTEGER DEFAULT 0;')
+      } catch {
+        // Ignore if already exists
+      }
+      db.exec("UPDATE settings SET updated_at = (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')) WHERE updated_at IS NULL;")
+    }
+  },
+  {
+    name: '008_users_sync_columns',
+    up: (db) => {
+      try {
+        db.exec('ALTER TABLE users ADD COLUMN updated_at TEXT;')
+      } catch {
+        // Ignore if already exists
+      }
+      try {
+        db.exec('ALTER TABLE users ADD COLUMN synced INTEGER DEFAULT 0;')
+      } catch {
+        // Ignore if already exists
+      }
+      db.exec("UPDATE users SET updated_at = created_at WHERE updated_at IS NULL;")
+    }
+  },
+  {
+    name: '009_backfill_missing_child_services',
+    up: (db) => {
+      // Repair children inserted after migration 004 (e.g. via Excel import / seed),
+      // which created `children` rows but no matching `child_services` enrollment.
+      // Create one enrollment per orphaned child from its legacy service/unit/price,
+      // then link any payments still missing a service_id.
+      db.exec(`
+        INSERT INTO child_services (child_id, service, unit, price, created_at, updated_at, synced)
+        SELECT id, service, unit, price, created_at, updated_at, 0
+        FROM children
+        WHERE id NOT IN (SELECT child_id FROM child_services);
+
+        UPDATE payments
+        SET service_id = (
+          SELECT cs.id FROM child_services cs
+          WHERE cs.child_id = payments.child_id
+          AND cs.service = payments.service
+        )
+        WHERE service_id IS NULL;
+      `)
     }
   }
 ]

@@ -58,7 +58,8 @@ export default function SyncManager() {
       entity,
       count: mode === 'push' ? stats.pushed ?? 0 : stats.pulled ?? 0,
       failed: stats.failed ?? 0,
-      skipped: stats.skipped ?? 0
+      skipped: stats.skipped ?? 0,
+      errors: (stats.errors ?? []) as { recordId: string; message: string }[]
     }))
   }
 
@@ -238,14 +239,25 @@ export default function SyncManager() {
           {lastPullResults && (
             <div className="bg-blue-50 rounded-xl p-3 space-y-1 text-xs">
               <p className="font-bold text-blue-700">✅ {isAr ? 'نتائج السحب:' : 'Pull Results:'}</p>
-              {formatResults(lastPullResults, 'pull')?.map(({ entity, count, failed, skipped }) => (
-                <div key={entity} className="flex justify-between text-slate-600">
-                  <span>{entity}</span>
-                  <span>
-                    <span className="text-blue-600 font-semibold">↓ {count}</span>
-                    {skipped > 0 && <span className="text-slate-400"> ({skipped} skipped)</span>}
-                    {failed > 0 && <span className="text-red-500"> ({failed} failed)</span>}
-                  </span>
+              {formatResults(lastPullResults, 'pull')?.map(({ entity, count, failed, skipped, errors }) => (
+                <div key={entity} className="space-y-0.5">
+                  <div className="flex justify-between text-slate-600">
+                    <span>{entity}</span>
+                    <span>
+                      <span className="text-blue-600 font-semibold">↓ {count}</span>
+                      {skipped > 0 && <span className="text-slate-400"> ({skipped} skipped)</span>}
+                      {failed > 0 && <span className="text-red-500"> ({failed} failed)</span>}
+                    </span>
+                  </div>
+                  {errors.length > 0 && (
+                    <ul className="ltr:pl-3 rtl:pr-3 space-y-0.5 text-[11px] text-red-500 ltr:text-left rtl:text-right">
+                      {errors.map((e, i) => (
+                        <li key={i} className="font-mono break-all">
+                          [{e.recordId}] {e.message}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
               ))}
             </div>

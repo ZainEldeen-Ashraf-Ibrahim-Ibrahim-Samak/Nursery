@@ -177,21 +177,28 @@ export default function ChildrenList() {
       key: 'service',
       header: t('service'),
       render: (child: Child) => {
-        const variant =
-          child.service === 'حضانة'
-            ? 'info'
-            : child.service === 'استضافة'
-            ? 'warning'
-            : 'success'
+        const enrollments = child.services?.length ? child.services : [{ service: child.service, unit: child.unit, price: child.price }];
         
-        // Map Arabic DB values to localized UI tags
-        let label: string = child.service
-        if (i18n.language === 'en') {
-          if (child.service === 'حضانة') label = t('services.nursery')
-          if (child.service === 'استضافة') label = t('services.hosting')
-          if (child.service === 'جلسة') label = t('services.session')
-        }
-        return <Badge variant={variant}>{label}</Badge>
+        return (
+          <div className="flex flex-wrap gap-1">
+            {enrollments.map((s: any, idx: number) => {
+              const variant =
+                s.service === 'حضانة'
+                  ? 'info'
+                  : s.service === 'استضافة'
+                  ? 'warning'
+                  : 'success'
+              
+              let label: string = s.service
+              if (i18n.language === 'en') {
+                if (s.service === 'حضانة') label = t('services.nursery')
+                if (s.service === 'استضافة') label = t('services.hosting')
+                if (s.service === 'جلسة') label = t('services.session')
+              }
+              return <Badge key={idx} variant={variant as any}>{label}</Badge>
+            })}
+          </div>
+        )
       },
     },
     {
@@ -204,14 +211,21 @@ export default function ChildrenList() {
           {t('price')} {sortKey === 'price' && (sortOrder === 'asc' ? '▲' : '▼')}
         </button>
       ),
-      render: (child: Child) => (
-        <span className="font-mono font-medium text-slate-800">
-          {formatCurrency(child.price)}
-          <span className="text-xs text-slate-400 block">
-            {child.unit === 'شهر' ? t('units.month') : child.unit === 'يوم' ? t('units.day') : child.unit === 'ساعة' ? t('units.hour') : t('units.session')}
-          </span>
-        </span>
-      ),
+      render: (child: Child) => {
+        const enrollments = child.services?.length ? child.services : [{ service: child.service, unit: child.unit, price: child.price }];
+        return (
+          <div className="space-y-1">
+            {enrollments.map((s: any, idx: number) => (
+              <span key={idx} className="font-mono font-medium text-slate-800 block whitespace-nowrap text-sm">
+                {formatCurrency(s.price)}
+                <span className="text-xs text-slate-400 ms-1 inline-block">
+                  / {s.unit === 'شهر' ? t('units.month') : s.unit === 'يوم' ? t('units.day') : s.unit === 'ساعة' ? t('units.hour') : t('units.session')}
+                </span>
+              </span>
+            ))}
+          </div>
+        )
+      },
     },
     {
       key: 'reg_date',

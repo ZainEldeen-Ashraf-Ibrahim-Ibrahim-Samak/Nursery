@@ -54,10 +54,13 @@ describe('Children IPC Contract tests', () => {
     expect(getHandler).toBeDefined()
 
     // Add a child directly to DB
-    db.prepare(`
+    const insertChild = db.prepare(`
       INSERT INTO children (name, guardian, guardian_phone, service, unit, price, reg_date, created_at, updated_at, is_active)
       VALUES ('طفل 1', 'ولي الأمر 1', '01000000000', 'حضانة', 'شهر', 2500, '2026-06-01', '2026-06-06T00:00:00Z', '2026-06-06T00:00:00Z', 1)
     `).run()
+    db.prepare(`INSERT INTO child_services (child_id, service, unit, price, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`).run(
+      insertChild.lastInsertRowid, 'حضانة', 'شهر', 2500, '2026-06-06T00:00:00Z', '2026-06-06T00:00:00Z'
+    )
 
     // Read as anonymous
     await expect(getHandler(null, {})).rejects.toThrow('UNAUTHORIZED')
@@ -120,12 +123,22 @@ describe('Children IPC Contract tests', () => {
     const getHandler = getHandlers()['children:get']
     
     // Seed test children
-    db.prepare(`
+    // Seed test children
+    const child1 = db.prepare(`
       INSERT INTO children (name, guardian, guardian_phone, service, unit, price, reg_date, created_at, updated_at, is_active)
-      VALUES 
-        ('محمد مصطفى', 'مصطفى', '0101', 'حضانة', 'شهر', 2500, '2026-06-01', '2026-06-06', '2026-06-06', 1),
-        ('كريم أحمد', 'أحمد', '0102', 'جلسة', 'جلسة', 100, '2026-06-01', '2026-06-06', '2026-06-06', 0)
+      VALUES ('محمد مصطفى', 'مصطفى', '0101', 'حضانة', 'شهر', 2500, '2026-06-01', '2026-06-06', '2026-06-06', 1)
     `).run()
+    db.prepare(`INSERT INTO child_services (child_id, service, unit, price, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`).run(
+      child1.lastInsertRowid, 'حضانة', 'شهر', 2500, '2026-06-06', '2026-06-06'
+    )
+
+    const child2 = db.prepare(`
+      INSERT INTO children (name, guardian, guardian_phone, service, unit, price, reg_date, created_at, updated_at, is_active)
+      VALUES ('كريم أحمد', 'أحمد', '0102', 'جلسة', 'جلسة', 100, '2026-06-01', '2026-06-06', '2026-06-06', 0)
+    `).run()
+    db.prepare(`INSERT INTO child_services (child_id, service, unit, price, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`).run(
+      child2.lastInsertRowid, 'جلسة', 'جلسة', 100, '2026-06-06', '2026-06-06'
+    )
 
     employeeSession()
 

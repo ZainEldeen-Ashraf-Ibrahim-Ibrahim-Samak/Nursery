@@ -93,6 +93,11 @@ export function initDb(dbPath = getDbPath()): Db {
   // Apply performance and integrity pragmas
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')
+  // NORMAL is safe under WAL and avoids an fsync on every COMMIT, which makes
+  // bulk writes (e.g. the Excel import) dramatically faster. temp_store=MEMORY
+  // keeps transient indexes/sorts off disk.
+  db.pragma('synchronous = NORMAL')
+  db.pragma('temp_store = MEMORY')
 
   return db
 }

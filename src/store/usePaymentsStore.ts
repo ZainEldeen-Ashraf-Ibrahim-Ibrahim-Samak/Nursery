@@ -9,6 +9,7 @@ interface PaymentSummary {
 
 interface PaymentsState {
   payments: Payment[]
+  byChild: any[]
   summary: PaymentSummary
   isLoading: boolean
   error: string | null
@@ -48,6 +49,7 @@ const defaultYear = now.getFullYear()
 
 export const usePaymentsStore = create<PaymentsState>((set, get) => ({
   payments: [],
+  byChild: [],
   summary: { totalInvoiced: 0, totalCollected: 0, arrears: 0 },
   isLoading: false,
   error: null,
@@ -67,6 +69,7 @@ export const usePaymentsStore = create<PaymentsState>((set, get) => ({
       const result = await window.api.payments.get({ month, year })
       set({
         payments: result.payments,
+        byChild: result.byChild,
         summary: result.summary,
         isLoading: false,
       })
@@ -102,34 +105,10 @@ export const usePaymentsStore = create<PaymentsState>((set, get) => ({
     try {
       const result = await window.api.payments.update({ id, quantity, paid, notes })
       
-      // Update local state directly to prevent full list refetches if possible,
-      // but re-calculating the summary locally is cleaner.
-      // Let's just update payments and recompute summary locally.
-      set((state) => {
-        const updatedPayments = state.payments.map((p) => (p.id === id ? result : p))
-        
-        let totalInvoiced = 0
-        let totalCollected = 0
-        let arrears = 0
-        
-        for (const p of updatedPayments) {
-          totalInvoiced += p.total
-          totalCollected += p.paid
-          if (p.balance > 0) {
-            arrears += p.balance
-          }
-        }
-        
-        return {
-          payments: updatedPayments,
-          summary: {
-            totalInvoiced: Number(totalInvoiced.toFixed(2)),
-            totalCollected: Number(totalCollected.toFixed(2)),
-            arrears: Number(arrears.toFixed(2)),
-          },
-          isLoading: false,
-        }
-      })
+      // Update byChild as well (simplified approach: just call fetchPayments instead of manual recalcs)
+      // Since we want to be fast, maybe we should just call fetchPayments anyway.
+      // Actually, let's keep it simple and just do a full refetch after update.
+      await get().fetchPayments()
       
       return result
     } catch (err: any) {

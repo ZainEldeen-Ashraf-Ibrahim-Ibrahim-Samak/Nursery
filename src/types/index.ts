@@ -12,6 +12,17 @@ export interface User {
 export type ServiceType = 'حضانة' | 'استضافة' | 'جلسة'
 export type UnitType = 'شهر' | 'يوم' | 'ساعة' | 'جلسة'
 
+export interface ServiceEnrollment {
+  id: number
+  child_id: number
+  service: ServiceType
+  unit: UnitType
+  price: number
+  created_at?: string
+  updated_at?: string
+  synced?: number
+}
+
 export interface Child {
   id: number
   name: string
@@ -22,6 +33,7 @@ export interface Child {
   service: ServiceType
   unit: UnitType
   price: number
+  services?: ServiceEnrollment[]
   reg_date: string
   notes?: string | null
   is_active: number // 0 or 1
@@ -35,6 +47,7 @@ export type PaymentStatus = 'paid' | 'partial' | 'unpaid'
 export interface Payment {
   id: number
   child_id: number
+  service_id?: number
   month: string // Arabic month name
   year: number
   service: string

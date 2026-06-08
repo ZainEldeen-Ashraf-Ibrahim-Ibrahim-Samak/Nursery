@@ -41,6 +41,8 @@ export interface ImportSummary {
   sheetsIgnored: string[]
   year: number
   rowErrors: number
+  /** Per-row failures with the reason, so the UI can show what to fix. */
+  rowErrorDetails: { sheet: string; row: number; name: string; message: string }[]
 }
 
 export interface ImportResult {
@@ -185,6 +187,22 @@ function monthOfSheet(name: string): number {
   return ARABIC_MONTHS.findIndex((m) => name.includes(m))
 }
 
+/**
+ * Return only the rows from DATA_START_ROW onward that actually hold values.
+ *
+ * `sheet.rowCount` can balloon to tens of thousands when a workbook carries
+ * stray formatting far below the data, which makes a `for (r <= rowCount)` loop
+ * crawl over endless empty rows. `eachRow({ includeEmpty: false })` visits only
+ * populated rows, so the import stays fast regardless of the sheet's formatting.
+ */
+function dataRows(sheet: ExcelJS.Worksheet): ExcelJS.Row[] {
+  const rows: ExcelJS.Row[] = []
+  sheet.eachRow({ includeEmpty: false }, (row, r) => {
+    if (r >= DATA_START_ROW) rows.push(row)
+  })
+  return rows
+}
+
 // ── Main import ───────────────────────────────────────────────────────────────
 
 export async function importFromWorkbook(filePath: string): Promise<ImportSummary> {
@@ -204,7 +222,19 @@ export async function importFromWorkbook(filePath: string): Promise<ImportSummar
     sheetsProcessed: [],
     sheetsIgnored: [],
     year,
-    rowErrors: 0
+    rowErrors: 0,
+    rowErrorDetails: []
+  }
+
+  /** Record a swallowed row failure with its reason (logged + returned to UI). */
+  function recordRowError(sheet: string, row: number, name: string, err: unknown) {
+    summary.rowErrors++
+    const message = err instanceof Error ? err.message : String(err)
+    // Keep the payload bounded; first 50 reasons are plenty to diagnose.
+    if (summary.rowErrorDetails.length < 50) {
+      summary.rowErrorDetails.push({ sheet, row, name, message })
+    }
+    console.error(`[import] row error — sheet="${sheet}" row=${row} name="${name}": ${message}`)
   }
 
   // Prepared statements reused across sheets
@@ -220,10 +250,26 @@ export async function importFromWorkbook(filePath: string): Promise<ImportSummar
   )
   const insertPayment = db.prepare(`
     INSERT INTO payments
-      (child_id, month, year, service, unit, quantity, price, total, paid, balance,
+      (child_id, service_id, month, year, service, unit, quantity, price, total, paid, balance,
        status, notes, created_at, updated_at, synced)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
   `)
+  // Each imported child must have a matching service enrollment so the
+  // service filter, payment generation, and sync stay consistent.
+  const insertChildService = db.prepare(`
+    INSERT INTO child_services (child_id, service, unit, price, created_at, updated_at, synced)
+    VALUES (?, ?, ?, ?, ?, ?, 0)
+    ON CONFLICT(child_id, service) DO NOTHING
+  `)
+  const findChildService = db.prepare(
+    'SELECT id FROM child_services WHERE child_id = ? AND service = ?'
+  )
+  /** Ensure a (child, service) enrollment exists; return its id. Idempotent. */
+  function ensureEnrollment(childId: number, service: string, unit: string, price: number): number | null {
+    insertChildService.run(childId, service, unit, price, now, now)
+    const row = findChildService.get(childId, service) as any
+    return row ? row.id : null
+  }
   const findEmployee = db.prepare('SELECT id FROM employees WHERE name = ?')
   const insertEmployee = db.prepare(`
     INSERT INTO employees
@@ -250,13 +296,18 @@ export async function importFromWorkbook(filePath: string): Promise<ImportSummar
   } = {}): number {
     const existing = findChild.get(name) as any
     if (existing) return existing.id
+    const svc = opts.service || 'حضانة'
+    const unit = opts.unit || 'شهر'
+    const price = opts.price ?? 0
     const res = insertChild.run(
       name, '—', '—', null, null,
-      opts.service || 'حضانة', opts.unit || 'شهر', opts.price ?? 0,
+      svc, unit, price,
       opts.regDate || now.slice(0, 10), null, now, now
     )
+    const childId = Number(res.lastInsertRowid)
+    ensureEnrollment(childId, svc, unit, price)
     summary.children.imported++
-    return Number(res.lastInsertRowid)
+    return childId
   }
 
   // ── 1. Children master sheet ────────────────────────────────────────────────
@@ -264,28 +315,32 @@ export async function importFromWorkbook(filePath: string): Promise<ImportSummar
   if (childSheet) {
     summary.sheetsProcessed.push(childSheet.name)
     const importChildren = db.transaction(() => {
-      for (let r = DATA_START_ROW; r <= childSheet.rowCount; r++) {
-        const row = childSheet.getRow(r)
+      for (const row of dataRows(childSheet)) {
+        const r = row.number
         const name = toStr(cellAt(row, CHILD_COL.name))
         if (!isDataName(name)) continue
         if (findChild.get(name)) { summary.children.skipped++; continue }
         try {
-          insertChild.run(
+          const svc = toStr(cellAt(row, CHILD_COL.service)) || 'حضانة'
+          const unit = toStr(cellAt(row, CHILD_COL.unit)) || 'شهر'
+          const price = toNum(cellAt(row, CHILD_COL.price))
+          const res = insertChild.run(
             name,
             toStr(cellAt(row, CHILD_COL.guardian)) || '—',
             toStr(cellAt(row, CHILD_COL.guardianPhone)) || '—',
             orNull(toStr(cellAt(row, CHILD_COL.childPhone))),
             orNull(toStr(cellAt(row, CHILD_COL.nationalId))),
-            toStr(cellAt(row, CHILD_COL.service)) || 'حضانة',
-            toStr(cellAt(row, CHILD_COL.unit)) || 'شهر',
-            toNum(cellAt(row, CHILD_COL.price)),
+            svc,
+            unit,
+            price,
             toStr(cellAt(row, CHILD_COL.regDate)) || now.slice(0, 10),
             orNull(toStr(cellAt(row, CHILD_COL.notes))),
             now, now
           )
+          ensureEnrollment(Number(res.lastInsertRowid), svc, unit, price)
           summary.children.imported++
-        } catch {
-          summary.rowErrors++
+        } catch (err) {
+          recordRowError(childSheet.name, r, name, err)
         }
       }
     })
@@ -304,8 +359,8 @@ export async function importFromWorkbook(filePath: string): Promise<ImportSummar
     const regBase = firstOfMonth(year, monthIdx)
 
     const importMonth = db.transaction(() => {
-      for (let r = DATA_START_ROW; r <= ws.rowCount; r++) {
-        const row = ws.getRow(r)
+      for (const row of dataRows(ws)) {
+        const r = row.number
         const name = toStr(cellAt(row, PAY_COL.name))
         if (!isDataName(name)) continue
         try {
@@ -321,18 +376,21 @@ export async function importFromWorkbook(filePath: string): Promise<ImportSummar
           const notes = orNull(toStr(cellAt(row, PAY_COL.notes)))
 
           const childId = ensureChild(name, { service, unit, price, regDate: regBase })
+          // Link to a (child, service) enrollment, creating it if this sheet
+          // bills a service the child is not yet enrolled in (multi-service import).
+          const serviceId = ensureEnrollment(childId, service, unit, price)
 
           if (findPayment.get(childId, month, year, service)) {
             summary.payments.skipped++
             continue
           }
           insertPayment.run(
-            childId, month, year, service, unit, quantity, price, total, paid,
+            childId, serviceId, month, year, service, unit, quantity, price, total, paid,
             balance, status, notes, now, now
           )
           summary.payments.imported++
-        } catch {
-          summary.rowErrors++
+        } catch (err) {
+          recordRowError(ws.name, r, name, err)
         }
       }
     })
@@ -344,8 +402,8 @@ export async function importFromWorkbook(filePath: string): Promise<ImportSummar
   if (salarySheet) {
     summary.sheetsProcessed.push(salarySheet.name)
     const importSalaries = db.transaction(() => {
-      for (let r = DATA_START_ROW; r <= salarySheet.rowCount; r++) {
-        const row = salarySheet.getRow(r)
+      for (const row of dataRows(salarySheet)) {
+        const r = row.number
         const name = toStr(cellAt(row, SAL_COL.name))
         if (!isDataName(name)) continue
         try {
@@ -383,8 +441,8 @@ export async function importFromWorkbook(filePath: string): Promise<ImportSummar
             )
             summary.salaryPayments.imported++
           }
-        } catch {
-          summary.rowErrors++
+        } catch (err) {
+          recordRowError(salarySheet.name, r, name, err)
         }
       }
     })
@@ -396,8 +454,8 @@ export async function importFromWorkbook(filePath: string): Promise<ImportSummar
   if (expensesSheet) {
     summary.sheetsProcessed.push(expensesSheet.name)
     const importExpenses = db.transaction(() => {
-      for (let r = DATA_START_ROW; r <= expensesSheet.rowCount; r++) {
-        const row = expensesSheet.getRow(r)
+      for (const row of dataRows(expensesSheet)) {
+        const r = row.number
         const item = toStr(cellAt(row, EXP_COL.item))
         if (!isDataName(item)) continue
         try {
@@ -408,8 +466,8 @@ export async function importFromWorkbook(filePath: string): Promise<ImportSummar
             if (Number(res.changes) > 0) summary.expenses.imported++
             else summary.expenses.skipped++
           }
-        } catch {
-          summary.rowErrors++
+        } catch (err) {
+          recordRowError(expensesSheet.name, r, item, err)
         }
       }
     })
