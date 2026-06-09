@@ -11,4 +11,6 @@ cluadnary
 
 when adding a new child choose his teacher and the days of his lessons to make his summisions for total days he take in the mounth and calculate his fees and take care if the mounth is 31 day or 28 beacuse by defult he should take 8 sessions in the mounth as 2 days per week but i can add extra lessons for him 
 
-cluadnary
+allow the embloyee to add childs
+
+in service calcluter mssining inputs and fix altghough the outputs
