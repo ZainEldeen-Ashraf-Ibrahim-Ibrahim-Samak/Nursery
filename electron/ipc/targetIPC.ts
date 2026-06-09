@@ -101,7 +101,7 @@ ipcMain.handle('target:get', async (_event, { year }) => {
  * distribution: { حضانة?: number, استضافة?: number, جلسة?: number }
  * Admin only.
  */
-ipcMain.handle('target:calc', async (_event, { distribution, month, year }) => {
+ipcMain.handle('target:calc', async (_event, { distribution, month, year, targetProfitPct: overridePct }) => {
   try {
     requireAdmin()
     const db = getDb()
@@ -140,8 +140,16 @@ ipcMain.handle('target:calc', async (_event, { distribution, month, year }) => {
       const totalExp = expenses.reduce((s, e) => s + e.amount, 0) +
                        salaries.reduce((s, s2) => s + s2.actual_paid, 0)
 
-      const targetProfitRow = db.prepare("SELECT value FROM settings WHERE key = 'target_profit_pct'").get() as any
-      const targetProfitPct = targetProfitRow ? Number(targetProfitRow.value) : 0.20
+      // Use the caller-supplied target profit % when provided (feature 004,
+      // FR-014); otherwise fall back to the saved setting. The formula is
+      // unchanged so an equal value reproduces the prior result (FR-015).
+      let targetProfitPct: number
+      if (overridePct !== undefined && overridePct !== null && overridePct !== '') {
+        targetProfitPct = Number(overridePct)
+      } else {
+        const targetProfitRow = db.prepare("SELECT value FROM settings WHERE key = 'target_profit_pct'").get() as any
+        targetProfitPct = targetProfitRow ? Number(targetProfitRow.value) : 0.20
+      }
       targetRequired = calcRequiredRevenue(totalExp, targetProfitPct)
     }
 

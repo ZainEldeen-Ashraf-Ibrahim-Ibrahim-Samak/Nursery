@@ -74,9 +74,9 @@ export default function App() {
           {/* Dashboard - Both admin and employee */}
           <Route index element={<Dashboard />} />
 
-          {/* Children Roster - Both read, admin write */}
+          {/* Children Roster - all read & add (feature 004 FR-012); edit is admin-only */}
           <Route path="children" element={<ChildrenList />} />
-          <Route path="children/new" element={<RoleGuard allowedRoles={['admin']}><ChildForm /></RoleGuard>} />
+          <Route path="children/new" element={<RoleGuard allowedRoles={['admin', 'employee']}><ChildForm /></RoleGuard>} />
           <Route path="children/:id/edit" element={<RoleGuard allowedRoles={['admin']}><ChildForm /></RoleGuard>} />
           <Route path="children/:id/statement" element={<ChildStatement />} />
 

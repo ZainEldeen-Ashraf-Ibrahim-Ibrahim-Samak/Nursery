@@ -3,7 +3,25 @@ import path from 'node:path'
 import fs from 'node:fs'
 import { getDb, closeDb, initDb } from '../db/connection.js'
 import { requireAdmin } from './_guard.js'
+import { getCurrentUser } from './authIPC.js'
 import { progressReporter } from './progress.js'
+import { uploadImage } from '../services/cloudinaryService.js'
+
+/**
+ * storage:uploadPhoto { dataUrl, folder? }
+ * Uploads a child photo to Cloudinary from the main process (signed request;
+ * the API secret never reaches the renderer). Auth-level — employees may add
+ * children with photos (feature 004). Returns { url, publicId }. Throws when
+ * Cloudinary is unconfigured/unreachable; the renderer then saves the child
+ * without a photo (offline-safe, FR-004a).
+ */
+ipcMain.handle('storage:uploadPhoto', async (_event, { dataUrl, folder }) => {
+  const user = getCurrentUser()
+  if (!user) {
+    throw new Error('UNAUTHORIZED: يجب تسجيل الدخول أولاً / Unauthorized')
+  }
+  return uploadImage(dataUrl, folder)
+})
 
 /**
  * storage:stats

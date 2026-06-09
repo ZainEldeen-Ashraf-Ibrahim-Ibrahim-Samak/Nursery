@@ -327,6 +327,30 @@ const migrations: Migration[] = [
         );
       `)
     }
+  },
+  {
+    name: '011_child_photo_teacher_lessons',
+    up: (db) => {
+      // Additive columns on `children` for the enrollment enhancements feature
+      // (004): Cloudinary photo reference, assigned teacher (employees.id),
+      // lesson schedule, and the computed monthly session fee. Each ALTER is
+      // guarded so re-runs / partially-applied DBs are safe (pattern from 003/007/008).
+      const addColumn = (ddl: string) => {
+        try {
+          db.exec(ddl)
+        } catch {
+          // Column already exists — ignore.
+        }
+      }
+      addColumn('ALTER TABLE children ADD COLUMN photo_url TEXT;')
+      addColumn('ALTER TABLE children ADD COLUMN photo_public_id TEXT;')
+      addColumn('ALTER TABLE children ADD COLUMN teacher_id INTEGER;')
+      addColumn('ALTER TABLE children ADD COLUMN lesson_days TEXT;')
+      addColumn('ALTER TABLE children ADD COLUMN sessions_baseline INTEGER DEFAULT 8;')
+      addColumn('ALTER TABLE children ADD COLUMN extra_lessons INTEGER DEFAULT 0;')
+      addColumn('ALTER TABLE children ADD COLUMN session_price REAL;')
+      addColumn('ALTER TABLE children ADD COLUMN monthly_fee REAL;')
+    }
   }
 ]
 

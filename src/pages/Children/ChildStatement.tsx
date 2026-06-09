@@ -230,9 +230,25 @@ export default function ChildStatement() {
             <span className="text-slate-400">/</span>
             <span className="text-slate-500">{t('statement')}</span>
           </div>
-          <h1 className="text-2xl font-bold text-slate-900 mt-2">
-            {i18n.language === 'ar' ? `كشف حساب: ${child.name}` : `Statement: ${child.name}`}
-          </h1>
+          <div className="flex items-center gap-3 mt-2">
+            <div className="w-12 h-12 rounded-full overflow-hidden bg-slate-100 border border-slate-200 flex items-center justify-center shrink-0">
+              {child.photo_url ? (
+                <img src={child.photo_url} alt={child.name} className="w-full h-full object-cover" />
+              ) : (
+                <span className="text-xl text-slate-300">🧒</span>
+              )}
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold text-slate-900">
+                {i18n.language === 'ar' ? `كشف حساب: ${child.name}` : `Statement: ${child.name}`}
+              </h1>
+              {child.teacher_name && (
+                <p className="text-sm text-slate-500">
+                  {t('teacher')}: <span className="font-semibold text-slate-700">{child.teacher_name}</span>
+                </p>
+              )}
+            </div>
+          </div>
         </div>
 
         {/* Export Buttons */}

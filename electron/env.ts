@@ -99,3 +99,35 @@ export function seedSetting(envKey: string, fallback: string): string {
   const v = process.env[envKey]?.trim()
   return v && v.length > 0 ? v : fallback
 }
+
+export interface CloudinaryConfig {
+  cloudName: string
+  apiKey: string
+  apiSecret: string
+}
+
+/**
+ * Resolve Cloudinary credentials for child-photo upload (feature 004).
+ * Accepts either the three discrete env vars or a single `CLOUDINARY_URL`
+ * of the form `cloudinary://<api_key>:<api_secret>@<cloud_name>`.
+ * Returns null when not configured — callers must handle this gracefully
+ * (photo upload is optional; the child still saves). Credentials live only in
+ * the main process and are never sent to the renderer.
+ */
+export function getCloudinaryConfig(): CloudinaryConfig | null {
+  const url = process.env.CLOUDINARY_URL?.trim()
+  if (url) {
+    const m = url.match(/^cloudinary:\/\/([^:]+):([^@]+)@(.+)$/)
+    if (m) {
+      return { apiKey: m[1], apiSecret: m[2], cloudName: m[3] }
+    }
+  }
+
+  const cloudName = process.env.CLOUDINARY_CLOUD_NAME?.trim()
+  const apiKey = process.env.CLOUDINARY_API_KEY?.trim()
+  const apiSecret = process.env.CLOUDINARY_API_SECRET?.trim()
+  if (cloudName && apiKey && apiSecret) {
+    return { cloudName, apiKey, apiSecret }
+  }
+  return null
+}

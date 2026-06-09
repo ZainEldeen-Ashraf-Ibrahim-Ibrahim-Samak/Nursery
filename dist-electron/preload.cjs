@@ -26,6 +26,7 @@ electron.contextBridge.exposeInMainWorld("api", {
 		update: (args) => electron.ipcRenderer.invoke("childServices:update", args),
 		remove: (args) => electron.ipcRenderer.invoke("childServices:remove", args)
 	},
+	teachers: { list: (args) => electron.ipcRenderer.invoke("teachers:list", args) },
 	payments: {
 		get: (args) => electron.ipcRenderer.invoke("payments:get", args),
 		generate: (args) => electron.ipcRenderer.invoke("payments:generate", args),
@@ -78,7 +79,8 @@ electron.contextBridge.exposeInMainWorld("api", {
 		restore: (args) => electron.ipcRenderer.invoke("storage:restore", args),
 		import: (args) => electron.ipcRenderer.invoke("storage:import", args),
 		clear: (args) => electron.ipcRenderer.invoke("storage:clear", args),
-		audit: () => electron.ipcRenderer.invoke("storage:audit")
+		audit: () => electron.ipcRenderer.invoke("storage:audit"),
+		uploadPhoto: (args) => electron.ipcRenderer.invoke("storage:uploadPhoto", args)
 	},
 	sync: {
 		connect: (args) => electron.ipcRenderer.invoke("sync:connect", args),

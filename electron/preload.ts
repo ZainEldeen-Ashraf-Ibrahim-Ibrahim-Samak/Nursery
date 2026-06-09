@@ -29,6 +29,9 @@ const api = {
     update: (args: any) => ipcRenderer.invoke('childServices:update', args),
     remove: (args: { id: number }) => ipcRenderer.invoke('childServices:remove', args),
   },
+  teachers: {
+    list: (args?: { role?: string }) => ipcRenderer.invoke('teachers:list', args),
+  },
 
   // Payments
   payments: {
@@ -98,6 +101,8 @@ const api = {
     import: (args: any) => ipcRenderer.invoke('storage:import', args),
     clear: (args: any) => ipcRenderer.invoke('storage:clear', args),
     audit: () => ipcRenderer.invoke('storage:audit'),
+    uploadPhoto: (args: { dataUrl: string; folder?: string }) =>
+      ipcRenderer.invoke('storage:uploadPhoto', args),
   },
 
   // Sync

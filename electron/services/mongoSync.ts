@@ -107,6 +107,15 @@ const childSchema = new Schema({
   reg_date: String,
   notes: String,
   is_active: Number,
+  // Feature 004 — additive enrollment fields
+  photo_url: String,
+  photo_public_id: String,
+  teacher_id: Number,
+  lesson_days: String,
+  sessions_baseline: Number,
+  extra_lessons: Number,
+  session_price: Number,
+  monthly_fee: Number,
   created_at: String,
   updated_at: String,
   synced: Number

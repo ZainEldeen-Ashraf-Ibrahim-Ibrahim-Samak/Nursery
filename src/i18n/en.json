@@ -83,6 +83,35 @@
     "bulk_pay_selected": "Record Full Payment for Selected",
     "no_payments": "No billing records found for this period. Click below to generate them for active children.",
     "select_month": "Select Month",
-    "select_year": "Select Year"
+    "select_year": "Select Year",
+    "index": "#",
+    "teacher": "Teacher",
+    "select_teacher": "Select a teacher",
+    "no_teacher": "No teacher",
+    "lesson_days": "Lesson Days",
+    "sessions_per_month": "Sessions / Month",
+    "extra_lessons": "Extra Lessons",
+    "session_price": "Session Price",
+    "monthly_fee": "Monthly Fee",
+    "lesson_schedule": "Lessons & Fee",
+    "photo": "Photo",
+    "use_camera": "Use Camera",
+    "capture": "Capture",
+    "upload_photo": "Upload Photo",
+    "select_device": "Select Device",
+    "remove_photo": "Remove Photo",
+    "no_photo": "No photo",
+    "photo_upload_failed": "Photo could not be uploaded (offline or not configured). The child was saved without a photo; you can add one later.",
+    "phone_invalid_eg": "Phone must be exactly 11 digits and start with 01",
+    "target_profit_pct": "Target Profit %",
+    "days": {
+      "sun": "Sun",
+      "mon": "Mon",
+      "tue": "Tue",
+      "wed": "Wed",
+      "thu": "Thu",
+      "fri": "Fri",
+      "sat": "Sat"
+    }
   }
 }

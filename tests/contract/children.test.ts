@@ -77,22 +77,22 @@ describe('Children IPC Contract tests', () => {
     expect(list.length).toBe(1)
   })
 
-  it('should block employees from adding children', async () => {
+  it('should allow employees to add children (feature 004, FR-012)', async () => {
     const addHandler = getHandlers()['children:add']
     expect(addHandler).toBeDefined()
 
     employeeSession()
-    await expect(
-      addHandler(null, {
-        name: 'طفل جديد',
-        guardian: 'ولي أمر',
-        guardian_phone: '01000000000',
-        service: 'جلسة',
-        unit: 'جلسة',
-        price: 120,
-        reg_date: '2026-06-06'
-      })
-    ).rejects.toThrow('FORBIDDEN')
+    const created = await addHandler(null, {
+      name: 'طفل جديد',
+      guardian: 'ولي أمر',
+      guardian_phone: '01000000000',
+      service: 'جلسة',
+      unit: 'جلسة',
+      price: 120,
+      reg_date: '2026-06-06'
+    })
+    expect(created.id).toBeDefined()
+    expect(created.name).toBe('طفل جديد')
   })
 
   it('should allow admins to add children and apply dates/defaults', async () => {

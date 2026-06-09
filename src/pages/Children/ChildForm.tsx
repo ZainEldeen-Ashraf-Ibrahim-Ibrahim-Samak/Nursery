@@ -7,7 +7,8 @@ import { Input } from '../../components/ui/Input.js'
 import { Select } from '../../components/ui/Select.js'
 import { Card } from '../../components/ui/Card.js'
 import { Alert } from '../../components/ui/Alert.js'
-import type { ServiceType, UnitType } from '../../types/index.js'
+import PhotoCapture from '../../components/PhotoCapture.js'
+import type { ServiceType, UnitType, Teacher } from '../../types/index.js'
 
 
 interface ServiceRow {
@@ -15,6 +16,11 @@ interface ServiceRow {
   unit: UnitType
   price: number
 }
+
+// Egyptian mobile: exactly 11 digits, starts with 01 (feature 004, FR-001).
+const GUARDIAN_PHONE_RE = /^01[0-9]{9}$/
+// Weekday keys in JS getDay() order (0 = Sunday … 6 = Saturday).
+const DAY_KEYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const
 
 export default function ChildForm() {
   const { t, i18n } = useTranslation()
@@ -33,13 +39,29 @@ export default function ChildForm() {
     national_id: '',
     reg_date: new Date().toISOString().split('T')[0],
     notes: '',
-    services: [{ service: 'حضانة' as ServiceType, unit: 'شهر' as UnitType, price: 0 }] as ServiceRow[]
+    services: [{ service: 'حضانة' as ServiceType, unit: 'شهر' as UnitType, price: 0 }] as ServiceRow[],
+    // Feature 004 — teacher / lesson schedule / fee
+    teacher_id: '' as string,
+    lesson_days: [] as number[],
+    extra_lessons: 0,
+    session_price: 0,
   })
+
+  // Feature 004 — photo (data URL for new/changed photo; existing URL otherwise)
+  const [photo, setPhoto] = useState<string | null>(null)
+  const [photoChanged, setPhotoChanged] = useState(false)
+  const [teachers, setTeachers] = useState<Teacher[]>([])
 
   const [formErrors, setFormErrors] = useState<Record<string, string>>({})
   const [settings, setSettings] = useState<Record<string, string>>({})
   const [isLoadingChild, setIsLoadingChild] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [photoNotice, setPhotoNotice] = useState<string | null>(null)
+
+  // Derived: sessions and computed fee (baseline is fixed at 8 per clarification)
+  const sessionsBaseline = 8
+  const totalSessions = sessionsBaseline + (Number(formData.extra_lessons) || 0)
+  const monthlyFee = totalSessions * (Number(formData.session_price) || 0)
 
   // Fetch Settings (pricing defaults)
   useEffect(() => {
@@ -52,6 +74,19 @@ export default function ChildForm() {
       }
     }
     loadSettings()
+  }, [])
+
+  // Load the teacher options (from the Employees list, feature 004)
+  useEffect(() => {
+    async function loadTeachers() {
+      try {
+        const list = await window.api.teachers.list()
+        setTeachers(list || [])
+      } catch (err) {
+        console.error('Failed to load teachers:', err)
+      }
+    }
+    loadTeachers()
   }, [])
 
   // If in edit mode, load the child record
@@ -67,9 +102,15 @@ export default function ChildForm() {
         }
 
         if (child) {
-          const loadedServices = child.services && child.services.length > 0 
+          const loadedServices = child.services && child.services.length > 0
             ? child.services.map(s => ({ service: s.service, unit: s.unit, price: s.price }))
             : [{ service: child.service, unit: child.unit, price: child.price }]
+
+          let days: number[] = []
+          if (Array.isArray(child.lesson_days)) days = child.lesson_days as number[]
+          else if (typeof child.lesson_days === 'string' && child.lesson_days) {
+            try { days = JSON.parse(child.lesson_days) } catch { days = [] }
+          }
 
           setFormData({
             name: child.name,
@@ -79,8 +120,14 @@ export default function ChildForm() {
             national_id: child.national_id || '',
             reg_date: child.reg_date,
             notes: child.notes || '',
-            services: loadedServices
+            services: loadedServices,
+            teacher_id: child.teacher_id != null ? String(child.teacher_id) : '',
+            lesson_days: days,
+            extra_lessons: child.extra_lessons ?? 0,
+            session_price: child.session_price ?? 0,
           })
+          setPhoto(child.photo_url || null)
+          setPhotoChanged(false)
         }
         setIsLoadingChild(false)
       }
@@ -106,7 +153,7 @@ export default function ChildForm() {
     setFormData(prev => {
       const newServices = [...prev.services]
       const row = { ...newServices[index], [field]: value }
-      
+
       // Auto-update unit if service changes to session
       if (field === 'service' && value === 'جلسة' && row.unit !== 'جلسة' && row.unit !== 'يوم') {
         row.unit = 'جلسة'
@@ -137,6 +184,15 @@ export default function ChildForm() {
     })
   }
 
+  const toggleLessonDay = (day: number) => {
+    setFormData(prev => ({
+      ...prev,
+      lesson_days: prev.lesson_days.includes(day)
+        ? prev.lesson_days.filter(d => d !== day)
+        : [...prev.lesson_days, day].sort((a, b) => a - b),
+    }))
+  }
+
   // Form Validation
   const validateForm = () => {
     const errors: Record<string, string> = {}
@@ -145,8 +201,8 @@ export default function ChildForm() {
     if (!formData.guardian.trim()) errors.guardian = i18n.language === 'ar' ? 'اسم ولي الأمر مطلوب' : 'Guardian name is required'
     if (!formData.guardian_phone.trim()) {
       errors.guardian_phone = i18n.language === 'ar' ? 'رقم هاتف ولي الأمر مطلوب' : 'Guardian phone is required'
-    } else if (!/^\+?[0-9\s-]{8,15}$/.test(formData.guardian_phone)) {
-      errors.guardian_phone = i18n.language === 'ar' ? 'رقم الهاتف غير صالح' : 'Invalid phone number'
+    } else if (!GUARDIAN_PHONE_RE.test(formData.guardian_phone.trim())) {
+      errors.guardian_phone = t('phone_invalid_eg')
     }
 
     if (formData.child_phone.trim() && !/^\+?[0-9\s-]{8,15}$/.test(formData.child_phone)) {
@@ -178,15 +234,45 @@ export default function ChildForm() {
     return Object.keys(errors).length === 0
   }
 
+  // Only allow digits in the guardian phone, capped at 11 chars.
+  const handleGuardianPhoneChange = (raw: string) => {
+    const digits = raw.replace(/\D/g, '').slice(0, 11)
+    setFormData((prev) => ({ ...prev, guardian_phone: digits }))
+  }
+
   // Handle Form Submit
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     clearError()
+    setPhotoNotice(null)
 
     if (!validateForm()) return
 
     setIsSubmitting(true)
     try {
+      // Resolve the photo: upload a newly captured/selected image first.
+      let photo_url: string | null | undefined = undefined
+      let photo_public_id: string | null | undefined = undefined
+      if (photoChanged) {
+        if (photo) {
+          try {
+            const uploaded = await window.api.storage.uploadPhoto({ dataUrl: photo })
+            photo_url = uploaded.url
+            photo_public_id = uploaded.publicId
+          } catch (err) {
+            // Offline / not configured — save the child without a photo (FR-004a).
+            console.warn('Photo upload failed:', err)
+            setPhotoNotice(t('photo_upload_failed'))
+            photo_url = null
+            photo_public_id = null
+          }
+        } else {
+          // Photo explicitly removed.
+          photo_url = null
+          photo_public_id = null
+        }
+      }
+
       const payload: any = {
         name: formData.name.trim(),
         guardian: formData.guardian.trim(),
@@ -195,7 +281,16 @@ export default function ChildForm() {
         national_id: formData.national_id.trim() || null,
         reg_date: formData.reg_date,
         notes: formData.notes.trim() || null,
-        services: formData.services
+        services: formData.services,
+        teacher_id: formData.teacher_id ? Number(formData.teacher_id) : null,
+        lesson_days: formData.lesson_days,
+        sessions_baseline: sessionsBaseline,
+        extra_lessons: Number(formData.extra_lessons) || 0,
+        session_price: Number(formData.session_price) || 0,
+      }
+      if (photo_url !== undefined) {
+        payload.photo_url = photo_url
+        payload.photo_public_id = photo_public_id
       }
 
       if (isEdit) {
@@ -223,6 +318,11 @@ export default function ChildForm() {
     )
   }
 
+  const formatCurrency = (val: number) =>
+    new Intl.NumberFormat(i18n.language === 'ar' ? 'ar-EG' : 'en-US', {
+      style: 'currency', currency: 'EGP', maximumFractionDigits: 0,
+    }).format(val)
+
   return (
     <div className="p-6 max-w-4xl mx-auto space-y-6">
       <div className="flex justify-between items-center">
@@ -240,8 +340,20 @@ export default function ChildForm() {
         </Alert>
       )}
 
+      {photoNotice && (
+        <Alert variant="warning" title={t('photo')} onClose={() => setPhotoNotice(null)}>
+          {photoNotice}
+        </Alert>
+      )}
+
       <form onSubmit={handleSubmit} className="space-y-6">
         <Card className="p-6 space-y-6">
+          {/* Photo */}
+          <PhotoCapture
+            value={photo}
+            onChange={(d) => { setPhoto(d); setPhotoChanged(true) }}
+          />
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="space-y-1.5">
               <label className="text-sm font-semibold text-slate-700">
@@ -273,8 +385,10 @@ export default function ChildForm() {
               </label>
               <Input
                 value={formData.guardian_phone}
-                onChange={(e) => setFormData((prev) => ({ ...prev, guardian_phone: e.target.value }))}
+                onChange={(e) => handleGuardianPhoneChange(e.target.value)}
                 error={formErrors.guardian_phone}
+                inputMode="numeric"
+                maxLength={11}
                 placeholder={i18n.language === 'ar' ? 'رقم الهاتف المحمول (مثال: 010...)' : 'Phone number (e.g. 010...)'}
               />
             </div>
@@ -317,6 +431,78 @@ export default function ChildForm() {
             </div>
           </div>
 
+          {/* Teacher, lesson days & fee (feature 004) */}
+          <div className="space-y-4 border-t border-slate-100 pt-6">
+            <label className="text-lg font-bold text-slate-800">{t('lesson_schedule')}</label>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="space-y-1.5">
+                <label className="text-sm font-semibold text-slate-700">{t('teacher')}</label>
+                <Select
+                  value={formData.teacher_id}
+                  onChange={(e) => setFormData((prev) => ({ ...prev, teacher_id: e.target.value }))}
+                  options={[
+                    { value: '', label: t('no_teacher') },
+                    ...teachers.map((tch) => ({ value: String(tch.id), label: tch.name })),
+                  ]}
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-sm font-semibold text-slate-700">{t('lesson_days')}</label>
+                <div className="flex flex-wrap gap-1.5">
+                  {DAY_KEYS.map((key, dayIdx) => {
+                    const active = formData.lesson_days.includes(dayIdx)
+                    return (
+                      <button
+                        type="button"
+                        key={key}
+                        onClick={() => toggleLessonDay(dayIdx)}
+                        className={`px-2.5 py-1 rounded-md text-xs font-semibold border transition-colors ${
+                          active
+                            ? 'bg-primary text-white border-primary'
+                            : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
+                        }`}
+                      >
+                        {t(`days.${key}`)}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-sm font-semibold text-slate-700">{t('extra_lessons')}</label>
+                <Input
+                  type="number"
+                  min={0}
+                  value={formData.extra_lessons}
+                  onChange={(e) => setFormData((prev) => ({ ...prev, extra_lessons: Math.max(0, Number(e.target.value)) }))}
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-sm font-semibold text-slate-700">{t('session_price')} (EGP)</label>
+                <Input
+                  type="number"
+                  min={0}
+                  value={formData.session_price}
+                  onChange={(e) => setFormData((prev) => ({ ...prev, session_price: Math.max(0, Number(e.target.value)) }))}
+                />
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-6 bg-slate-50 border border-slate-200 rounded-lg p-4">
+              <div>
+                <p className="text-xs text-slate-500">{t('sessions_per_month')}</p>
+                <p className="text-lg font-bold text-slate-800">{totalSessions}</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500">{t('monthly_fee')}</p>
+                <p className="text-lg font-bold text-primary">{formatCurrency(monthlyFee)}</p>
+              </div>
+            </div>
+          </div>
+
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <label className="text-lg font-bold text-slate-800">
@@ -327,7 +513,7 @@ export default function ChildForm() {
                 {i18n.language === 'ar' ? 'إضافة خدمة' : 'Add Service'}
               </Button>
             </div>
-            
+
             {formErrors.services && (
               <p className="text-sm text-red-500 font-medium">{formErrors.services}</p>
             )}
@@ -378,9 +564,9 @@ export default function ChildForm() {
                     </div>
                     {formData.services.length > 1 && (
                       <div className="pb-1">
-                        <Button 
-                          type="button" 
-                          variant="ghost" 
+                        <Button
+                          type="button"
+                          variant="ghost"
                           className="text-red-500 hover:text-red-700 hover:bg-red-50 p-2"
                           onClick={() => handleRemoveService(index)}
                         >

@@ -139,6 +139,16 @@ export default function ChildrenList() {
   // Columns definition
   const columns = [
     {
+      key: 'index',
+      header: t('index'),
+      className: 'w-12 text-center',
+      render: (child: Child) => (
+        <span className="font-mono text-slate-400 text-sm">
+          {sortedChildren.findIndex((c) => c.id === child.id) + 1}
+        </span>
+      ),
+    },
+    {
       key: 'name',
       header: (
         <button
@@ -149,8 +159,17 @@ export default function ChildrenList() {
         </button>
       ),
       render: (child: Child) => (
-        <div className="font-semibold text-slate-900 hover:text-primary cursor-pointer" onClick={() => navigate(`/children/${child.id}/statement`)}>
-          {child.name}
+        <div className="flex items-center gap-2.5">
+          <div className="w-8 h-8 rounded-full overflow-hidden bg-slate-100 border border-slate-200 flex items-center justify-center shrink-0">
+            {child.photo_url ? (
+              <img src={child.photo_url} alt={child.name} className="w-full h-full object-cover" />
+            ) : (
+              <span className="text-sm text-slate-300">🧒</span>
+            )}
+          </div>
+          <div className="font-semibold text-slate-900 hover:text-primary cursor-pointer" onClick={() => navigate(`/children/${child.id}/statement`)}>
+            {child.name}
+          </div>
         </div>
       ),
     },
@@ -330,11 +349,10 @@ export default function ChildrenList() {
             📕 {i18n.language === 'ar' ? 'تصدير PDF' : 'PDF Export'}
           </Button>
           
-          {isAdmin && (
-            <Button variant="primary" onClick={() => navigate('/children/new')}>
-              {t('add_child')}
-            </Button>
-          )}
+          {/* Employees (not only admins) can add children — feature 004, FR-012 */}
+          <Button variant="primary" onClick={() => navigate('/children/new')}>
+            {t('add_child')}
+          </Button>
         </div>
       </div>
 

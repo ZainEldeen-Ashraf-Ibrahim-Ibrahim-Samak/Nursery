@@ -67,6 +67,9 @@ export default function TargetPlanning() {
   })
   const [calcResult, setCalcResult] = useState<CalcResult | null>(null)
   const [isCalcing, setIsCalcing] = useState(false)
+  // Feature 004 — Target Profit % is a calculator input (FR-014). Empty = use
+  // the saved setting (so outputs are unchanged when left untouched, FR-015).
+  const [calcProfitPct, setCalcProfitPct] = useState('')
 
   const fetchTarget = async (year: number) => {
     setIsLoading(true)
@@ -74,6 +77,12 @@ export default function TargetPlanning() {
     try {
       const result = await window.api.target.get({ year })
       setData(result)
+      // Prefill the calculator's Target Profit % from the saved setting (once).
+      setCalcProfitPct((prev) =>
+        prev.trim() === '' && result?.targetProfitPct != null
+          ? String(Math.round(result.targetProfitPct * 100))
+          : prev
+      )
     } catch (err: any) {
       let msg = err.message || 'Failed to fetch target data'
       if (msg.includes('Error invoking remote method')) {
@@ -101,7 +110,9 @@ export default function TargetPlanning() {
       const result = await window.api.target.calc({
         distribution,
         month: calcMonth,
-        year: currentYear
+        year: currentYear,
+        // Convert percentage points → fraction; omit when blank to use the saved setting.
+        targetProfitPct: calcProfitPct.trim() === '' ? undefined : Number(calcProfitPct) / 100
       })
       setCalcResult(result)
     } catch (err: any) {
@@ -346,6 +357,17 @@ export default function TargetPlanning() {
             value={calcMonth}
             options={monthOptions}
             onChange={(e) => setCalcMonth(e.target.value)}
+          />
+
+          {/* Target Profit % — calculator input (feature 004, FR-014) */}
+          <Input
+            label={isAr ? 'نسبة الربح المستهدفة %' : 'Target Profit %'}
+            type="number"
+            min="0"
+            max="99"
+            value={calcProfitPct}
+            onChange={(e) => setCalcProfitPct(e.target.value)}
+            placeholder={isAr ? 'مثال: 20' : 'e.g. 20'}
           />
 
           <div className="space-y-3">

@@ -127,7 +127,11 @@ export function getChildStatement(child: any, existingPayments: any[], currentDa
       unit: child.unit,
       price: child.price,
       reg_date: child.reg_date,
-      is_active: child.is_active
+      is_active: child.is_active,
+      // Feature 004 — surface photo, teacher, and computed fee on the record
+      photo_url: child.photo_url ?? null,
+      teacher_name: child.teacher_name ?? null,
+      monthly_fee: child.monthly_fee ?? null
     },
     rows,
     summary: {

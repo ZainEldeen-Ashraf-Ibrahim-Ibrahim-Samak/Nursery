@@ -40,6 +40,23 @@ export interface Child {
   created_at: string
   updated_at: string
   synced: number // 0 or 1
+
+  // Feature 004 — child enrollment enhancements (all optional / additive)
+  photo_url?: string | null
+  photo_public_id?: string | null
+  teacher_id?: number | null
+  lesson_days?: number[] | string | null // number[] in the UI; JSON string at rest
+  sessions_baseline?: number // default 8
+  extra_lessons?: number // default 0
+  session_price?: number | null
+  monthly_fee?: number | null
+}
+
+/** A teacher option, projected from the employees table (feature 004). */
+export interface Teacher {
+  id: number
+  name: string
+  role: string
 }
 
 export type PaymentStatus = 'paid' | 'partial' | 'unpaid'
@@ -156,6 +173,9 @@ export interface ChildStatement {
     price: number
     reg_date: string
     is_active: number
+    photo_url?: string | null
+    teacher_name?: string | null
+    monthly_fee?: number | null
   }
   rows: ChildStatementRow[]
   summary: {

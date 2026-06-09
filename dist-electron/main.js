@@ -7,6 +7,7 @@ import fs from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import ExcelJS from "exceljs";
 import PdfPrinter from "pdfmake";
+import crypto$1 from "node:crypto";
 import mongoose, { Schema } from "mongoose";
 import { promises } from "dns";
 //#region \0rolldown/runtime.js
@@ -147,7 +148,7 @@ var import_main = /* @__PURE__ */ __toESM((/* @__PURE__ */ __commonJSMin(((expor
 	var fs$1 = __require("fs");
 	var path$1 = __require("path");
 	var os = __require("os");
-	var crypto$2 = __require("crypto");
+	var crypto$3 = __require("crypto");
 	var version = (init_package(), __toCommonJS(package_exports).default).version;
 	var LINE = /(?:^|^)\s*(?:export\s+)?([\w.-]+)(?:\s*=\s*?|:\s+?)(\s*'(?:\\'|[^'])*'|\s*"(?:\\"|[^"])*"|\s*`(?:\\`|[^`])*`|[^#\r\n]+)?\s*(?:#.*)?(?:$|$)/gm;
 	function parse(src) {
@@ -322,7 +323,7 @@ var import_main = /* @__PURE__ */ __toESM((/* @__PURE__ */ __commonJSMin(((expor
 		const authTag = ciphertext.subarray(-16);
 		ciphertext = ciphertext.subarray(12, -16);
 		try {
-			const aesgcm = crypto$2.createDecipheriv("aes-256-gcm", key, nonce);
+			const aesgcm = crypto$3.createDecipheriv("aes-256-gcm", key, nonce);
 			aesgcm.setAuthTag(authTag);
 			return `${aesgcm.update(ciphertext)}${aesgcm.final()}`;
 		} catch (error) {
@@ -436,6 +437,34 @@ function getSeedAdmin() {
 function seedSetting(envKey, fallback) {
 	const v = process.env[envKey]?.trim();
 	return v && v.length > 0 ? v : fallback;
+}
+/**
+* Resolve Cloudinary credentials for child-photo upload (feature 004).
+* Accepts either the three discrete env vars or a single `CLOUDINARY_URL`
+* of the form `cloudinary://<api_key>:<api_secret>@<cloud_name>`.
+* Returns null when not configured — callers must handle this gracefully
+* (photo upload is optional; the child still saves). Credentials live only in
+* the main process and are never sent to the renderer.
+*/
+function getCloudinaryConfig() {
+	const url = process.env.CLOUDINARY_URL?.trim();
+	if (url) {
+		const m = url.match(/^cloudinary:\/\/([^:]+):([^@]+)@(.+)$/);
+		if (m) return {
+			apiKey: m[1],
+			apiSecret: m[2],
+			cloudName: m[3]
+		};
+	}
+	const cloudName = process.env.CLOUDINARY_CLOUD_NAME?.trim();
+	const apiKey = process.env.CLOUDINARY_API_KEY?.trim();
+	const apiSecret = process.env.CLOUDINARY_API_SECRET?.trim();
+	if (cloudName && apiKey && apiSecret) return {
+		cloudName,
+		apiKey,
+		apiSecret
+	};
+	return null;
 }
 //#endregion
 //#region electron/db/migrations/index.ts
@@ -733,6 +762,24 @@ var migrations = [
           UNIQUE(sheet, row_index)
         );
       `);
+		}
+	},
+	{
+		name: "011_child_photo_teacher_lessons",
+		up: (db) => {
+			const addColumn = (ddl) => {
+				try {
+					db.exec(ddl);
+				} catch {}
+			};
+			addColumn("ALTER TABLE children ADD COLUMN photo_url TEXT;");
+			addColumn("ALTER TABLE children ADD COLUMN photo_public_id TEXT;");
+			addColumn("ALTER TABLE children ADD COLUMN teacher_id INTEGER;");
+			addColumn("ALTER TABLE children ADD COLUMN lesson_days TEXT;");
+			addColumn("ALTER TABLE children ADD COLUMN sessions_baseline INTEGER DEFAULT 8;");
+			addColumn("ALTER TABLE children ADD COLUMN extra_lessons INTEGER DEFAULT 0;");
+			addColumn("ALTER TABLE children ADD COLUMN session_price REAL;");
+			addColumn("ALTER TABLE children ADD COLUMN monthly_fee REAL;");
 		}
 	}
 ];
@@ -2995,14 +3042,14 @@ var require_buffer_equal_constant_time = /* @__PURE__ */ __commonJSMin(((exports
 //#region node_modules/jwa/index.js
 var require_jwa = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 	var Buffer = require_safe_buffer().Buffer;
-	var crypto$1 = __require("crypto");
+	var crypto$2 = __require("crypto");
 	var formatEcdsa = require_ecdsa_sig_formatter();
 	var util$2 = __require("util");
 	var MSG_INVALID_ALGORITHM = "\"%s\" is not a valid algorithm.\n  Supported algorithms are:\n  \"HS256\", \"HS384\", \"HS512\", \"RS256\", \"RS384\", \"RS512\", \"PS256\", \"PS384\", \"PS512\", \"ES256\", \"ES384\", \"ES512\" and \"none\".";
 	var MSG_INVALID_SECRET = "secret must be a string or buffer";
 	var MSG_INVALID_VERIFIER_KEY = "key must be a string or a buffer";
 	var MSG_INVALID_SIGNER_KEY = "key must be a string, a buffer or an object";
-	var supportsKeyObjects = typeof crypto$1.createPublicKey === "function";
+	var supportsKeyObjects = typeof crypto$2.createPublicKey === "function";
 	if (supportsKeyObjects) {
 		MSG_INVALID_VERIFIER_KEY += " or a KeyObject";
 		MSG_INVALID_SECRET += "or a KeyObject";
@@ -3055,14 +3102,14 @@ var require_jwa = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 		return function sign(thing, secret) {
 			checkIsSecretKey(secret);
 			thing = normalizeInput(thing);
-			var hmac = crypto$1.createHmac("sha" + bits, secret);
+			var hmac = crypto$2.createHmac("sha" + bits, secret);
 			return fromBase64((hmac.update(thing), hmac.digest("base64")));
 		};
 	}
 	var bufferEqual;
-	var timingSafeEqual = "timingSafeEqual" in crypto$1 ? function timingSafeEqual(a, b) {
+	var timingSafeEqual = "timingSafeEqual" in crypto$2 ? function timingSafeEqual(a, b) {
 		if (a.byteLength !== b.byteLength) return false;
-		return crypto$1.timingSafeEqual(a, b);
+		return crypto$2.timingSafeEqual(a, b);
 	} : function timingSafeEqual(a, b) {
 		if (!bufferEqual) bufferEqual = require_buffer_equal_constant_time();
 		return bufferEqual(a, b);
@@ -3077,7 +3124,7 @@ var require_jwa = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 		return function sign(thing, privateKey) {
 			checkIsPrivateKey(privateKey);
 			thing = normalizeInput(thing);
-			var signer = crypto$1.createSign("RSA-SHA" + bits);
+			var signer = crypto$2.createSign("RSA-SHA" + bits);
 			return fromBase64((signer.update(thing), signer.sign(privateKey, "base64")));
 		};
 	}
@@ -3086,7 +3133,7 @@ var require_jwa = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 			checkIsPublicKey(publicKey);
 			thing = normalizeInput(thing);
 			signature = toBase64(signature);
-			var verifier = crypto$1.createVerify("RSA-SHA" + bits);
+			var verifier = crypto$2.createVerify("RSA-SHA" + bits);
 			verifier.update(thing);
 			return verifier.verify(publicKey, signature, "base64");
 		};
@@ -3095,11 +3142,11 @@ var require_jwa = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 		return function sign(thing, privateKey) {
 			checkIsPrivateKey(privateKey);
 			thing = normalizeInput(thing);
-			var signer = crypto$1.createSign("RSA-SHA" + bits);
+			var signer = crypto$2.createSign("RSA-SHA" + bits);
 			return fromBase64((signer.update(thing), signer.sign({
 				key: privateKey,
-				padding: crypto$1.constants.RSA_PKCS1_PSS_PADDING,
-				saltLength: crypto$1.constants.RSA_PSS_SALTLEN_DIGEST
+				padding: crypto$2.constants.RSA_PKCS1_PSS_PADDING,
+				saltLength: crypto$2.constants.RSA_PSS_SALTLEN_DIGEST
 			}, "base64")));
 		};
 	}
@@ -3108,12 +3155,12 @@ var require_jwa = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 			checkIsPublicKey(publicKey);
 			thing = normalizeInput(thing);
 			signature = toBase64(signature);
-			var verifier = crypto$1.createVerify("RSA-SHA" + bits);
+			var verifier = crypto$2.createVerify("RSA-SHA" + bits);
 			verifier.update(thing);
 			return verifier.verify({
 				key: publicKey,
-				padding: crypto$1.constants.RSA_PKCS1_PSS_PADDING,
-				saltLength: crypto$1.constants.RSA_PSS_SALTLEN_DIGEST
+				padding: crypto$2.constants.RSA_PKCS1_PSS_PADDING,
+				saltLength: crypto$2.constants.RSA_PSS_SALTLEN_DIGEST
 			}, signature, "base64");
 		};
 	}
@@ -7164,7 +7211,10 @@ function getChildStatement(child, existingPayments, currentDate) {
 			unit: child.unit,
 			price: child.price,
 			reg_date: child.reg_date,
-			is_active: child.is_active
+			is_active: child.is_active,
+			photo_url: child.photo_url ?? null,
+			teacher_name: child.teacher_name ?? null,
+			monthly_fee: child.monthly_fee ?? null
 		},
 		rows,
 		summary: {
@@ -7179,6 +7229,26 @@ function getChildStatement(child, existingPayments, currentDate) {
 //#region electron/ipc/childrenIPC.ts
 function checkAuth$4() {
 	if (!getCurrentUser()) throw new Error("UNAUTHORIZED: يجب تسجيل الدخول أولاً / Unauthorized");
+}
+var GUARDIAN_PHONE_RE = /^01[0-9]{9}$/;
+function validateGuardianPhone(phone) {
+	if (!GUARDIAN_PHONE_RE.test((phone ?? "").toString().trim())) throw new Error("رقم هاتف ولي الأمر يجب أن يتكوّن من 11 رقماً ويبدأ بـ 01 / Guardian phone must be exactly 11 digits starting with 01");
+}
+function buildLessonFields(src) {
+	const sessions_baseline = src.sessions_baseline === void 0 || src.sessions_baseline === null ? 8 : Math.max(0, Math.trunc(Number(src.sessions_baseline)));
+	const extra_lessons = src.extra_lessons === void 0 || src.extra_lessons === null ? 0 : Math.max(0, Math.trunc(Number(src.extra_lessons)));
+	const session_price = src.session_price === void 0 || src.session_price === null || src.session_price === "" ? null : Number(src.session_price);
+	if (session_price !== null && session_price < 0) throw new Error("سعر الجلسة لا يمكن أن يكون سالباً / Session price cannot be negative");
+	const lesson_days = src.lesson_days === void 0 || src.lesson_days === null ? null : Array.isArray(src.lesson_days) ? JSON.stringify(src.lesson_days) : String(src.lesson_days);
+	const monthly_fee = session_price === null ? null : Number(((sessions_baseline + extra_lessons) * session_price).toFixed(2));
+	return {
+		teacher_id: src.teacher_id === void 0 || src.teacher_id === null || src.teacher_id === "" ? null : Number(src.teacher_id),
+		lesson_days,
+		sessions_baseline,
+		extra_lessons,
+		session_price,
+		monthly_fee
+	};
 }
 ipcMain.handle("children:get", async (_event, { search, service, activeOnly }) => {
 	try {
@@ -7207,7 +7277,7 @@ ipcMain.handle("children:get", async (_event, { search, service, activeOnly }) =
 });
 ipcMain.handle("children:add", async (_event, childInput) => {
 	try {
-		requireAdmin();
+		checkAuth$4();
 		const db = getDb();
 		const { name, guardian, guardian_phone, child_phone, national_id, reg_date, notes, services } = childInput;
 		const enrollments = services || (childInput.service ? [{
@@ -7216,17 +7286,21 @@ ipcMain.handle("children:add", async (_event, childInput) => {
 			price: childInput.price
 		}] : []);
 		if (!name || !guardian || !guardian_phone || enrollments.length === 0 || !reg_date) throw new Error("جميع الحقول الإلزامية مطلوبة / Missing required fields");
+		validateGuardianPhone(guardian_phone);
 		if (new Set(enrollments.map((s) => s.service)).size < enrollments.length) throw new Error("لا يمكن إضافة نفس الخدمة أكثر من مرة / Cannot add duplicate services");
+		const lesson = buildLessonFields(childInput);
 		const now = (/* @__PURE__ */ new Date()).toISOString();
 		const createdId = db.transaction(() => {
 			const first = enrollments[0];
 			const result = db.prepare(`
         INSERT INTO children (
-          name, guardian, guardian_phone, child_phone, national_id, 
-          service, unit, price, reg_date, notes, 
+          name, guardian, guardian_phone, child_phone, national_id,
+          service, unit, price, reg_date, notes,
+          photo_url, photo_public_id, teacher_id, lesson_days,
+          sessions_baseline, extra_lessons, session_price, monthly_fee,
           is_active, created_at, updated_at, synced
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, 0)
-      `).run(name, guardian, guardian_phone, child_phone || null, national_id || null, first.service, first.unit, first.price, reg_date, notes || null, now, now);
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, 0)
+      `).run(name, guardian, guardian_phone, child_phone || null, national_id || null, first.service, first.unit, first.price, reg_date, notes || null, childInput.photo_url || null, childInput.photo_public_id || null, lesson.teacher_id, lesson.lesson_days, lesson.sessions_baseline, lesson.extra_lessons, lesson.session_price, lesson.monthly_fee, now, now);
 			const childId = Number(result.lastInsertRowid);
 			const insertSvc = db.prepare(`INSERT INTO child_services (child_id, service, unit, price, created_at, updated_at, synced) VALUES (?, ?, ?, ?, ?, ?, 0)`);
 			for (const s of enrollments) insertSvc.run(childId, s.service, s.unit, s.price, now, now);
@@ -7245,7 +7319,9 @@ ipcMain.handle("children:update", async (_event, { id, patch }) => {
 		requireAdmin();
 		const db = getDb();
 		if (!id || !patch) throw new Error("Child ID and patch data are required");
-		if (!db.prepare("SELECT id FROM children WHERE id = ?").get(id)) throw new Error("الطفل غير موجود / Child not found");
+		const child = db.prepare("SELECT * FROM children WHERE id = ?").get(id);
+		if (!child) throw new Error("الطفل غير موجود / Child not found");
+		if (patch.guardian_phone !== void 0) validateGuardianPhone(patch.guardian_phone);
 		db.transaction(() => {
 			const enrollments = patch.services;
 			if (enrollments) {
@@ -7268,10 +7344,31 @@ ipcMain.handle("children:update", async (_event, { id, patch }) => {
 				"price",
 				"reg_date",
 				"notes",
-				"is_active"
+				"is_active",
+				"photo_url",
+				"photo_public_id"
 			]) if (patch[key] !== void 0) {
 				query += `${key} = ?, `;
 				params.push(patch[key]);
+			}
+			if ([
+				"teacher_id",
+				"lesson_days",
+				"sessions_baseline",
+				"extra_lessons",
+				"session_price"
+			].some((k) => patch[k] !== void 0)) {
+				const merged = buildLessonFields({
+					teacher_id: patch.teacher_id !== void 0 ? patch.teacher_id : child.teacher_id,
+					lesson_days: patch.lesson_days !== void 0 ? patch.lesson_days : child.lesson_days,
+					sessions_baseline: patch.sessions_baseline !== void 0 ? patch.sessions_baseline : child.sessions_baseline,
+					extra_lessons: patch.extra_lessons !== void 0 ? patch.extra_lessons : child.extra_lessons,
+					session_price: patch.session_price !== void 0 ? patch.session_price : child.session_price
+				});
+				for (const [k, v] of Object.entries(merged)) {
+					query += `${k} = ?, `;
+					params.push(v);
+				}
 			}
 			const now = (/* @__PURE__ */ new Date()).toISOString();
 			if (params.length > 0) {
@@ -7312,6 +7409,7 @@ ipcMain.handle("children:statement", async (_event, { childId }) => {
 		const db = getDb();
 		const child = db.prepare("SELECT * FROM children WHERE id = ?").get(childId);
 		if (!child) throw new Error("الطفل غير موجود / Child not found");
+		if (child.teacher_id) child.teacher_name = db.prepare("SELECT name FROM employees WHERE id = ?").get(child.teacher_id)?.name ?? null;
 		return getChildStatement(child, db.prepare("SELECT * FROM payments WHERE child_id = ?").all(childId), /* @__PURE__ */ new Date());
 	} catch (error) {
 		console.error("Failed to get child statement:", error);
@@ -7408,6 +7506,31 @@ ipcMain.handle("childServices:remove", async (_event, { id }) => {
 	} catch (error) {
 		console.error("Failed to remove child service:", error);
 		throw new Error(error.message || "Failed to remove child service");
+	}
+});
+//#endregion
+//#region electron/ipc/teachersIPC.ts
+/**
+* teachers:list { role? }
+*
+* Auth-level (any signed-in user) read projection over the `employees` table,
+* used by the child form to assign a teacher (feature 004). Returns only
+* id/name/role — salary fields are intentionally excluded so employee users
+* can pick a teacher without gaining payroll visibility (the admin-only
+* `employees:get` is unchanged). When `role` is provided, results are filtered
+* to employees whose role matches (case-insensitive, includes the common
+* Arabic teacher titles).
+*/
+ipcMain.handle("teachers:list", async (_event, args) => {
+	try {
+		if (!getCurrentUser()) throw new Error("UNAUTHORIZED: يجب تسجيل الدخول أولاً / Unauthorized");
+		const rows = getDb().prepare("SELECT id, name, role FROM employees WHERE is_active = 1 ORDER BY name ASC").all();
+		const roleFilter = (args?.role ?? "").toString().trim().toLowerCase();
+		if (!roleFilter) return rows;
+		return rows.filter((r) => (r.role ?? "").toLowerCase().includes(roleFilter));
+	} catch (error) {
+		console.error("Failed to list teachers:", error);
+		throw new Error(error.message || "Failed to list teachers");
 	}
 });
 //#endregion
@@ -7918,7 +8041,7 @@ ipcMain.handle("target:get", async (_event, { year }) => {
 * distribution: { حضانة?: number, استضافة?: number, جلسة?: number }
 * Admin only.
 */
-ipcMain.handle("target:calc", async (_event, { distribution, month, year }) => {
+ipcMain.handle("target:calc", async (_event, { distribution, month, year, targetProfitPct: overridePct }) => {
 	try {
 		requireAdmin();
 		const db = getDb();
@@ -7942,8 +8065,13 @@ ipcMain.handle("target:calc", async (_event, { distribution, month, year }) => {
 			const expenses = db.prepare("SELECT amount FROM expenses WHERE month = ? AND year = ?").all(month, year);
 			const salaries = db.prepare("SELECT actual_paid FROM salary_payments WHERE month = ? AND year = ?").all(month, year);
 			const totalExp = expenses.reduce((s, e) => s + e.amount, 0) + salaries.reduce((s, s2) => s + s2.actual_paid, 0);
-			const targetProfitRow = db.prepare("SELECT value FROM settings WHERE key = 'target_profit_pct'").get();
-			targetRequired = calcRequiredRevenue(totalExp, targetProfitRow ? Number(targetProfitRow.value) : .2);
+			let targetProfitPct;
+			if (overridePct !== void 0 && overridePct !== null && overridePct !== "") targetProfitPct = Number(overridePct);
+			else {
+				const targetProfitRow = db.prepare("SELECT value FROM settings WHERE key = 'target_profit_pct'").get();
+				targetProfitPct = targetProfitRow ? Number(targetProfitRow.value) : .2;
+			}
+			targetRequired = calcRequiredRevenue(totalExp, targetProfitPct);
 		}
 		const coveragePct = targetRequired > 0 ? Number(Math.min(1, projectedRevenue / targetRequired).toFixed(4)) : 0;
 		const services = Object.keys(pricing);
@@ -11312,7 +11440,71 @@ function progressReporter(event, op) {
 	};
 }
 //#endregion
+//#region electron/services/cloudinaryService.ts
+/**
+* Compute a Cloudinary upload signature: sha1 of the request params (sorted by
+* key, joined as `k=v&...`) followed by the API secret. Exported for unit
+* testing (feature 004, FR — no network needed).
+*/
+function signParams(params, apiSecret) {
+	const toSign = Object.keys(params).sort().map((k) => `${k}=${params[k]}`).join("&");
+	return crypto$1.createHash("sha1").update(toSign + apiSecret).digest("hex");
+}
+/**
+* Upload an image (data URL or raw base64/remote URL accepted by Cloudinary's
+* `file` field) to Cloudinary via a signed REST request. Runs in the main
+* process only; the API secret never leaves here. Throws a descriptive error
+* when Cloudinary is not configured or the request fails — the caller (renderer)
+* catches it and proceeds to save the child without a photo (offline-safe).
+*/
+async function uploadImage(dataUrl, folder = "nursery/children") {
+	const config = getCloudinaryConfig();
+	if (!config) throw new Error("Cloudinary is not configured / لم يتم إعداد Cloudinary");
+	if (!dataUrl) throw new Error("No image provided / لا توجد صورة");
+	const timestamp = Math.floor(Date.now() / 1e3);
+	const signature = signParams({
+		folder,
+		timestamp
+	}, config.apiSecret);
+	const form = new FormData();
+	form.append("file", dataUrl);
+	form.append("api_key", config.apiKey);
+	form.append("timestamp", String(timestamp));
+	form.append("folder", folder);
+	form.append("signature", signature);
+	const endpoint = `https://api.cloudinary.com/v1_1/${config.cloudName}/image/upload`;
+	const res = await fetch(endpoint, {
+		method: "POST",
+		body: form
+	});
+	if (!res.ok) {
+		let detail = "";
+		try {
+			const body = await res.json();
+			detail = body?.error?.message ? `: ${body.error.message}` : "";
+		} catch {}
+		throw new Error(`Cloudinary upload failed (${res.status})${detail}`);
+	}
+	const body = await res.json();
+	return {
+		url: body.secure_url,
+		publicId: body.public_id
+	};
+}
+//#endregion
 //#region electron/ipc/storageIPC.ts
+/**
+* storage:uploadPhoto { dataUrl, folder? }
+* Uploads a child photo to Cloudinary from the main process (signed request;
+* the API secret never reaches the renderer). Auth-level — employees may add
+* children with photos (feature 004). Returns { url, publicId }. Throws when
+* Cloudinary is unconfigured/unreachable; the renderer then saves the child
+* without a photo (offline-safe, FR-004a).
+*/
+ipcMain.handle("storage:uploadPhoto", async (_event, { dataUrl, folder }) => {
+	if (!getCurrentUser()) throw new Error("UNAUTHORIZED: يجب تسجيل الدخول أولاً / Unauthorized");
+	return uploadImage(dataUrl, folder);
+});
 /**
 * storage:stats
 * Returns counts for all major tables and database file size.
@@ -11565,6 +11757,14 @@ var childSchema = new Schema({
 	reg_date: String,
 	notes: String,
 	is_active: Number,
+	photo_url: String,
+	photo_public_id: String,
+	teacher_id: Number,
+	lesson_days: String,
+	sessions_baseline: Number,
+	extra_lessons: Number,
+	session_price: Number,
+	monthly_fee: Number,
 	created_at: String,
 	updated_at: String,
 	synced: Number
