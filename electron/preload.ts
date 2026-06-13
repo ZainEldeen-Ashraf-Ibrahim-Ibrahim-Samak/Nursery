@@ -68,6 +68,7 @@ const api = {
   target: {
     get: (args: any) => ipcRenderer.invoke('target:get', args),
     calc: (args: any) => ipcRenderer.invoke('target:calc', args),
+    capacityPlan: (args: any) => ipcRenderer.invoke('target:capacity-plan', args),
   },
 
   // Settings & Branding

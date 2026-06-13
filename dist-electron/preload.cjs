@@ -52,7 +52,8 @@ electron.contextBridge.exposeInMainWorld("api", {
 	dashboard: { get: (args) => electron.ipcRenderer.invoke("dashboard:get", args) },
 	target: {
 		get: (args) => electron.ipcRenderer.invoke("target:get", args),
-		calc: (args) => electron.ipcRenderer.invoke("target:calc", args)
+		calc: (args) => electron.ipcRenderer.invoke("target:calc", args),
+		capacityPlan: (args) => electron.ipcRenderer.invoke("target:capacity-plan", args)
 	},
 	settings: {
 		get: () => electron.ipcRenderer.invoke("settings:get"),

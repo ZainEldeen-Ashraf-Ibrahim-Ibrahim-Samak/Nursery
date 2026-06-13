@@ -8036,6 +8036,69 @@ ipcMain.handle("target:get", async (_event, { year }) => {
 	}
 });
 /**
+* target:capacity-plan { numClasses, classCapacity, numStaff, desiredRevenue }
+* Given the physical constraints of the centre, returns:
+*  - totalCapacity (numClasses × classCapacity)
+*  - For each service: minimum children needed to reach desiredRevenue alone,
+*    and whether that fits within capacity.
+*  - A balanced recommended mix (50 % nursery, 30 % hosting, 20 % sessions).
+*  - Per-staff and per-class revenue metrics.
+* Admin only.
+*/
+ipcMain.handle("target:capacity-plan", (_event, { numClasses, classCapacity, numStaff, desiredRevenue }) => {
+	try {
+		requireAdmin();
+		const db = getDb();
+		const nc = Math.max(0, Number(numClasses || 0));
+		const cc = Math.max(0, Number(classCapacity || 0));
+		const ns = Math.max(0, Number(numStaff || 0));
+		const dr = Math.max(0, Number(desiredRevenue || 0));
+		const totalCapacity = nc * cc;
+		const settings = db.prepare("SELECT key, value FROM settings").all();
+		const settingMap = {};
+		for (const s of settings) settingMap[s.key] = s.value;
+		const pricing = {
+			حضانة: Number(settingMap["nursery_monthly"] || 2500),
+			استضافة: Number(settingMap["hosting_monthly"] || 3e3),
+			جلسة: Number(settingMap["session_hourly"] || 100)
+		};
+		const scenarios = {};
+		for (const [service, price] of Object.entries(pricing)) {
+			const childrenNeeded = price > 0 ? Math.ceil(dr / price) : 0;
+			scenarios[service] = {
+				childrenNeeded,
+				feasible: totalCapacity > 0 && childrenNeeded <= totalCapacity,
+				maxRevenue: Number((totalCapacity * price).toFixed(2)),
+				utilization: totalCapacity > 0 ? Number(Math.min(1, childrenNeeded / totalCapacity).toFixed(4)) : 0
+			};
+		}
+		const nurserySlots = Math.floor(totalCapacity * .5);
+		const hostingSlots = Math.floor(totalCapacity * .3);
+		const recommendedMix = {
+			حضانة: nurserySlots,
+			استضافة: hostingSlots,
+			جلسة: Math.max(0, totalCapacity - nurserySlots - hostingSlots)
+		};
+		const recommendedRevenue = Number(Object.entries(recommendedMix).reduce((s, [svc, count]) => s + count * (pricing[svc] ?? 0), 0).toFixed(2));
+		return {
+			totalCapacity,
+			desiredRevenue: dr,
+			pricing,
+			scenarios,
+			recommendedMix,
+			recommendedRevenue,
+			metrics: {
+				revenuePerClass: nc > 0 ? Number((dr / nc).toFixed(2)) : 0,
+				revenuePerStaff: ns > 0 ? Number((dr / ns).toFixed(2)) : 0,
+				childrenPerStaff: ns > 0 ? Number((totalCapacity / ns).toFixed(2)) : 0,
+				revenueGap: Number(Math.max(0, dr - recommendedRevenue).toFixed(2))
+			}
+		};
+	} catch (error) {
+		throw new Error(error.message || "Failed to calculate capacity plan");
+	}
+});
+/**
 * target:calc { distribution }
 * Computes projected revenue and coverage for a custom service distribution.
 * distribution: { حضانة?: number, استضافة?: number, جلسة?: number }
