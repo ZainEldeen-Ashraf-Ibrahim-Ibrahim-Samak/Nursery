@@ -129,6 +129,7 @@ export const ChildModel: Model<any> = mongoose.models['sync_children'] ||
 const paymentSchema = new Schema({
   id: { type: Number, required: true, unique: true },
   child_id: Number,
+  service_id: Number,
   service: String,
   unit: String,
   quantity: Number,
