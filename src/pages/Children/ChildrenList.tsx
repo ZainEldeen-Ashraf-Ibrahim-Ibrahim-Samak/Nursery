@@ -15,7 +15,7 @@ import { Pagination } from '../../components/ui/Pagination.js'
 import { Modal } from '../../components/ui/Modal.js'
 import type { Child } from '../../types/index.js'
 
-type SortKey = 'name' | 'guardian' | 'price' | 'reg_date' | 'is_active'
+type SortKey = 'id' | 'name' | 'guardian' | 'price' | 'reg_date' | 'is_active'
 type SortOrder = 'asc' | 'desc'
 
 export default function ChildrenList() {
@@ -39,7 +39,7 @@ export default function ChildrenList() {
   // Local state
   const [currentPage, setCurrentPage] = useState(1)
   const [itemsPerPage] = useState(10)
-  const [sortKey, setSortKey] = useState<SortKey>('name')
+  const [sortKey, setSortKey] = useState<SortKey>('id')
   const [sortOrder, setSortOrder] = useState<SortOrder>('asc')
   
   // Deactivate modal state

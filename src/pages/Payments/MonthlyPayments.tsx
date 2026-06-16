@@ -210,6 +210,9 @@ export default function MonthlyPayments() {
               </Button>
             </>
           )}
+          <Button variant="primary" onClick={handleGenerate} isLoading={isGenerating}>
+            ⚡ {t('generate_payments')}
+          </Button>
         </div>
       </div>
 
@@ -276,9 +279,6 @@ export default function MonthlyPayments() {
             <p className="text-slate-500 max-w-md mx-auto text-sm leading-relaxed">
               {t('no_payments')}
             </p>
-            <Button variant="primary" onClick={handleGenerate} isLoading={isGenerating}>
-              ⚡ {t('generate_payments')}
-            </Button>
           </div>
         ) : (
           <div className="flex flex-col">
