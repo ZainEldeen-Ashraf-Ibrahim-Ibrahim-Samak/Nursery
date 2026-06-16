@@ -351,6 +351,26 @@ const migrations: Migration[] = [
       addColumn('ALTER TABLE children ADD COLUMN session_price REAL;')
       addColumn('ALTER TABLE children ADD COLUMN monthly_fee REAL;')
     }
+  },
+  {
+    name: '012_repush_payments_with_service_id',
+    up: (db) => {
+      // Payments pushed to MongoDB before service_id was added to the Mongoose schema
+      // landed there without that field. Re-backfill any NULL service_id rows locally,
+      // then mark all payments unsynced so the next push overwrites MongoDB documents
+      // with the correct service_id.
+      db.exec(`
+        UPDATE payments
+        SET service_id = (
+          SELECT cs.id FROM child_services cs
+          WHERE cs.child_id = payments.child_id
+          AND cs.service = payments.service
+        )
+        WHERE service_id IS NULL;
+
+        UPDATE payments SET synced = 0;
+      `)
+    }
   }
 ]
 
