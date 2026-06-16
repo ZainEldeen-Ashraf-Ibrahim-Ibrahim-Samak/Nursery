@@ -15,7 +15,7 @@ dist/
 dist-ssr/
 build/
 out/
-release/
+release*/
 *.local
 
 

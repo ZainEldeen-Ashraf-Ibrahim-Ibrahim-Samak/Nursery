@@ -11,6 +11,10 @@ files:
   # Bundled inside the asar so the existing `path.join(__dirname, '../assets/...')` resolves.
   - assets/branding/**/*
   - assets/default-branding/**/*
+extraFiles:
+  - from: .env
+    to: .env
+
 win:
   target: nsis
   icon: assets/branding/icon.ico
