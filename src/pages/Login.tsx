@@ -74,7 +74,7 @@ export default function Login() {
         {(validationError || error) && (
           <div className="w-full">
             <Alert variant="danger" onClose={() => { setValidationError(''); clearError(); }}>
-              {validationError || error}
+              {validationError || (error ? t(error, { defaultValue: error }) : '')}
             </Alert>
           </div>
         )}

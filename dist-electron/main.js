@@ -6977,9 +6977,9 @@ ipcMain.handle("auth:login", async (_event, { username, password }) => {
 		};
 	} catch (error) {
 		console.error("Login error:", error);
-		if (error.message === "USER_NOT_FOUND" || error.message === "INVALID_PASSWORD") throw new Error("اسم المستخدم أو كلمة المرور غير صحيحة / Invalid username or password");
-		else if (error.message === "USER_DEACTIVATED") throw new Error("تم إلغاء تنشيط هذا الحساب / This account has been deactivated");
-		throw new Error(error.message || "فشلت عملية تسجيل الدخول / Authentication failed");
+		if (error.message === "USER_NOT_FOUND" || error.message === "INVALID_PASSWORD") throw new Error("INVALID_PASSWORD");
+		else if (error.message === "USER_DEACTIVATED") throw new Error("USER_DEACTIVATED");
+		throw new Error(error.message || "AUTH_FAILED");
 	}
 });
 ipcMain.handle("auth:logout", () => {
