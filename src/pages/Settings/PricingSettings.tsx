@@ -5,27 +5,78 @@ import { Input } from '../../components/ui/Input.js'
 import { Button } from '../../components/ui/Button.js'
 import { Alert } from '../../components/ui/Alert.js'
 
+type SettingsKey =
+  | 'nursery_monthly'
+  | 'nursery_daily'
+  | 'nursery_hourly'
+  | 'hosting_monthly'
+  | 'hosting_daily'
+  | 'hosting_hourly'
+  | 'session_hourly'
+  | 'session_daily'
+  | 'target_profit_pct'
+  | 'max_capacity'
+  | 'work_days'
+  | 'work_hours'
+
+type SettingsState = Record<SettingsKey, string>
+type FieldErrors = Partial<Record<SettingsKey, string>>
+
+const PRICING_KEYS: SettingsKey[] = [
+  'nursery_monthly',
+  'nursery_daily',
+  'nursery_hourly',
+  'hosting_monthly',
+  'hosting_daily',
+  'hosting_hourly',
+  'session_hourly',
+  'session_daily',
+  'target_profit_pct',
+  'max_capacity',
+  'work_days',
+  'work_hours',
+]
+
+const DEFAULT_SETTINGS: SettingsState = {
+  nursery_monthly: '0',
+  nursery_daily: '0',
+  nursery_hourly: '0',
+  hosting_monthly: '0',
+  hosting_daily: '0',
+  hosting_hourly: '0',
+  session_hourly: '0',
+  session_daily: '0',
+  target_profit_pct: '0.20',
+  max_capacity: '50',
+  work_days: '22',
+  work_hours: '8',
+}
+
 export default function PricingSettings() {
   const { t, i18n } = useTranslation()
+  const isAr = i18n.language === 'ar'
 
-  const [settings, setSettings] = useState({
-    nursery_monthly: '0',
-    nursery_daily: '0',
-    nursery_hourly: '0',
-    hosting_monthly: '0',
-    hosting_daily: '0',
-    hosting_hourly: '0',
-    session_hourly: '0',
-    session_daily: '0',
-    target_profit_pct: '0.20',
-    max_capacity: '50',
-    work_days: '22',
-    work_hours: '8',
-  })
-
+  const [settings, setSettings] = useState<SettingsState>(DEFAULT_SETTINGS)
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({})
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'danger'; text: string } | null>(null)
+
+  // Human-readable field labels for validation messages
+  const fieldLabels: Record<SettingsKey, string> = {
+    nursery_monthly: isAr ? 'الحضانة / الشهر' : 'Nursery / Month',
+    nursery_daily: isAr ? 'الحضانة / اليوم' : 'Nursery / Day',
+    nursery_hourly: isAr ? 'الحضانة / الساعة' : 'Nursery / Hour',
+    hosting_monthly: isAr ? 'الإيواء / الشهر' : 'Hosting / Month',
+    hosting_daily: isAr ? 'الإيواء / اليوم' : 'Hosting / Day',
+    hosting_hourly: isAr ? 'الإيواء / الساعة' : 'Hosting / Hour',
+    session_hourly: isAr ? 'الجلسة / الساعة' : 'Session / Hour',
+    session_daily: isAr ? 'الجلسة / اليوم' : 'Session / Day',
+    target_profit_pct: isAr ? 'نسبة الربح المستهدفة' : 'Target Profit Rate',
+    max_capacity: isAr ? 'القدرة الاستيعابية' : 'Max Capacity',
+    work_days: isAr ? 'أيام العمل / الشهر' : 'Work Days / Month',
+    work_hours: isAr ? 'ساعات العمل / اليوم' : 'Work Hours / Day',
+  }
 
   useEffect(() => {
     async function loadSettings() {
@@ -34,75 +85,110 @@ export default function PricingSettings() {
         const data = await window.api.settings.get()
         if (data) {
           setSettings((prev) => {
-            const pricingData = {} as typeof prev
-            for (const key of Object.keys(prev) as (keyof typeof prev)[]) {
-              if (data[key] !== undefined) {
-                pricingData[key] = data[key]
+            const updated = { ...prev }
+            for (const key of PRICING_KEYS) {
+              if (data[key] !== undefined && data[key] !== null) {
+                // Coerce value to string
+                updated[key] = String(data[key])
               }
             }
-            return {
-              ...prev,
-              ...pricingData,
-            }
+            return updated
           })
         }
       } catch (err: any) {
         console.error('Failed to load pricing settings:', err)
         setMessage({
           type: 'danger',
-          text: i18n.language === 'ar' ? 'فشل تحميل الإعدادات' : 'Failed to load settings',
+          text: isAr ? 'فشل تحميل الإعدادات' : 'Failed to load settings',
         })
       } finally {
         setIsLoading(false)
       }
     }
     loadSettings()
-  }, [i18n.language])
+  }, [isAr])
 
-  const handleChange = (key: keyof typeof settings, value: string) => {
-    setSettings((prev) => ({
-      ...prev,
-      [key]: value,
-    }))
-  };
+  const handleChange = (key: SettingsKey, value: string) => {
+    setSettings((prev) => ({ ...prev, [key]: value }))
+    // Clear per-field error when user starts typing
+    if (fieldErrors[key]) {
+      setFieldErrors((prev) => {
+        const next = { ...prev }
+        delete next[key]
+        return next
+      })
+    }
+  }
+
+  const validateField = (key: SettingsKey, val: string): string | null => {
+    const trimmed = val.trim()
+    // Empty field is treated as 0 (valid)
+    if (trimmed === '') return null
+    const num = Number(trimmed)
+    if (isNaN(num)) {
+      return isAr ? 'يجب أن يكون رقماً صحيحاً' : 'Must be a valid number'
+    }
+    if (num < 0) {
+      return isAr ? 'يجب أن تكون القيمة موجبة' : 'Must be a positive value'
+    }
+    if (key === 'target_profit_pct' && num > 1) {
+      return isAr ? 'يجب أن تكون النسبة بين 0 و 1 (مثال: 0.20)' : 'Must be between 0 and 1 (e.g. 0.20)'
+    }
+    return null
+  }
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault()
-    setIsSaving(true)
     setMessage(null)
 
-    // Validate inputs are non-negative numbers
-    for (const [, val] of Object.entries(settings)) {
-      const num = Number(val)
-      if (isNaN(num) || num < 0) {
-        setMessage({
-          type: 'danger',
-          text:
-            i18n.language === 'ar'
-              ? 'يرجى إدخال قيم رقمية صالحة وغير سالبة'
-              : 'Please enter valid non-negative numeric values',
-        })
-        setIsSaving(false)
-        return
-      }
+    // Validate all fields and collect errors
+    const errors: FieldErrors = {}
+    for (const key of PRICING_KEYS) {
+      const err = validateField(key, settings[key])
+      if (err) errors[key] = err
+    }
+
+    if (Object.keys(errors).length > 0) {
+      setFieldErrors(errors)
+      const firstErrorLabel = fieldLabels[Object.keys(errors)[0] as SettingsKey]
+      setMessage({
+        type: 'danger',
+        text: isAr
+          ? `يوجد خطأ في حقل: ${firstErrorLabel} — يرجى مراجعة الحقول المُميَّزة بالأحمر أدناه`
+          : `Invalid value in: ${firstErrorLabel} — Please review the fields highlighted in red below`,
+      })
+      return
+    }
+
+    setFieldErrors({})
+    setIsSaving(true)
+
+    // Normalize empty strings to '0' before saving
+    const toSave: Record<string, string> = {}
+    for (const key of PRICING_KEYS) {
+      toSave[key] = settings[key].trim() === '' ? '0' : settings[key].trim()
     }
 
     try {
-      const result = await window.api.settings.update(settings)
+      const result = await window.api.settings.update(toSave)
       if (result && result.ok) {
         setMessage({
           type: 'success',
-          text:
-            i18n.language === 'ar'
-              ? 'تم حفظ إعدادات التسعير بنجاح'
-              : 'Pricing settings saved successfully',
+          text: isAr ? 'تم حفظ إعدادات التسعير بنجاح ✓' : 'Pricing settings saved successfully ✓',
         })
+        // Refresh to confirm persisted values
+        setSettings((prev) => ({ ...prev, ...toSave }))
       }
     } catch (err: any) {
       console.error('Failed to save settings:', err)
+      let msg: string = err.message || ''
+      // Strip Electron IPC wrapper
+      if (msg.includes('Error invoking remote method')) {
+        msg = msg.replace(/^Error: Error invoking remote method '[^']+': /, '')
+      }
       setMessage({
         type: 'danger',
-        text: err.message || (i18n.language === 'ar' ? 'فشل حفظ الإعدادات' : 'Failed to save settings'),
+        text: msg || (isAr ? 'فشل حفظ الإعدادات' : 'Failed to save settings'),
       })
     } finally {
       setIsSaving(false)
@@ -121,9 +207,13 @@ export default function PricingSettings() {
   }
 
   return (
-    <form onSubmit={handleSave} className="space-y-6">
+    <form onSubmit={handleSave} className="space-y-6" noValidate>
       {message && (
-        <Alert variant={message.type} title={message.type === 'success' ? t('success') : t('error')} onClose={() => setMessage(null)}>
+        <Alert
+          variant={message.type}
+          title={message.type === 'success' ? (isAr ? '✓ تم الحفظ' : '✓ Saved') : (isAr ? '⚠ خطأ في التحقق' : '⚠ Validation Error')}
+          onClose={() => setMessage(null)}
+        >
           {message.text}
         </Alert>
       )}
@@ -135,39 +225,30 @@ export default function PricingSettings() {
             <span className="text-primary">👶</span> {t('services.nursery')}
           </h2>
           <div className="space-y-3">
-            <div className="space-y-1.5">
-              <label className="text-sm font-semibold text-slate-700">
-                {t('units.month')} (EGP)
-              </label>
-              <Input
-                type="number"
-                value={settings.nursery_monthly}
-                onChange={(e) => handleChange('nursery_monthly', e.target.value)}
-                min={0}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-sm font-semibold text-slate-700">
-                {t('units.day')} (EGP)
-              </label>
-              <Input
-                type="number"
-                value={settings.nursery_daily}
-                onChange={(e) => handleChange('nursery_daily', e.target.value)}
-                min={0}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-sm font-semibold text-slate-700">
-                {t('units.hour')} (EGP)
-              </label>
-              <Input
-                type="number"
-                value={settings.nursery_hourly}
-                onChange={(e) => handleChange('nursery_hourly', e.target.value)}
-                min={0}
-              />
-            </div>
+            <Input
+              label={`${t('units.month')} (EGP)`}
+              type="number"
+              value={settings.nursery_monthly}
+              onChange={(e) => handleChange('nursery_monthly', e.target.value)}
+              min={0}
+              error={fieldErrors.nursery_monthly}
+            />
+            <Input
+              label={`${t('units.day')} (EGP)`}
+              type="number"
+              value={settings.nursery_daily}
+              onChange={(e) => handleChange('nursery_daily', e.target.value)}
+              min={0}
+              error={fieldErrors.nursery_daily}
+            />
+            <Input
+              label={`${t('units.hour')} (EGP)`}
+              type="number"
+              value={settings.nursery_hourly}
+              onChange={(e) => handleChange('nursery_hourly', e.target.value)}
+              min={0}
+              error={fieldErrors.nursery_hourly}
+            />
           </div>
         </Card>
 
@@ -177,39 +258,30 @@ export default function PricingSettings() {
             <span className="text-primary">🏠</span> {t('services.hosting')}
           </h2>
           <div className="space-y-3">
-            <div className="space-y-1.5">
-              <label className="text-sm font-semibold text-slate-700">
-                {t('units.month')} (EGP)
-              </label>
-              <Input
-                type="number"
-                value={settings.hosting_monthly}
-                onChange={(e) => handleChange('hosting_monthly', e.target.value)}
-                min={0}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-sm font-semibold text-slate-700">
-                {t('units.day')} (EGP)
-              </label>
-              <Input
-                type="number"
-                value={settings.hosting_daily}
-                onChange={(e) => handleChange('hosting_daily', e.target.value)}
-                min={0}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-sm font-semibold text-slate-700">
-                {t('units.hour')} (EGP)
-              </label>
-              <Input
-                type="number"
-                value={settings.hosting_hourly}
-                onChange={(e) => handleChange('hosting_hourly', e.target.value)}
-                min={0}
-              />
-            </div>
+            <Input
+              label={`${t('units.month')} (EGP)`}
+              type="number"
+              value={settings.hosting_monthly}
+              onChange={(e) => handleChange('hosting_monthly', e.target.value)}
+              min={0}
+              error={fieldErrors.hosting_monthly}
+            />
+            <Input
+              label={`${t('units.day')} (EGP)`}
+              type="number"
+              value={settings.hosting_daily}
+              onChange={(e) => handleChange('hosting_daily', e.target.value)}
+              min={0}
+              error={fieldErrors.hosting_daily}
+            />
+            <Input
+              label={`${t('units.hour')} (EGP)`}
+              type="number"
+              value={settings.hosting_hourly}
+              onChange={(e) => handleChange('hosting_hourly', e.target.value)}
+              min={0}
+              error={fieldErrors.hosting_hourly}
+            />
           </div>
         </Card>
 
@@ -219,92 +291,80 @@ export default function PricingSettings() {
             <span className="text-primary">💬</span> {t('services.session')}
           </h2>
           <div className="space-y-3">
-            <div className="space-y-1.5">
-              <label className="text-sm font-semibold text-slate-700">
-                {t('units.session')} / {t('units.hour')} (EGP)
-              </label>
-              <Input
-                type="number"
-                value={settings.session_hourly}
-                onChange={(e) => handleChange('session_hourly', e.target.value)}
-                min={0}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-sm font-semibold text-slate-700">
-                {t('units.day')} (EGP)
-              </label>
-              <Input
-                type="number"
-                value={settings.session_daily}
-                onChange={(e) => handleChange('session_daily', e.target.value)}
-                min={0}
-              />
-            </div>
+            <Input
+              label={`${t('units.session')} / ${t('units.hour')} (EGP)`}
+              type="number"
+              value={settings.session_hourly}
+              onChange={(e) => handleChange('session_hourly', e.target.value)}
+              min={0}
+              error={fieldErrors.session_hourly}
+            />
+            <Input
+              label={`${t('units.day')} (EGP)`}
+              type="number"
+              value={settings.session_daily}
+              onChange={(e) => handleChange('session_daily', e.target.value)}
+              min={0}
+              error={fieldErrors.session_daily}
+            />
           </div>
         </Card>
 
         {/* Targets & Capacities Section */}
         <Card className="p-6 space-y-4">
           <h2 className="text-lg font-bold text-slate-900 border-b border-slate-100 pb-2 flex items-center gap-2">
-            <span className="text-primary">📈</span> {i18n.language === 'ar' ? 'الأهداف والقدرة الاستيعابية' : 'Targets & Capacity'}
+            <span className="text-primary">📈</span>{' '}
+            {isAr ? 'الأهداف والقدرة الاستيعابية' : 'Targets & Capacity'}
           </h2>
           <div className="space-y-3">
-            <div className="space-y-1.5">
-              <label className="text-sm font-semibold text-slate-700">
-                {i18n.language === 'ar' ? 'نسبة الربح المستهدفة (مثال: 0.20 للربح 20%)' : 'Target Profit Rate (e.g. 0.20 for 20%)'}
-              </label>
-              <Input
-                type="number"
-                step="0.01"
-                value={settings.target_profit_pct}
-                onChange={(e) => handleChange('target_profit_pct', e.target.value)}
-                min={0}
-                max={1}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-sm font-semibold text-slate-700">
-                {i18n.language === 'ar' ? 'القدرة الاستيعابية القصوى للأطفال' : 'Maximum Capacity (Children)'}
-              </label>
-              <Input
-                type="number"
-                value={settings.max_capacity}
-                onChange={(e) => handleChange('max_capacity', e.target.value)}
-                min={1}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-sm font-semibold text-slate-700">
-                {i18n.language === 'ar' ? 'أيام العمل في الشهر' : 'Working Days in Month'}
-              </label>
-              <Input
-                type="number"
-                value={settings.work_days}
-                onChange={(e) => handleChange('work_days', e.target.value)}
-                min={1}
-                max={31}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-sm font-semibold text-slate-700">
-                {i18n.language === 'ar' ? 'ساعات العمل اليومية' : 'Daily Working Hours'}
-              </label>
-              <Input
-                type="number"
-                value={settings.work_hours}
-                onChange={(e) => handleChange('work_hours', e.target.value)}
-                min={1}
-                max={24}
-              />
-            </div>
+            <Input
+              label={isAr ? 'نسبة الربح المستهدفة (0.20 = 20%)' : 'Target Profit Rate (0.20 = 20%)'}
+              type="number"
+              step="0.01"
+              value={settings.target_profit_pct}
+              onChange={(e) => handleChange('target_profit_pct', e.target.value)}
+              min={0}
+              max={1}
+              error={fieldErrors.target_profit_pct}
+            />
+            <Input
+              label={isAr ? 'القدرة الاستيعابية القصوى (طفل)' : 'Maximum Capacity (Children)'}
+              type="number"
+              value={settings.max_capacity}
+              onChange={(e) => handleChange('max_capacity', e.target.value)}
+              min={1}
+              error={fieldErrors.max_capacity}
+            />
+            <Input
+              label={isAr ? 'أيام العمل في الشهر' : 'Working Days in Month'}
+              type="number"
+              value={settings.work_days}
+              onChange={(e) => handleChange('work_days', e.target.value)}
+              min={1}
+              max={31}
+              error={fieldErrors.work_days}
+            />
+            <Input
+              label={isAr ? 'ساعات العمل اليومية' : 'Daily Working Hours'}
+              type="number"
+              value={settings.work_hours}
+              onChange={(e) => handleChange('work_hours', e.target.value)}
+              min={1}
+              max={24}
+              error={fieldErrors.work_hours}
+            />
           </div>
         </Card>
       </div>
 
-      <div className="flex justify-end pt-4 border-t border-slate-100">
-        <Button type="submit" variant="primary" isLoading={isSaving}>
-          {t('save')}
+      <div className="flex justify-end items-center gap-3 pt-4 border-t border-slate-100">
+        {isSaving && (
+          <span className="text-sm text-slate-500 animate-pulse">
+            {isAr ? 'جارٍ الحفظ...' : 'Saving...'}
+          </span>
+        )}
+        <Button type="submit" variant="primary" isLoading={isSaving} disabled={isSaving}>
+          {isAr ? 'حفظ الإعدادات' : 'Save Settings'}
         </Button>
       </div>
     </form>

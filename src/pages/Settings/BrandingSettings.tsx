@@ -57,9 +57,14 @@ export default function BrandingSettings() {
     setError(null)
     setSuccess(null)
     try {
-      await window.api.branding.save(form)
+      // Filter out undefined values before saving
+      const cleanForm: Record<string, string> = {}
+      for (const [k, v] of Object.entries(form)) {
+        if (v !== undefined && v !== null) cleanForm[k] = String(v)
+      }
+      await window.api.branding.save(cleanForm)
       updateBrandingLocal(form)
-      setSuccess(isAr ? 'تم حفظ إعدادات الهوية البصرية بنجاح.' : 'Branding settings saved successfully.')
+      setSuccess(isAr ? 'تم حفظ إعدادات الهوية البصرية بنجاح ✓' : 'Branding settings saved successfully ✓')
       await fetchBranding()
     } catch (err: any) {
       let msg = err.message || 'Failed to save branding'
@@ -283,6 +288,7 @@ export default function BrandingSettings() {
           variant="primary"
           onClick={handleSave}
           isLoading={isSaving}
+          disabled={isSaving}
         >
           💾 {isAr ? 'حفظ إعدادات الهوية البصرية' : 'Save Branding Settings'}
         </Button>
