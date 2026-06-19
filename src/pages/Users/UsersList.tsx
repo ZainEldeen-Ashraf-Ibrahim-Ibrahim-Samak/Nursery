@@ -90,13 +90,13 @@ export default function UsersList() {
 
     try {
       if (!username.trim() || !role) {
-        throw new Error('اسم المستخدم والصلاحية مطلوبة / Username and role are required')
+        throw new Error(t('username_role_required'))
       }
 
       if (!editingUser) {
         // Create Mode
         if (!password) {
-          throw new Error('كلمة المرور مطلوبة للمستخدم الجديد / Password is required for new users')
+          throw new Error(t('password_required_new'))
         }
         await window.api.users.create({
           username: username.trim(),
@@ -104,7 +104,7 @@ export default function UsersList() {
           role,
           name: name.trim() || undefined,
         })
-        setSuccessMsg('تم إنشاء حساب المستخدم بنجاح / User account created successfully')
+        setSuccessMsg(t('user_created_success'))
       } else {
         // Edit Mode
         const patch: any = {
@@ -119,7 +119,7 @@ export default function UsersList() {
           id: editingUser.id,
           patch,
         })
-        setSuccessMsg('تم تحديث حساب المستخدم بنجاح / User account updated successfully')
+        setSuccessMsg(t('user_updated_success'))
       }
 
       setIsFormOpen(false)
@@ -137,7 +137,7 @@ export default function UsersList() {
     setError('')
     try {
       await window.api.users.deactivate({ id: userToDeactivate.id })
-      setSuccessMsg('تم إلغاء تنشيط الحساب بنجاح / Account deactivated successfully')
+      setSuccessMsg(t('user_deactivated_success'))
       setIsDeactivateOpen(false)
       fetchUsers()
     } catch (err: any) {
@@ -151,7 +151,7 @@ export default function UsersList() {
     setError('')
     try {
       await window.api.users.update({ id: user.id, patch: { is_active: 1 } })
-      setSuccessMsg('تم تنشيط الحساب بنجاح / Account activated successfully')
+      setSuccessMsg(t('user_activated_success'))
       fetchUsers()
     } catch (err: any) {
       console.error(err)
@@ -169,7 +169,7 @@ export default function UsersList() {
     setError('')
     try {
       await window.api.users.delete({ id: userToDelete.id })
-      setSuccessMsg('تم حذف الحساب بنجاح / Account deleted successfully')
+      setSuccessMsg(t('user_deleted_success'))
       setIsDeleteOpen(false)
       fetchUsers()
     } catch (err: any) {
@@ -183,17 +183,17 @@ export default function UsersList() {
   const columns = [
     {
       key: 'name',
-      header: 'الاسم / Display Name',
+      header: t('display_name'),
       render: (u: User) => <span className="font-semibold text-slate-800">{u.name || '-'}</span>,
     },
     {
       key: 'username',
-      header: 'اسم المستخدم / Username',
+      header: t('username'),
       render: (u: User) => <code className="text-slate-600 bg-slate-100/60 px-2 py-0.5 rounded text-xs">{u.username}</code>,
     },
     {
       key: 'role',
-      header: 'الصلاحية / Role',
+      header: t('role'),
       render: (u: User) => (
         <Badge variant={u.role === 'admin' ? 'info' : 'neutral'}>
           {u.role === 'admin' ? t('admin') : t('employee')}
@@ -202,7 +202,7 @@ export default function UsersList() {
     },
     {
       key: 'status',
-      header: 'الحالة / Status',
+      header: t('status'),
       render: (u: User) => (
         <Badge variant={u.is_active === 1 ? 'success' : 'danger'}>
           {u.is_active === 1 ? t('active') : t('inactive')}
@@ -211,7 +211,7 @@ export default function UsersList() {
     },
     {
       key: 'actions',
-      header: 'الإجراءات / Actions',
+      header: t('actions'),
       render: (u: User) => {
         const isSelf = currentUser?.id === u.id
         return (
@@ -223,11 +223,11 @@ export default function UsersList() {
               <>
                 {u.is_active === 1 ? (
                   <Button variant="outline" size="sm" onClick={() => handleOpenDeactivate(u)} className="text-amber-600 border-amber-100 hover:bg-amber-50 hover:border-amber-200">
-                    إلغاء تنشيط / Deactivate
+                    {t('deactivate')}
                   </Button>
                 ) : (
                   <Button variant="outline" size="sm" onClick={() => handleActivate(u)} className="text-emerald-600 border-emerald-100 hover:bg-emerald-50 hover:border-emerald-200">
-                    تنشيط / Activate
+                    {t('activate')}
                   </Button>
                 )}
                 <Button variant="danger" size="sm" onClick={() => handleOpenDelete(u)}>
@@ -247,14 +247,14 @@ export default function UsersList() {
       <div className="flex items-center justify-between">
         <div className="flex flex-col gap-1 text-start">
           <h2 className="text-2xl font-bold text-slate-800 m-0">
-            إدارة حسابات المستخدمين
+            {t('user_mgmt')}
           </h2>
           <span className="text-slate-400 text-sm font-semibold">
-            User Accounts Management (Admin Only)
+            {t('admin_only')}
           </span>
         </div>
         <Button variant="primary" size="md" onClick={handleOpenCreate}>
-          + إضافة مستخدم جديد / Add User
+          + {t('add_user')}
         </Button>
       </div>
 
@@ -309,7 +309,7 @@ export default function UsersList() {
           )}
 
           <Input
-            label="اسم المستخدم / Username"
+            label={t('username')}
             type="text"
             value={username}
             onChange={(e) => setUsername(e.target.value)}
@@ -318,17 +318,17 @@ export default function UsersList() {
           />
 
           <Input
-            label={editingUser ? "كلمة المرور الجديدة (اختياري) / New Password (optional)" : "كلمة المرور / Password"}
+            label={editingUser ? t('new_password_optional') : t('password')}
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            placeholder={editingUser ? "اتركه فارغاً للاحتفاظ بالحالية / Leave blank to keep current" : "••••••••"}
+            placeholder={editingUser ? t('password_placeholder') : "••••••••"}
             disabled={isSubmitLoading}
             required={editingUser === null}
           />
 
           <Input
-            label="الاسم المعروض / Display Name"
+            label={t('display_name')}
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -337,7 +337,7 @@ export default function UsersList() {
           />
 
           <Select
-            label="الصلاحية / Access Role"
+            label={t('access_role')}
             value={role}
             onChange={(e) => setRole(e.target.value as 'admin' | 'employee')}
             disabled={isSubmitLoading || (editingUser !== null && currentUser?.id === editingUser.id)} // Prevent altering own role
@@ -353,21 +353,20 @@ export default function UsersList() {
       <Modal
         isOpen={isDeactivateOpen}
         onClose={() => setIsDeactivateOpen(false)}
-        title="إلغاء تنشيط الحساب / Deactivate Account"
+        title={t('deactivate_account')}
         footer={
           <div className="flex gap-2.5">
             <Button variant="outline" onClick={() => setIsDeactivateOpen(false)}>
               {t('cancel')}
             </Button>
             <Button variant="danger" onClick={confirmDeactivate}>
-              إلغاء التنشيط / Deactivate
+              {t('deactivate')}
             </Button>
           </div>
         }
       >
         <p className="text-slate-600 leading-relaxed text-start">
-          هل أنت متأكد من رغبتك في إلغاء تنشيط حساب المستخدم <strong>{userToDeactivate?.name || userToDeactivate?.username}</strong>؟ 
-          لن يتمكن هذا المستخدم من تسجيل الدخول للنظام بعد الآن، ولكن سيتم الاحتفاظ ببياناته التاريخية.
+          {t('deactivate_confirm_desc', { name: userToDeactivate?.name || userToDeactivate?.username })}
         </p>
       </Modal>
 
@@ -375,21 +374,20 @@ export default function UsersList() {
       <Modal
         isOpen={isDeleteOpen}
         onClose={() => setIsDeleteOpen(false)}
-        title="حذف الحساب / Delete Account"
+        title={t('delete_account')}
         footer={
           <div className="flex gap-2.5">
             <Button variant="outline" onClick={() => setIsDeleteOpen(false)}>
               {t('cancel')}
             </Button>
             <Button variant="danger" onClick={confirmDelete}>
-              حذف / Delete
+              {t('delete')}
             </Button>
           </div>
         }
       >
         <p className="text-slate-600 leading-relaxed text-start">
-          هل أنت متأكد من رغبتك في حذف حساب المستخدم <strong>{userToDelete?.name || userToDelete?.username}</strong> نهائياً؟ 
-          لا يمكن التراجع عن هذا الإجراء وسيتم مسح الحساب بالكامل من قاعدة البيانات.
+          {t('delete_confirm_desc', { name: userToDelete?.name || userToDelete?.username })}
         </p>
       </Modal>
     </div>

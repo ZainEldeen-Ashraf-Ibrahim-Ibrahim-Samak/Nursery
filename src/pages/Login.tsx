@@ -6,6 +6,7 @@ import { Button } from '../components/ui/Button.js'
 import { Alert } from '../components/ui/Alert.js'
 import { AppLogo } from '../components/ui/AppLogo.js'
 import { LanguageSwitcher } from '../components/layout/LanguageSwitcher.js'
+import { UpdateBanner } from '../components/layout/UpdateBanner.js'
 
 export default function Login() {
   const { t } = useTranslation()
@@ -15,6 +16,19 @@ export default function Login() {
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [validationError, setValidationError] = useState('')
+  const [isChecking, setIsChecking] = useState(false)
+
+  const handleCheckUpdates = async () => {
+    if (!window.api?.updater) return
+    setIsChecking(true)
+    try {
+      await window.api.updater.check()
+    } catch (err) {
+      console.error('Failed to check for updates:', err)
+    } finally {
+      setTimeout(() => setIsChecking(false), 2000)
+    }
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -44,8 +58,24 @@ export default function Login() {
 
   return (
     <div className="min-h-screen w-screen flex flex-col items-center justify-center bg-slate-50 px-4 relative">
-      {/* Top Floating Language Switcher */}
-      <div className="absolute top-6 left-6 right-6 flex justify-end">
+      <div className="absolute top-0 left-0 right-0 z-50">
+        <UpdateBanner />
+      </div>
+
+      {/* Top Floating Actions (Language & Updates) */}
+      <div className="absolute top-6 left-6 right-6 flex justify-between items-center gap-4">
+        {/* Check for updates button */}
+        <button
+          onClick={handleCheckUpdates}
+          disabled={isChecking}
+          className="flex items-center gap-2 px-3 py-1.5 bg-white border border-slate-200 hover:border-slate-300 text-slate-500 hover:text-slate-700 disabled:opacity-50 rounded-lg text-xs font-semibold shadow-sm transition-all cursor-pointer"
+        >
+          <svg className={`w-3.5 h-3.5 ${isChecking ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 1121.21 8H18.2" />
+          </svg>
+          <span>{isChecking ? t('checking') : t('check_updates')}</span>
+        </button>
+
         <LanguageSwitcher />
       </div>
 

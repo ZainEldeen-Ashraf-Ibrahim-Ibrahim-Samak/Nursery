@@ -345,7 +345,7 @@ export default function ChildForm() {
           {isEdit ? t('edit_child') : t('add_child')}
         </h1>
         <Button variant="outline" onClick={() => navigate('/children')}>
-          {i18n.language === 'ar' ? 'عودة للقائمة' : 'Back to List'}
+          {t('back_to_list')}
         </Button>
       </div>
 
@@ -404,13 +404,13 @@ export default function ChildForm() {
                 error={formErrors.guardian_phone}
                 inputMode="tel"
                 maxLength={13}
-                placeholder={i18n.language === 'ar' ? 'رقم الهاتف المحمول (مثال: 010... أو +2010...)' : 'Phone number (e.g. 010... or +2010...)'}
+                placeholder={t('guardian_phone_placeholder')}
               />
             </div>
 
             <div className="space-y-1.5">
               <label className="text-sm font-semibold text-slate-700">
-                {t('child_phone')} <span className="text-xs text-slate-400 font-normal">({i18n.language === 'ar' ? 'اختياري' : 'Optional'})</span>
+                {t('child_phone')} <span className="text-xs text-slate-400 font-normal">({t('optional')})</span>
               </label>
               <Input
                 value={formData.child_phone}
@@ -418,13 +418,13 @@ export default function ChildForm() {
                 error={formErrors.child_phone}
                 inputMode="tel"
                 maxLength={13}
-                placeholder={i18n.language === 'ar' ? 'رقم هاتف الطفل الخاص (مثال: 010... أو +2010...)' : 'Child\'s own phone number (e.g. 010... or +2010...)'}
+                placeholder={t('child_phone_placeholder')}
               />
             </div>
 
             <div className="space-y-1.5">
               <label className="text-sm font-semibold text-slate-700">
-                {t('national_id')} <span className="text-xs text-slate-400 font-normal">({i18n.language === 'ar' ? '14 رقماً، اختياري' : '14 digits, optional'})</span>
+                {t('national_id')} <span className="text-xs text-slate-400 font-normal">({t('digits_optional')})</span>
               </label>
               <Input
                 value={formData.national_id}
@@ -523,11 +523,11 @@ export default function ChildForm() {
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <label className="text-lg font-bold text-slate-800">
-                {i18n.language === 'ar' ? 'الخدمات المشترك بها' : 'Enrolled Services'}
+                {t('enrolled_services')}
               </label>
               <Button type="button" variant="outline" size="sm" onClick={handleAddService}>
                 <span className="ml-1">➕</span>
-                {i18n.language === 'ar' ? 'إضافة خدمة' : 'Add Service'}
+                {t('add_service')}
               </Button>
             </div>
 

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 
 interface UpdaterStatus {
   event: 'checking-for-update' | 'update-available' | 'update-not-available' | 'error' | 'download-progress' | 'update-downloaded'
@@ -8,6 +9,7 @@ interface UpdaterStatus {
 }
 
 export const UpdateBanner: React.FC = () => {
+  const { t } = useTranslation()
   const [status, setStatus] = useState<UpdaterStatus['event'] | 'idle'>('idle')
   const [percent, setPercent] = useState<number>(0)
   const [errorMsg, setErrorMsg] = useState<string>('')
@@ -86,24 +88,12 @@ export const UpdateBanner: React.FC = () => {
 
         <div>
           <div className="font-semibold text-sm">
-            {status === 'checking-for-update' && (
-              <>جاري التحقق من وجود تحديثات... <span className="text-xs text-slate-400 font-normal">/ Checking for updates...</span></>
-            )}
-            {status === 'update-available' && (
-              <>تم العثور على تحديث جديد، جاري بدء التنزيل... <span className="text-xs text-slate-400 font-normal">/ Update available, starting download...</span></>
-            )}
-            {status === 'update-not-available' && (
-              <>أنت تستخدم أحدث نسخة بالفعل. <span className="text-xs text-slate-400 font-normal">/ App is up to date.</span></>
-            )}
-            {status === 'download-progress' && (
-              <>جاري تنزيل التحديث: {percent}% <span className="text-xs text-slate-400 font-normal">/ Downloading update: {percent}%</span></>
-            )}
-            {status === 'update-downloaded' && (
-              <>تم تحميل التحديث بنجاح! جاهز للتثبيت. <span className="text-xs text-slate-400 font-normal">/ Update downloaded and ready to install.</span></>
-            )}
-            {status === 'error' && (
-              <>حدث خطأ أثناء التحديث: {errorMsg} <span className="text-xs text-slate-400 font-normal">/ Update error: {errorMsg}</span></>
-            )}
+            {status === 'checking-for-update' && t('checking_updates')}
+            {status === 'update-available' && t('update_available')}
+            {status === 'update-not-available' && t('update_not_available')}
+            {status === 'download-progress' && t('download_progress', { percent })}
+            {status === 'update-downloaded' && t('update_downloaded')}
+            {status === 'error' && t('update_error', { error: errorMsg })}
           </div>
           {status === 'download-progress' && (
             <div className="w-64 bg-slate-200 h-1.5 rounded-full mt-1.5 overflow-hidden">
@@ -118,7 +108,7 @@ export const UpdateBanner: React.FC = () => {
           onClick={handleRestart}
           className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold text-xs rounded-lg shadow-sm transition-all cursor-pointer focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
         >
-          إعادة التشغيل والتثبيت / Restart & Install
+          {t('restart_install')}
         </button>
       )}
     </div>

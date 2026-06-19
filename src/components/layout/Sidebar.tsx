@@ -195,10 +195,7 @@ export const Sidebar: React.FC = () => {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 1121.21 8H18.2" />
           </svg>
           <span>
-            {isChecking 
-              ? (t('checking', { defaultValue: 'جاري التحقق... / Checking...' }))
-              : (t('check_updates', { defaultValue: 'التحقق من التحديثات / Check for updates' }))
-            }
+            {isChecking ? t('checking') : t('check_updates')}
           </span>
         </button>
       </div>
