@@ -36,6 +36,10 @@ export default function UsersList() {
   const [isDeactivateOpen, setIsDeactivateOpen] = useState(false)
   const [userToDeactivate, setUserToDeactivate] = useState<User | null>(null)
 
+  // Delete states
+  const [isDeleteOpen, setIsDeleteOpen] = useState(false)
+  const [userToDelete, setUserToDelete] = useState<User | null>(null)
+
   const fetchUsers = async () => {
     setIsLoading(true)
     setError('')
@@ -143,6 +147,38 @@ export default function UsersList() {
     }
   }
 
+  const handleActivate = async (user: User) => {
+    setError('')
+    try {
+      await window.api.users.update({ id: user.id, patch: { is_active: 1 } })
+      setSuccessMsg('تم تنشيط الحساب بنجاح / Account activated successfully')
+      fetchUsers()
+    } catch (err: any) {
+      console.error(err)
+      setError(err.message || 'Failed to activate account')
+    }
+  }
+
+  const handleOpenDelete = (user: User) => {
+    setUserToDelete(user)
+    setIsDeleteOpen(true)
+  }
+
+  const confirmDelete = async () => {
+    if (!userToDelete) return
+    setError('')
+    try {
+      await window.api.users.delete({ id: userToDelete.id })
+      setSuccessMsg('تم حذف الحساب بنجاح / Account deleted successfully')
+      setIsDeleteOpen(false)
+      fetchUsers()
+    } catch (err: any) {
+      console.error(err)
+      setError(err.message || 'Failed to delete account')
+      setIsDeleteOpen(false)
+    }
+  }
+
   // Define table columns
   const columns = [
     {
@@ -183,10 +219,21 @@ export default function UsersList() {
             <Button variant="outline" size="sm" onClick={() => handleOpenEdit(u)}>
               {t('edit')}
             </Button>
-            {u.is_active === 1 && !isSelf && (
-              <Button variant="danger" size="sm" onClick={() => handleOpenDeactivate(u)}>
-                {t('delete')}
-              </Button>
+            {!isSelf && (
+              <>
+                {u.is_active === 1 ? (
+                  <Button variant="outline" size="sm" onClick={() => handleOpenDeactivate(u)} className="text-amber-600 border-amber-100 hover:bg-amber-50 hover:border-amber-200">
+                    إلغاء تنشيط / Deactivate
+                  </Button>
+                ) : (
+                  <Button variant="outline" size="sm" onClick={() => handleActivate(u)} className="text-emerald-600 border-emerald-100 hover:bg-emerald-50 hover:border-emerald-200">
+                    تنشيط / Activate
+                  </Button>
+                )}
+                <Button variant="danger" size="sm" onClick={() => handleOpenDelete(u)}>
+                  {t('delete')}
+                </Button>
+              </>
             )}
           </div>
         )
@@ -321,6 +368,28 @@ export default function UsersList() {
         <p className="text-slate-600 leading-relaxed text-start">
           هل أنت متأكد من رغبتك في إلغاء تنشيط حساب المستخدم <strong>{userToDeactivate?.name || userToDeactivate?.username}</strong>؟ 
           لن يتمكن هذا المستخدم من تسجيل الدخول للنظام بعد الآن، ولكن سيتم الاحتفاظ ببياناته التاريخية.
+        </p>
+      </Modal>
+
+      {/* Delete Confirmation Modal */}
+      <Modal
+        isOpen={isDeleteOpen}
+        onClose={() => setIsDeleteOpen(false)}
+        title="حذف الحساب / Delete Account"
+        footer={
+          <div className="flex gap-2.5">
+            <Button variant="outline" onClick={() => setIsDeleteOpen(false)}>
+              {t('cancel')}
+            </Button>
+            <Button variant="danger" onClick={confirmDelete}>
+              حذف / Delete
+            </Button>
+          </div>
+        }
+      >
+        <p className="text-slate-600 leading-relaxed text-start">
+          هل أنت متأكد من رغبتك في حذف حساب المستخدم <strong>{userToDelete?.name || userToDelete?.username}</strong> نهائياً؟ 
+          لا يمكن التراجع عن هذا الإجراء وسيتم مسح الحساب بالكامل من قاعدة البيانات.
         </p>
       </Modal>
     </div>

@@ -246,3 +246,21 @@ ipcMain.handle('users:deactivate', async (_event, { id }) => {
     throw new Error(error.message || 'Failed to deactivate user')
   }
 })
+
+ipcMain.handle('users:delete', async (_event, { id }) => {
+  try {
+    requireAdmin()
+    const db = getDb()
+    
+    const currentUser = getCurrentUser()
+    if (currentUser && currentUser.id === id) {
+      throw new Error('لا يمكن حذف حسابك الحالي / Cannot delete your own active session')
+    }
+    
+    db.prepare('DELETE FROM users WHERE id = ?').run(id)
+    return { ok: true }
+  } catch (error: any) {
+    console.error('Failed to delete user:', error)
+    throw new Error(error.message || 'Failed to delete user')
+  }
+})

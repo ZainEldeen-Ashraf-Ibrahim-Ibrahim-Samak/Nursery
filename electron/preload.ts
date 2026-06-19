@@ -13,6 +13,7 @@ const api = {
     create: (args: any) => ipcRenderer.invoke('users:create', args),
     update: (args: any) => ipcRenderer.invoke('users:update', args),
     deactivate: (args: any) => ipcRenderer.invoke('users:deactivate', args),
+    delete: (args: any) => ipcRenderer.invoke('users:delete', args),
   },
   
   // Children

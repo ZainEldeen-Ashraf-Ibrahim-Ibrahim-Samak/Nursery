@@ -11,7 +11,8 @@ electron.contextBridge.exposeInMainWorld("api", {
 		list: () => electron.ipcRenderer.invoke("users:list"),
 		create: (args) => electron.ipcRenderer.invoke("users:create", args),
 		update: (args) => electron.ipcRenderer.invoke("users:update", args),
-		deactivate: (args) => electron.ipcRenderer.invoke("users:deactivate", args)
+		deactivate: (args) => electron.ipcRenderer.invoke("users:deactivate", args),
+		delete: (args) => electron.ipcRenderer.invoke("users:delete", args)
 	},
 	children: {
 		get: (args) => electron.ipcRenderer.invoke("children:get", args),
