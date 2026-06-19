@@ -6,67 +6,104 @@ import SecuritySettings from './SecuritySettings.js'
 
 type TabType = 'pricing' | 'branding' | 'security'
 
+interface TabDef {
+  id: TabType
+  labelAr: string
+  labelEn: string
+  icon: string
+  descAr: string
+  descEn: string
+}
+
+const TAB_DEFS: TabDef[] = [
+  {
+    id: 'pricing',
+    labelAr: 'التسعير والأهداف',
+    labelEn: 'Pricing & Targets',
+    icon: '💰',
+    descAr: 'أسعار الخدمات والحدود الربحية',
+    descEn: 'Service rates and profit targets',
+  },
+  {
+    id: 'branding',
+    labelAr: 'الهوية البصرية',
+    labelEn: 'Branding',
+    icon: '🎨',
+    descAr: 'الشعار والألوان والبيانات التعريفية',
+    descEn: 'Logo, colors and identity',
+  },
+  {
+    id: 'security',
+    labelAr: 'الأمان والمزامنة',
+    labelEn: 'Security & Sync',
+    icon: '🔒',
+    descAr: 'كلمة المرور والمزامنة السحابية',
+    descEn: 'Password and cloud sync',
+  },
+]
+
 export default function Settings() {
   const { t, i18n } = useTranslation()
+  const isAr = i18n.language === 'ar'
   const [activeTab, setActiveTab] = useState<TabType>('pricing')
 
-  const tabs = [
-    {
-      id: 'pricing' as TabType,
-      label: i18n.language === 'ar' ? 'التسعير والأهداف' : 'Pricing & Targets',
-    },
-    {
-      id: 'branding' as TabType,
-      label: i18n.language === 'ar' ? 'الهوية البصرية' : 'Branding',
-    },
-    {
-      id: 'security' as TabType,
-      label: i18n.language === 'ar' ? 'الأمان والمزامنة' : 'Security & Sync',
-    },
-  ]
+  const activeTabDef = TAB_DEFS.find((tab) => tab.id === activeTab)!
 
   return (
     <div className="p-6 space-y-6">
+      {/* Page Header */}
       <div>
         <h1 className="text-2xl font-bold text-slate-900">{t('settings')}</h1>
         <p className="text-sm text-slate-500 mt-1">
-          {i18n.language === 'ar'
+          {isAr
             ? 'تكوين أسعار الخدمات الافتراضية والحدود الربحية وإعدادات النظام.'
             : 'Configure service rate defaults, targets, and system preferences.'}
         </p>
       </div>
 
-      {/* Tabs list */}
+      {/* Tab Navigation */}
       <div className="border-b border-slate-200">
-        <nav className="-mb-px flex space-x-8 rtl:space-x-reverse" aria-label="Tabs">
-          {tabs.map((tab) => {
+        <nav className="-mb-px flex gap-1" aria-label="Settings tabs">
+          {TAB_DEFS.map((tab) => {
             const isActive = activeTab === tab.id
             return (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`
-                  whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-all focus:outline-none
-                  ${
-                    isActive
-                      ? 'border-primary text-primary'
-                      : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
-                  }
-                `}
+                className={[
+                  'group flex items-center gap-2 whitespace-nowrap py-3.5 px-4 border-b-2 font-medium text-sm transition-all focus:outline-none rounded-t-lg',
+                  isActive
+                    ? 'border-primary text-primary bg-primary/5'
+                    : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300 hover:bg-slate-50',
+                ].join(' ')}
+                aria-selected={isActive}
+                role="tab"
               >
-                {tab.label}
+                <span className="text-base">{tab.icon}</span>
+                <span>{isAr ? tab.labelAr : tab.labelEn}</span>
               </button>
             )
           })}
         </nav>
       </div>
 
-      {/* Tab content */}
-      <div className="mt-6">
+      {/* Active tab description */}
+      <div className="flex items-center gap-2 -mt-2 pb-1">
+        <span className="text-lg">{activeTabDef.icon}</span>
+        <div>
+          <span className="text-sm font-semibold text-slate-700">
+            {isAr ? activeTabDef.labelAr : activeTabDef.labelEn}
+          </span>
+          <span className="text-slate-400 text-xs ms-2">
+            — {isAr ? activeTabDef.descAr : activeTabDef.descEn}
+          </span>
+        </div>
+      </div>
+
+      {/* Tab Content */}
+      <div>
         {activeTab === 'pricing' && <PricingSettings />}
-        
         {activeTab === 'branding' && <BrandingSettings />}
-        
         {activeTab === 'security' && <SecuritySettings />}
       </div>
     </div>
