@@ -12,14 +12,24 @@ function checkAuth() {
   }
 }
 
-// Egyptian mobile: exactly 11 digits, digits only, starts with "01" (feature 004, FR-001).
-const GUARDIAN_PHONE_RE = /^01[0-9]{9}$/
+// Egyptian mobile: starts with 01, optionally prefixed by 2 or +2 (feature 004, FR-001).
+const GUARDIAN_PHONE_RE = /^(?:\+?2)?01[0-9]{9}$/
 
 function validateGuardianPhone(phone: string): void {
   if (!GUARDIAN_PHONE_RE.test((phone ?? '').toString().trim())) {
     throw new Error(
-      'رقم هاتف ولي الأمر يجب أن يتكوّن من 11 رقماً ويبدأ بـ 01 / Guardian phone must be exactly 11 digits starting with 01'
+      'رقم هاتف ولي الأمر يجب أن يكون بالتنسيق الصحيح (مثال: 01012345678 أو 201012345678 أو +201012345678) / Guardian phone must be a valid format (e.g., 01012345678, 201012345678, or +201012345678)'
     )
+  }
+}
+
+function validateChildPhone(phone: string | null): void {
+  if (phone && phone.toString().trim() !== '') {
+    if (!GUARDIAN_PHONE_RE.test(phone.toString().trim())) {
+      throw new Error(
+        'رقم هاتف الطفل يجب أن يكون بالتنسيق الصحيح (مثال: 01012345678 أو +201012345678) / Child phone must be a valid format (e.g., 01012345678, 201012345678, or +201012345678)'
+      )
+    }
   }
 }
 
@@ -124,6 +134,9 @@ ipcMain.handle('children:add', async (_event, childInput) => {
     }
 
     validateGuardianPhone(guardian_phone)
+    if (child_phone) {
+      validateChildPhone(child_phone)
+    }
 
     const serviceNames = new Set(enrollments.map((s: any) => s.service))
     if (serviceNames.size < enrollments.length) throw new Error('لا يمكن إضافة نفس الخدمة أكثر من مرة / Cannot add duplicate services')
@@ -186,6 +199,9 @@ ipcMain.handle('children:update', async (_event, { id, patch }) => {
 
     if (patch.guardian_phone !== undefined) {
       validateGuardianPhone(patch.guardian_phone)
+    }
+    if (patch.child_phone !== undefined) {
+      validateChildPhone(patch.child_phone)
     }
 
     const tx = db.transaction(() => {

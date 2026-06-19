@@ -17,8 +17,8 @@ interface ServiceRow {
   price: number
 }
 
-// Egyptian mobile: exactly 11 digits, starts with 01 (feature 004, FR-001).
-const GUARDIAN_PHONE_RE = /^01[0-9]{9}$/
+// Egyptian mobile: starts with 01, optionally prefixed by 2 or +2 (feature 004, FR-001).
+const GUARDIAN_PHONE_RE = /^(?:\+?2)?01[0-9]{9}$/
 // Weekday keys in JS getDay() order (0 = Sunday … 6 = Saturday).
 const DAY_KEYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const
 
@@ -202,12 +202,16 @@ export default function ChildForm() {
     if (!formData.guardian_phone.trim()) {
       errors.guardian_phone = i18n.language === 'ar' ? 'رقم هاتف ولي الأمر مطلوب' : 'Guardian phone is required'
     } else if (!GUARDIAN_PHONE_RE.test(formData.guardian_phone.trim())) {
-      errors.guardian_phone = t('phone_invalid_eg')
+      errors.guardian_phone = i18n.language === 'ar'
+        ? 'رقم هاتف غير صالح (مثال: 01012345678 أو +201012345678)'
+        : 'Invalid phone format (e.g., 01012345678 or +201012345678)'
+    }
+    if (formData.child_phone.trim() && !GUARDIAN_PHONE_RE.test(formData.child_phone.trim())) {
+      errors.child_phone = i18n.language === 'ar'
+        ? 'رقم هاتف غير صالح (مثال: 01012345678 أو +201012345678)'
+        : 'Invalid phone format (e.g., 01012345678 or +201012345678)'
     }
 
-    if (formData.child_phone.trim() && !/^\+?[0-9\s-]{8,15}$/.test(formData.child_phone)) {
-      errors.child_phone = i18n.language === 'ar' ? 'رقم هاتف الطفل غير صالح' : 'Invalid child phone number'
-    }
     if (formData.national_id.trim() && !/^[0-9]{14}$/.test(formData.national_id)) {
       errors.national_id = i18n.language === 'ar' ? 'الرقم القومي يجب أن يتكون من 14 رقماً' : 'National ID must be exactly 14 digits'
     }
@@ -234,10 +238,21 @@ export default function ChildForm() {
     return Object.keys(errors).length === 0
   }
 
-  // Only allow digits in the guardian phone, capped at 11 chars.
+  // Allow digits and '+' at the start, up to 13 chars total
   const handleGuardianPhoneChange = (raw: string) => {
-    const digits = raw.replace(/\D/g, '').slice(0, 11)
-    setFormData((prev) => ({ ...prev, guardian_phone: digits }))
+    const cleaned = raw.replace(/[^\d+]/g, '')
+    const startsWithPlus = cleaned.startsWith('+')
+    const digitsOnly = cleaned.replace(/\+/g, '')
+    const finalVal = (startsWithPlus ? '+' : '') + digitsOnly.slice(0, 12)
+    setFormData((prev) => ({ ...prev, guardian_phone: finalVal.slice(0, 13) }))
+  }
+
+  const handleChildPhoneChange = (raw: string) => {
+    const cleaned = raw.replace(/[^\d+]/g, '')
+    const startsWithPlus = cleaned.startsWith('+')
+    const digitsOnly = cleaned.replace(/\+/g, '')
+    const finalVal = (startsWithPlus ? '+' : '') + digitsOnly.slice(0, 12)
+    setFormData((prev) => ({ ...prev, child_phone: finalVal.slice(0, 13) }))
   }
 
   // Handle Form Submit
@@ -387,9 +402,9 @@ export default function ChildForm() {
                 value={formData.guardian_phone}
                 onChange={(e) => handleGuardianPhoneChange(e.target.value)}
                 error={formErrors.guardian_phone}
-                inputMode="numeric"
-                maxLength={11}
-                placeholder={i18n.language === 'ar' ? 'رقم الهاتف المحمول (مثال: 010...)' : 'Phone number (e.g. 010...)'}
+                inputMode="tel"
+                maxLength={13}
+                placeholder={i18n.language === 'ar' ? 'رقم الهاتف المحمول (مثال: 010... أو +2010...)' : 'Phone number (e.g. 010... or +2010...)'}
               />
             </div>
 
@@ -399,9 +414,11 @@ export default function ChildForm() {
               </label>
               <Input
                 value={formData.child_phone}
-                onChange={(e) => setFormData((prev) => ({ ...prev, child_phone: e.target.value }))}
+                onChange={(e) => handleChildPhoneChange(e.target.value)}
                 error={formErrors.child_phone}
-                placeholder={i18n.language === 'ar' ? 'رقم هاتف الطفل الخاص' : 'Child\'s own phone number'}
+                inputMode="tel"
+                maxLength={13}
+                placeholder={i18n.language === 'ar' ? 'رقم هاتف الطفل الخاص (مثال: 010... أو +2010...)' : 'Child\'s own phone number (e.g. 010... or +2010...)'}
               />
             </div>
 

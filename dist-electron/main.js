@@ -21573,9 +21573,14 @@ function getChildStatement(child, existingPayments, currentDate) {
 function checkAuth$4() {
 	if (!getCurrentUser()) throw new Error("UNAUTHORIZED: يجب تسجيل الدخول أولاً / Unauthorized");
 }
-var GUARDIAN_PHONE_RE = /^01[0-9]{9}$/;
+var GUARDIAN_PHONE_RE = /^(?:\+?2)?01[0-9]{9}$/;
 function validateGuardianPhone(phone) {
-	if (!GUARDIAN_PHONE_RE.test((phone ?? "").toString().trim())) throw new Error("رقم هاتف ولي الأمر يجب أن يتكوّن من 11 رقماً ويبدأ بـ 01 / Guardian phone must be exactly 11 digits starting with 01");
+	if (!GUARDIAN_PHONE_RE.test((phone ?? "").toString().trim())) throw new Error("رقم هاتف ولي الأمر يجب أن يكون بالتنسيق الصحيح (مثال: 01012345678 أو 201012345678 أو +201012345678) / Guardian phone must be a valid format (e.g., 01012345678, 201012345678, or +201012345678)");
+}
+function validateChildPhone(phone) {
+	if (phone && phone.toString().trim() !== "") {
+		if (!GUARDIAN_PHONE_RE.test(phone.toString().trim())) throw new Error("رقم هاتف الطفل يجب أن يكون بالتنسيق الصحيح (مثال: 01012345678 أو +201012345678) / Child phone must be a valid format (e.g., 01012345678, 201012345678, or +201012345678)");
+	}
 }
 function buildLessonFields(src) {
 	const sessions_baseline = src.sessions_baseline === void 0 || src.sessions_baseline === null ? 8 : Math.max(0, Math.trunc(Number(src.sessions_baseline)));
@@ -21630,6 +21635,7 @@ ipcMain.handle("children:add", async (_event, childInput) => {
 		}] : []);
 		if (!name || !guardian || !guardian_phone || enrollments.length === 0 || !reg_date) throw new Error("جميع الحقول الإلزامية مطلوبة / Missing required fields");
 		validateGuardianPhone(guardian_phone);
+		if (child_phone) validateChildPhone(child_phone);
 		if (new Set(enrollments.map((s) => s.service)).size < enrollments.length) throw new Error("لا يمكن إضافة نفس الخدمة أكثر من مرة / Cannot add duplicate services");
 		const lesson = buildLessonFields(childInput);
 		const now = (/* @__PURE__ */ new Date()).toISOString();
@@ -21665,6 +21671,7 @@ ipcMain.handle("children:update", async (_event, { id, patch }) => {
 		const child = db.prepare("SELECT * FROM children WHERE id = ?").get(id);
 		if (!child) throw new Error("الطفل غير موجود / Child not found");
 		if (patch.guardian_phone !== void 0) validateGuardianPhone(patch.guardian_phone);
+		if (patch.child_phone !== void 0) validateChildPhone(patch.child_phone);
 		db.transaction(() => {
 			const enrollments = patch.services;
 			if (enrollments) {
