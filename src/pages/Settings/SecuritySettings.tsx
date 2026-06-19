@@ -53,7 +53,7 @@ export default function SecuritySettings() {
     disconnect,
     setAutoSync,
     error: syncError,
-    clearError
+    clearError,
   } = useSyncStore()
 
   // ── App password change ──────────────────────────────────────────────────
@@ -64,10 +64,15 @@ export default function SecuritySettings() {
   const [pwSaving, setPwSaving] = useState(false)
   const [pwError, setPwError] = useState<string | null>(null)
   const [pwSuccess, setPwSuccess] = useState<string | null>(null)
+  // per-field inline errors
+  const [newPwFieldError, setNewPwFieldError] = useState<string | undefined>()
+  const [confirmPwFieldError, setConfirmPwFieldError] = useState<string | undefined>()
 
   // ── MongoDB / auto-sync ──────────────────────────────────────────────────
   const [mongoUri, setMongoUri] = useState('')
+  const [mongoUriError, setMongoUriError] = useState<string | undefined>()
   const [autoInterval, setAutoInterval] = useState('30')
+  const [autoIntervalError, setAutoIntervalError] = useState<string | undefined>()
 
   useEffect(() => {
     fetchStatus()
@@ -76,21 +81,36 @@ export default function SecuritySettings() {
   const isConnected = status?.connected ?? false
 
   const handleChangePassword = async () => {
+    // Clear previous state
     setPwError(null)
     setPwSuccess(null)
+    setNewPwFieldError(undefined)
+    setConfirmPwFieldError(undefined)
+
+    // Validate new password
+    if (!newPassword.trim()) {
+      setNewPwFieldError(isAr ? 'يرجى إدخال كلمة المرور الجديدة' : 'Please enter a new password')
+      return
+    }
     if (newPassword.trim().length < 4) {
-      setPwError(isAr ? 'كلمة المرور قصيرة جداً (4 أحرف على الأقل).' : 'Password too short (min 4 characters).')
+      setNewPwFieldError(isAr ? 'كلمة المرور قصيرة جداً (4 أحرف على الأقل)' : 'Too short — minimum 4 characters')
+      return
+    }
+    // Validate confirm password
+    if (!confirmPassword) {
+      setConfirmPwFieldError(isAr ? 'يرجى تأكيد كلمة المرور' : 'Please confirm the password')
       return
     }
     if (newPassword !== confirmPassword) {
-      setPwError(isAr ? 'كلمتا المرور غير متطابقتين.' : 'Passwords do not match.')
+      setConfirmPwFieldError(isAr ? 'كلمتا المرور غير متطابقتين' : 'Passwords do not match')
       return
     }
     if (!user) return
+
     setPwSaving(true)
     try {
       await window.api.users.update({ id: user.id, patch: { password: newPassword } })
-      setPwSuccess(isAr ? 'تم تغيير كلمة المرور بنجاح.' : 'Password changed successfully.')
+      setPwSuccess(isAr ? 'تم تغيير كلمة المرور بنجاح ✓' : 'Password changed successfully ✓')
       setNewPassword('')
       setConfirmPassword('')
     } catch (err: any) {
@@ -105,20 +125,36 @@ export default function SecuritySettings() {
   }
 
   const handleConnect = async () => {
-    if (!mongoUri.trim()) return
+    setMongoUriError(undefined)
+    if (!mongoUri.trim()) {
+      setMongoUriError(isAr ? 'يرجى إدخال رابط الاتصال أولاً' : 'Please enter a connection URI first')
+      return
+    }
+    if (!mongoUri.trim().startsWith('mongodb')) {
+      setMongoUriError(isAr ? 'رابط غير صحيح — يجب أن يبدأ بـ mongodb://' : 'Invalid URI — must start with mongodb://')
+      return
+    }
     await connect(mongoUri.trim())
   }
 
   const handleToggleAutoSync = async () => {
-    await setAutoSync(!autoSyncEnabled, Number(autoInterval) || 30)
+    setAutoIntervalError(undefined)
+    const interval = Number(autoInterval)
+    if (!autoSyncEnabled && (isNaN(interval) || interval < 1)) {
+      setAutoIntervalError(isAr ? 'يرجى إدخال فترة صحيحة (دقيقة واحدة على الأقل)' : 'Enter a valid interval (min 1 minute)')
+      return
+    }
+    await setAutoSync(!autoSyncEnabled, interval || 30)
   }
 
   return (
     <div className="space-y-6">
-      {/* App password */}
+      {/* ── App password ────────────────────────────────────────────────── */}
       <Card className="p-6 space-y-4">
         <div>
-          <h2 className="font-bold text-slate-800">{isAr ? 'كلمة مرور التطبيق' : 'App Password'}</h2>
+          <h2 className="font-bold text-slate-800 flex items-center gap-2">
+            🔒 {isAr ? 'كلمة مرور التطبيق' : 'App Password'}
+          </h2>
           <p className="text-xs text-slate-400 mt-1">
             {isAr
               ? 'تغيير كلمة المرور الخاصة بحسابك الحالي.'
@@ -126,8 +162,16 @@ export default function SecuritySettings() {
           </p>
         </div>
 
-        {pwError && <Alert variant="danger">{pwError}</Alert>}
-        {pwSuccess && <Alert variant="success">{pwSuccess}</Alert>}
+        {pwError && (
+          <Alert variant="danger" onClose={() => setPwError(null)}>
+            {pwError}
+          </Alert>
+        )}
+        {pwSuccess && (
+          <Alert variant="success" onClose={() => setPwSuccess(null)}>
+            {pwSuccess}
+          </Alert>
+        )}
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-xl">
           <div className="relative">
@@ -135,18 +179,21 @@ export default function SecuritySettings() {
               type={showNewPassword ? 'text' : 'password'}
               label={isAr ? 'كلمة المرور الجديدة' : 'New Password'}
               value={newPassword}
-              onChange={(e) => setNewPassword(e.target.value)}
+              onChange={(e) => {
+                setNewPassword(e.target.value)
+                if (newPwFieldError) setNewPwFieldError(undefined)
+              }}
               placeholder="••••••••"
               className="pe-11"
+              error={newPwFieldError}
+              disabled={pwSaving}
             />
             <PasswordToggle
               shown={showNewPassword}
               onToggle={() => setShowNewPassword((v) => !v)}
-              label={
-                showNewPassword
-                  ? isAr ? 'إخفاء كلمة المرور' : 'Hide password'
-                  : isAr ? 'إظهار كلمة المرور' : 'Show password'
-              }
+              label={showNewPassword
+                ? isAr ? 'إخفاء كلمة المرور' : 'Hide password'
+                : isAr ? 'إظهار كلمة المرور' : 'Show password'}
             />
           </div>
           <div className="relative">
@@ -154,32 +201,43 @@ export default function SecuritySettings() {
               type={showConfirmPassword ? 'text' : 'password'}
               label={isAr ? 'تأكيد كلمة المرور' : 'Confirm Password'}
               value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
+              onChange={(e) => {
+                setConfirmPassword(e.target.value)
+                if (confirmPwFieldError) setConfirmPwFieldError(undefined)
+              }}
               placeholder="••••••••"
               className="pe-11"
+              error={confirmPwFieldError}
+              disabled={pwSaving}
             />
             <PasswordToggle
               shown={showConfirmPassword}
               onToggle={() => setShowConfirmPassword((v) => !v)}
-              label={
-                showConfirmPassword
-                  ? isAr ? 'إخفاء كلمة المرور' : 'Hide password'
-                  : isAr ? 'إظهار كلمة المرور' : 'Show password'
-              }
+              label={showConfirmPassword
+                ? isAr ? 'إخفاء كلمة المرور' : 'Hide password'
+                : isAr ? 'إظهار كلمة المرور' : 'Show password'}
             />
           </div>
         </div>
 
-        <Button onClick={handleChangePassword} disabled={pwSaving} className="w-full sm:w-auto mt-2">
-          {pwSaving ? (isAr ? 'جارٍ الحفظ...' : 'Saving...') : isAr ? 'تغيير كلمة المرور' : 'Change Password'}
+        <Button
+          variant="primary"
+          onClick={handleChangePassword}
+          isLoading={pwSaving}
+          disabled={pwSaving}
+          className="w-full sm:w-auto mt-2"
+        >
+          {isAr ? 'تغيير كلمة المرور' : 'Change Password'}
         </Button>
       </Card>
 
-      {/* MongoDB connection */}
+      {/* ── MongoDB connection ───────────────────────────────────────────── */}
       <Card className="p-6 space-y-4">
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="font-bold text-slate-800">{isAr ? 'قاعدة البيانات السحابية (MongoDB)' : 'Cloud Database (MongoDB)'}</h2>
+            <h2 className="font-bold text-slate-800 flex items-center gap-2">
+              ☁️ {isAr ? 'قاعدة البيانات السحابية (MongoDB)' : 'Cloud Database (MongoDB)'}
+            </h2>
             <p className="text-xs text-slate-400 mt-1">
               {isAr
                 ? 'رابط الاتصال بقاعدة بيانات MongoDB للمزامنة السحابية.'
@@ -203,8 +261,13 @@ export default function SecuritySettings() {
               type="text"
               label={isAr ? 'رابط الاتصال' : 'Connection URI'}
               value={mongoUri}
-              onChange={(e) => setMongoUri(e.target.value)}
+              onChange={(e) => {
+                setMongoUri(e.target.value)
+                if (mongoUriError) setMongoUriError(undefined)
+              }}
               placeholder="mongodb+srv://user:pass@cluster.mongodb.net/db"
+              error={mongoUriError}
+              disabled={isConnecting || isConnected}
             />
           </div>
           {isConnected ? (
@@ -212,23 +275,31 @@ export default function SecuritySettings() {
               {isAr ? 'قطع الاتصال' : 'Disconnect'}
             </Button>
           ) : (
-            <Button onClick={handleConnect} disabled={isConnecting || !mongoUri.trim()}>
-              {isConnecting ? (isAr ? 'جارٍ الاتصال...' : 'Connecting...') : isAr ? 'اتصال' : 'Connect'}
+            <Button
+              onClick={handleConnect}
+              isLoading={isConnecting}
+              disabled={isConnecting}
+              variant="primary"
+            >
+              {isAr ? 'اتصال' : 'Connect'}
             </Button>
           )}
         </div>
         {status?.uri && (
           <p className="text-xs text-slate-400">
-            {isAr ? 'رابط محفوظ:' : 'Saved URI:'} {status.uri}
+            {isAr ? 'رابط محفوظ:' : 'Saved URI:'}{' '}
+            <span className="font-mono">{status.uri}</span>
           </p>
         )}
       </Card>
 
-      {/* Auto-sync */}
+      {/* ── Auto-sync ────────────────────────────────────────────────────── */}
       <Card className="p-6 space-y-4">
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="font-bold text-slate-800">{isAr ? 'المزامنة التلقائية' : 'Auto-Sync'}</h2>
+            <h2 className="font-bold text-slate-800 flex items-center gap-2">
+              🔄 {isAr ? 'المزامنة التلقائية' : 'Auto-Sync'}
+            </h2>
             <p className="text-xs text-slate-400 mt-1">
               {isAr
                 ? 'دفع السجلات غير المتزامنة تلقائياً على فترات منتظمة.'
@@ -241,19 +312,33 @@ export default function SecuritySettings() {
         </div>
 
         <div className="flex items-end gap-3 max-w-md">
-          <div className="w-40">
+          <div className="w-48">
             <Input
               type="number"
               label={isAr ? 'الفترة (دقائق)' : 'Interval (minutes)'}
               value={autoInterval}
-              onChange={(e) => setAutoInterval(e.target.value)}
+              onChange={(e) => {
+                setAutoInterval(e.target.value)
+                if (autoIntervalError) setAutoIntervalError(undefined)
+              }}
               min={1}
+              disabled={autoSyncEnabled}
+              error={autoIntervalError}
             />
           </div>
-          <Button variant={autoSyncEnabled ? 'secondary' : 'primary'} onClick={handleToggleAutoSync}>
-            {autoSyncEnabled ? (isAr ? 'إيقاف' : 'Disable') : isAr ? 'تفعيل' : 'Enable'}
+          <Button
+            variant={autoSyncEnabled ? 'danger' : 'primary'}
+            onClick={handleToggleAutoSync}
+            disabled={!isConnected && !autoSyncEnabled}
+          >
+            {autoSyncEnabled ? (isAr ? 'إيقاف المزامنة' : 'Disable Sync') : isAr ? 'تفعيل المزامنة' : 'Enable Sync'}
           </Button>
         </div>
+        {!isConnected && (
+          <p className="text-xs text-amber-600 font-medium">
+            ⚠ {isAr ? 'يجب الاتصال بقاعدة البيانات السحابية أولاً لتفعيل المزامنة.' : 'Connect to MongoDB first to enable auto-sync.'}
+          </p>
+        )}
       </Card>
     </div>
   )
