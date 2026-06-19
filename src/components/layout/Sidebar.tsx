@@ -8,6 +8,19 @@ import clsx from 'clsx'
 export const Sidebar: React.FC = () => {
   const { t } = useTranslation()
   const { user } = useAuthStore()
+  const [isChecking, setIsChecking] = React.useState(false)
+
+  const handleCheckUpdates = async () => {
+    if (!window.api?.updater) return
+    setIsChecking(true)
+    try {
+      await window.api.updater.check()
+    } catch (err) {
+      console.error('Failed to check for updates:', err)
+    } finally {
+      setTimeout(() => setIsChecking(false), 2000)
+    }
+  }
 
   const isAdmin = user?.role === 'admin'
 
@@ -171,6 +184,24 @@ export const Sidebar: React.FC = () => {
           )
         })}
       </nav>
+      {/* Check for updates button */}
+      <div className="px-4 pb-4">
+        <button
+          onClick={handleCheckUpdates}
+          disabled={isChecking}
+          className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 active:bg-slate-700/80 disabled:opacity-50 text-slate-300 hover:text-white rounded-lg text-xs font-semibold border border-slate-700/50 hover:border-slate-600 transition-all cursor-pointer"
+        >
+          <svg className={clsx("w-4 h-4", { "animate-spin": isChecking })} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 1121.21 8H18.2" />
+          </svg>
+          <span>
+            {isChecking 
+              ? (t('checking', { defaultValue: 'جاري التحقق... / Checking...' }))
+              : (t('check_updates', { defaultValue: 'التحقق من التحديثات / Check for updates' }))
+            }
+          </span>
+        </button>
+      </div>
 
       {/* Footer Info */}
       <div className="p-4 bg-slate-950 border-t border-slate-800 flex items-center gap-3">
