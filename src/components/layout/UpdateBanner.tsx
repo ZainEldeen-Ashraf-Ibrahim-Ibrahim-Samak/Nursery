@@ -1,0 +1,126 @@
+import React, { useEffect, useState } from 'react'
+
+interface UpdaterStatus {
+  event: 'checking-for-update' | 'update-available' | 'update-not-available' | 'error' | 'download-progress' | 'update-downloaded'
+  info?: any
+  error?: string
+  progress?: { percent: number; bytesPerSecond: number; transferred: number; total: number }
+}
+
+export const UpdateBanner: React.FC = () => {
+  const [status, setStatus] = useState<UpdaterStatus['event'] | 'idle'>('idle')
+  const [percent, setPercent] = useState<number>(0)
+  const [errorMsg, setErrorMsg] = useState<string>('')
+  const [isVisible, setIsVisible] = useState<boolean>(false)
+
+  useEffect(() => {
+    // If window.api or window.api.updater is not defined (e.g. running in web browser rather than Electron), do nothing
+    if (!window.api?.updater) return
+
+    const unsubscribe = window.api.updater.onStatusChange((payload) => {
+      console.log('Updater status payload:', payload)
+      setStatus(payload.event)
+
+      if (payload.event === 'checking-for-update') {
+        setIsVisible(true)
+      } else if (payload.event === 'update-available') {
+        setIsVisible(true)
+      } else if (payload.event === 'update-not-available') {
+        // Auto hide after a few seconds
+        setTimeout(() => setIsVisible(false), 5000)
+      } else if (payload.event === 'download-progress' && payload.progress) {
+        setIsVisible(true)
+        setPercent(Math.round(payload.progress.percent))
+      } else if (payload.event === 'update-downloaded') {
+        setIsVisible(true)
+      } else if (payload.event === 'error') {
+        setIsVisible(true)
+        setErrorMsg(payload.error || 'Unknown update error')
+        setTimeout(() => setIsVisible(false), 8000)
+      }
+    })
+
+    return () => {
+      unsubscribe()
+    }
+  }, [])
+
+  const handleRestart = () => {
+    if (window.api?.updater) {
+      window.api.updater.install()
+    }
+  }
+
+  if (!isVisible || status === 'idle') return null
+
+  // Helper for background/border colors based on status
+  let bgClass = 'bg-teal-50 border-teal-200 text-teal-800'
+  let iconColor = 'text-teal-500'
+  if (status === 'error') {
+    bgClass = 'bg-rose-50 border-rose-200 text-rose-800'
+    iconColor = 'text-rose-500'
+  } else if (status === 'update-downloaded') {
+    bgClass = 'bg-emerald-50 border-emerald-200 text-emerald-800'
+    iconColor = 'text-emerald-500'
+  } else if (status === 'checking-for-update' || status === 'download-progress') {
+    bgClass = 'bg-sky-50 border-sky-200 text-sky-800'
+    iconColor = 'text-sky-500'
+  }
+
+  return (
+    <div className={`border-b px-6 py-3 flex items-center justify-between shadow-sm transition-all duration-300 ${bgClass}`}>
+      <div className="flex items-center gap-3 text-start">
+        {/* Animated Icon */}
+        <div className={`p-1 rounded-full bg-white/80 shadow-sm ${iconColor}`}>
+          {(status === 'checking-for-update' || status === 'download-progress') ? (
+            <svg className="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+            </svg>
+          ) : (
+            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+            </svg>
+          )}
+        </div>
+
+        <div>
+          <div className="font-semibold text-sm">
+            {status === 'checking-for-update' && (
+              <>جاري التحقق من وجود تحديثات... <span className="text-xs text-slate-400 font-normal">/ Checking for updates...</span></>
+            )}
+            {status === 'update-available' && (
+              <>تم العثور على تحديث جديد، جاري بدء التنزيل... <span className="text-xs text-slate-400 font-normal">/ Update available, starting download...</span></>
+            )}
+            {status === 'update-not-available' && (
+              <>أنت تستخدم أحدث نسخة بالفعل. <span className="text-xs text-slate-400 font-normal">/ App is up to date.</span></>
+            )}
+            {status === 'download-progress' && (
+              <>جاري تنزيل التحديث: {percent}% <span className="text-xs text-slate-400 font-normal">/ Downloading update: {percent}%</span></>
+            )}
+            {status === 'update-downloaded' && (
+              <>تم تحميل التحديث بنجاح! جاهز للتثبيت. <span className="text-xs text-slate-400 font-normal">/ Update downloaded and ready to install.</span></>
+            )}
+            {status === 'error' && (
+              <>حدث خطأ أثناء التحديث: {errorMsg} <span className="text-xs text-slate-400 font-normal">/ Update error: {errorMsg}</span></>
+            )}
+          </div>
+          {status === 'download-progress' && (
+            <div className="w-64 bg-slate-200 h-1.5 rounded-full mt-1.5 overflow-hidden">
+              <div className="bg-sky-500 h-full rounded-full transition-all duration-300" style={{ width: `${percent}%` }} />
+            </div>
+          )}
+        </div>
+      </div>
+
+      {status === 'update-downloaded' && (
+        <button
+          onClick={handleRestart}
+          className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold text-xs rounded-lg shadow-sm transition-all cursor-pointer focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
+        >
+          إعادة التشغيل والتثبيت / Restart & Install
+        </button>
+      )}
+    </div>
+  )
+}

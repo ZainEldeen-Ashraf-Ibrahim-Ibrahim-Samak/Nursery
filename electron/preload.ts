@@ -117,6 +117,24 @@ const api = {
       ipcRenderer.invoke('sync:auto-sync', args),
   },
 
+  // Auto-Updater
+  updater: {
+    check: () => ipcRenderer.invoke('updater:check'),
+    install: () => ipcRenderer.invoke('updater:install'),
+    onStatusChange: (
+      callback: (payload: {
+        event: 'checking-for-update' | 'update-available' | 'update-not-available' | 'error' | 'download-progress' | 'update-downloaded'
+        info?: any
+        error?: string
+        progress?: { percent: number; bytesPerSecond: number; transferred: number; total: number }
+      }) => void
+    ) => {
+      const handler = (_e: unknown, payload: any) => callback(payload)
+      ipcRenderer.on('updater:status', handler)
+      return () => ipcRenderer.removeListener('updater:status', handler)
+    }
+  },
+
   /**
    * Subscribe to long-running operation progress (push/pull/import/backup/restore).
    * Returns an unsubscribe function. Payload: { op, phase, current, total, percent }.

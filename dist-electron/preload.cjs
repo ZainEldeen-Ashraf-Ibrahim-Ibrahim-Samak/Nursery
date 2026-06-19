@@ -91,6 +91,15 @@ electron.contextBridge.exposeInMainWorld("api", {
 		status: () => electron.ipcRenderer.invoke("sync:status"),
 		autoSync: (args) => electron.ipcRenderer.invoke("sync:auto-sync", args)
 	},
+	updater: {
+		check: () => electron.ipcRenderer.invoke("updater:check"),
+		install: () => electron.ipcRenderer.invoke("updater:install"),
+		onStatusChange: (callback) => {
+			const handler = (_e, payload) => callback(payload);
+			electron.ipcRenderer.on("updater:status", handler);
+			return () => electron.ipcRenderer.removeListener("updater:status", handler);
+		}
+	},
 	/**
 	* Subscribe to long-running operation progress (push/pull/import/backup/restore).
 	* Returns an unsubscribe function. Payload: { op, phase, current, total, percent }.

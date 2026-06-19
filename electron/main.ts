@@ -1,6 +1,7 @@
 // MUST be first: loads .env into process.env before any module reads it.
 import { checkRequiredConfig } from './env.js'
-import { app, BrowserWindow, protocol, net, dialog } from 'electron'
+import { app, BrowserWindow, protocol, net, dialog, ipcMain } from 'electron'
+import { autoUpdater } from 'electron-updater'
 import path from 'node:path'
 import fs from 'node:fs'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -167,6 +168,14 @@ app.whenReady().then(async () => {
   })
 
   createWindow()
+  
+  // Set up auto updater and check for updates after a short delay
+  initAutoUpdater()
+  setTimeout(() => {
+    autoUpdater.checkForUpdatesAndNotify().catch((err) => {
+      console.error('Error during automatic update check:', err)
+    })
+  }, 5000)
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -174,6 +183,56 @@ app.whenReady().then(async () => {
     }
   })
 })
+
+function initAutoUpdater() {
+  autoUpdater.logger = console
+
+  autoUpdater.on('checking-for-update', () => {
+    mainWindow?.webContents.send('updater:status', { event: 'checking-for-update' })
+  })
+
+  autoUpdater.on('update-available', (info) => {
+    mainWindow?.webContents.send('updater:status', { event: 'update-available', info })
+  })
+
+  autoUpdater.on('update-not-available', (info) => {
+    mainWindow?.webContents.send('updater:status', { event: 'update-not-available', info })
+  })
+
+  autoUpdater.on('error', (err) => {
+    mainWindow?.webContents.send('updater:status', { event: 'error', error: err.message })
+  })
+
+  autoUpdater.on('download-progress', (progressObj) => {
+    mainWindow?.webContents.send('updater:status', {
+      event: 'download-progress',
+      progress: {
+        percent: progressObj.percent,
+        bytesPerSecond: progressObj.bytesPerSecond,
+        transferred: progressObj.transferred,
+        total: progressObj.total,
+      }
+    })
+  })
+
+  autoUpdater.on('update-downloaded', (info) => {
+    mainWindow?.webContents.send('updater:status', { event: 'update-downloaded', info })
+  })
+
+  ipcMain.handle('updater:check', async () => {
+    try {
+      const result = await autoUpdater.checkForUpdates()
+      return { success: true, result }
+    } catch (err: any) {
+      return { success: false, error: err.message }
+    }
+  })
+
+  ipcMain.handle('updater:install', () => {
+    autoUpdater.quitAndInstall()
+    return { success: true }
+  })
+}
 
 app.on('window-all-closed', () => {
   closeDb()

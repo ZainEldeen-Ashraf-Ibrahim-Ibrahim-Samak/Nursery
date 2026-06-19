@@ -6,6 +6,7 @@ import { LoadingSpinner } from './components/ui/LoadingSpinner.js'
 import { Sidebar } from './components/layout/Sidebar.js'
 import { Header } from './components/layout/Header.js'
 import { RoleGuard } from './components/layout/RoleGuard.js'
+import { UpdateBanner } from './components/layout/UpdateBanner.js'
 
 // Import Pages
 import Dashboard from './pages/Dashboard.js'
@@ -39,6 +40,7 @@ const AppLayout: React.FC = () => {
     <div className="flex h-screen w-screen overflow-hidden bg-slate-50">
       <Sidebar />
       <div className="flex-1 flex flex-col overflow-hidden">
+        <UpdateBanner />
         <Header />
         <main className="flex-1 overflow-y-auto">
           <Outlet />

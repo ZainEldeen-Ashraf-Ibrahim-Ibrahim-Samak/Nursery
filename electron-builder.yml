@@ -1,5 +1,9 @@
 appId: com.nursery.management
 productName: Nursery & Autism Center Management System
+publish:
+  provider: github
+  owner: ZainEldeen-Ashraf-Ibrahim-Ibrahim-Samak
+  repo: Nursery
 directories:
   output: release
   buildResources: assets
