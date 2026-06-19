@@ -69,7 +69,10 @@ ipcMain.handle('sync:connect', async (_event, { uri }) => {
     }
 
     const db = getDb()
-    db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('sync_mongo_uri', uri)
+    db.prepare(`
+      INSERT OR REPLACE INTO settings (key, value, updated_at, synced)
+      VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), 0)
+    `).run('sync_mongo_uri', uri)
 
     await connectMongo(uri)
     logSync('connect', 'connection', 'mongodb', 'success')
@@ -423,11 +426,17 @@ ipcMain.handle('sync:auto-sync', async (_event, { enabled, intervalMinutes = 30 
     if (enabled) {
       const intervalMs = intervalMinutes * 60 * 1000
       startAutoSync(intervalMs)
-      db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('sync_auto_interval', String(intervalMinutes))
+      db.prepare(`
+        INSERT OR REPLACE INTO settings (key, value, updated_at, synced)
+        VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), 0)
+      `).run('sync_auto_interval', String(intervalMinutes))
       return { autoSync: true, intervalMinutes }
     } else {
       stopAutoSync()
-      db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('sync_auto_interval', '0')
+      db.prepare(`
+        INSERT OR REPLACE INTO settings (key, value, updated_at, synced)
+        VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), 0)
+      `).run('sync_auto_interval', '0')
       return { autoSync: false }
     }
   } catch (error: any) {

@@ -29,7 +29,10 @@ ipcMain.handle('branding:save', (_event, brandingData: Record<string, string>) =
     requireAdmin()
     const db = getDb()
     
-    const updateStmt = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)')
+    const updateStmt = db.prepare(`
+      INSERT OR REPLACE INTO settings (key, value, updated_at, synced)
+      VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), 0)
+    `)
     const transaction = db.transaction(() => {
       for (const [key, value] of Object.entries(brandingData)) {
         if (key.startsWith('brand_')) {
@@ -131,7 +134,10 @@ ipcMain.handle('branding:reset', () => {
       brand_icon_path: '',
     }
     
-    const updateStmt = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)')
+    const updateStmt = db.prepare(`
+      INSERT OR REPLACE INTO settings (key, value, updated_at, synced)
+      VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), 0)
+    `)
     const transaction = db.transaction(() => {
       for (const [key, value] of Object.entries(defaultBranding)) {
         updateStmt.run(key, value)

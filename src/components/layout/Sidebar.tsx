@@ -3,11 +3,13 @@ import { NavLink } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '../../store/useAuthStore.js'
 import { AppLogo } from '../ui/AppLogo.js'
+import { useBranding } from '../../hooks/useBranding.js'
 import clsx from 'clsx'
 
 export const Sidebar: React.FC = () => {
   const { t } = useTranslation()
   const { user } = useAuthStore()
+  const { branding } = useBranding()
   const [isChecking, setIsChecking] = React.useState(false)
 
   const handleCheckUpdates = async () => {
@@ -147,10 +149,10 @@ export const Sidebar: React.FC = () => {
         <AppLogo className="w-8 h-8 text-sm" />
         <div className="flex flex-col text-start">
           <span className="font-bold text-white text-sm leading-tight truncate w-40">
-            {t('app_name')}
+            {branding?.brand_app_name || t('app_name')}
           </span>
           <span className="text-[10px] text-slate-500 font-semibold tracking-wider uppercase leading-none mt-0.5">
-            Autism Center System
+            {branding?.brand_tagline || 'Autism Center System'}
           </span>
         </div>
       </div>

@@ -143,6 +143,8 @@
     "username_exists": "اسم المستخدم موجود بالفعل",
     "cannot_deactivate_self": "لا يمكن إلغاء تنشيط حسابك الحالي",
     "cannot_delete_self": "لا يمكن حذف حسابك الحالي",
+    "hide_password": "إخفاء كلمة المرور",
+    "show_password": "إظهار كلمة المرور",
     "display_name": "الاسم المعروض",
     "new_password_optional": "كلمة المرور الجديدة (اختياري)",
     "password_placeholder": "اتركه فارغاً للاحتفاظ بالحالية",

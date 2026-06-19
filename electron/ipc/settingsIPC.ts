@@ -24,7 +24,10 @@ ipcMain.handle('settings:update', (_event, settings: Record<string, string>) => 
     requireAdmin()
     
     const db = getDb()
-    const updateStmt = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)')
+    const updateStmt = db.prepare(`
+      INSERT OR REPLACE INTO settings (key, value, updated_at, synced)
+      VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), 0)
+    `)
     
     const transaction = db.transaction(() => {
       for (const [key, value] of Object.entries(settings)) {

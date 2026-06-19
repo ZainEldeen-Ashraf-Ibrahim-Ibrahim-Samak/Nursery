@@ -143,6 +143,8 @@
     "username_exists": "Username already exists",
     "cannot_deactivate_self": "Cannot deactivate your own active session",
     "cannot_delete_self": "Cannot delete your own active session",
+    "hide_password": "Hide password",
+    "show_password": "Show password",
     "display_name": "Display Name",
     "new_password_optional": "New Password (optional)",
     "password_placeholder": "Leave blank to keep current",

@@ -69,7 +69,10 @@ export async function seedDatabase(db: Db): Promise<void> {
       { key: 'brand_icon_path', value: '' },
     ]
     
-    const insertSetting = db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)')
+    const insertSetting = db.prepare(`
+      INSERT OR IGNORE INTO settings (key, value, updated_at, synced)
+      VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), 0)
+    `)
     
     const transaction = db.transaction(() => {
       for (const setting of defaultSettings) {

@@ -7,10 +7,12 @@ import { Alert } from '../components/ui/Alert.js'
 import { AppLogo } from '../components/ui/AppLogo.js'
 import { LanguageSwitcher } from '../components/layout/LanguageSwitcher.js'
 import { UpdateBanner } from '../components/layout/UpdateBanner.js'
+import { useBranding } from '../hooks/useBranding.js'
 
 export default function Login() {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const { login, isLoading, error, clearError } = useAuthStore()
+  const { branding } = useBranding()
   
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -85,10 +87,10 @@ export default function Login() {
           <AppLogo className="w-16 h-16 text-2xl" />
           <div className="flex flex-col gap-1">
             <h2 className="text-xl font-bold text-slate-800 m-0 leading-tight">
-              {t('app_name')}
+              {branding?.brand_app_name || t('app_name')}
             </h2>
             <span className="text-xs text-slate-400 font-semibold uppercase tracking-wider">
-              نظام الإدارة الماليّة / Management System
+              {branding?.brand_tagline || (i18n.language === 'ar' ? 'نظام الإدارة الماليّة' : 'Management System')}
             </span>
           </div>
         </div>
@@ -117,7 +119,7 @@ export default function Login() {
             type="text"
             value={username}
             onChange={(e) => setUsername(e.target.value)}
-            placeholder="admin / employee"
+            placeholder={i18n.language === 'ar' ? 'مدير / موظف' : 'admin / employee'}
             disabled={isLoading}
             autoFocus
           />
@@ -139,8 +141,8 @@ export default function Login() {
               disabled={isLoading}
               aria-label={
                 showPassword
-                  ? t('hide_password', { defaultValue: 'إخفاء كلمة المرور / Hide password' })
-                  : t('show_password', { defaultValue: 'إظهار كلمة المرور / Show password' })
+                  ? t('hide_password')
+                  : t('show_password')
               }
               className="absolute bottom-2 end-3 text-slate-400 hover:text-slate-600 transition-colors disabled:opacity-50 focus:outline-none"
             >
@@ -170,7 +172,7 @@ export default function Login() {
 
       {/* Footer copyright */}
       <div className="mt-8 text-center text-xs text-slate-400 font-medium select-none">
-        © {new Date().getFullYear()} {t('app_name')}. جميع الحقوق محفوظة. / All rights reserved.
+        © {new Date().getFullYear()} {branding?.brand_app_name || t('app_name')}. {i18n.language === 'ar' ? 'جميع الحقوق محفوظة.' : 'All rights reserved.'}
       </div>
     </div>
   )

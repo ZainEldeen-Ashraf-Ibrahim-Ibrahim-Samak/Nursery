@@ -89,7 +89,7 @@ export default function SecuritySettings() {
     if (!user) return
     setPwSaving(true)
     try {
-      await window.api.users.update({ id: user.id, password: newPassword })
+      await window.api.users.update({ id: user.id, patch: { password: newPassword } })
       setPwSuccess(isAr ? 'تم تغيير كلمة المرور بنجاح.' : 'Password changed successfully.')
       setNewPassword('')
       setConfirmPassword('')

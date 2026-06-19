@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import i18n from 'i18next'
 
 export interface BrandingData {
   brand_app_name: string
@@ -46,7 +47,7 @@ export const useBrandingStore = create<BrandingState>((set) => ({
         }
         
         // Update document title
-        const appName = data.brand_app_name || 'أكاديمية زين الدين / Nursery & Autism Center'
+        const appName = data.brand_app_name || i18n.t('app_name')
         const tagline = data.brand_tagline || ''
         document.title = tagline ? `${appName} - ${tagline}` : appName
       }

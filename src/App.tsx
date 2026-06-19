@@ -7,6 +7,7 @@ import { Sidebar } from './components/layout/Sidebar.js'
 import { Header } from './components/layout/Header.js'
 import { RoleGuard } from './components/layout/RoleGuard.js'
 import { UpdateBanner } from './components/layout/UpdateBanner.js'
+import { useBranding } from './hooks/useBranding.js'
 
 // Import Pages
 import Dashboard from './pages/Dashboard.js'
@@ -52,6 +53,7 @@ const AppLayout: React.FC = () => {
 
 export default function App() {
   const { checkCurrent, isLoading, isAuthenticated } = useAuthStore()
+  useBranding()
 
   // Verify session on app startup
   useEffect(() => {

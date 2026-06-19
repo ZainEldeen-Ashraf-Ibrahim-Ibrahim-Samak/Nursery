@@ -17260,7 +17260,10 @@ async function seedDatabase(db) {
 				value: ""
 			}
 		];
-		const insertSetting = db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)");
+		const insertSetting = db.prepare(`
+      INSERT OR IGNORE INTO settings (key, value, updated_at, synced)
+      VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), 0)
+    `);
 		db.transaction(() => {
 			for (const setting of defaultSettings) insertSetting.run(setting.key, setting.value);
 		})();
@@ -22522,7 +22525,10 @@ ipcMain.handle("settings:update", (_event, settings) => {
 	try {
 		requireAdmin();
 		const db = getDb();
-		const updateStmt = db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)");
+		const updateStmt = db.prepare(`
+      INSERT OR REPLACE INTO settings (key, value, updated_at, synced)
+      VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), 0)
+    `);
 		db.transaction(() => {
 			for (const [key, value] of Object.entries(settings)) updateStmt.run(key, value);
 		})();
@@ -22552,7 +22558,10 @@ ipcMain.handle("branding:save", (_event, brandingData) => {
 	try {
 		requireAdmin();
 		const db = getDb();
-		const updateStmt = db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)");
+		const updateStmt = db.prepare(`
+      INSERT OR REPLACE INTO settings (key, value, updated_at, synced)
+      VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), 0)
+    `);
 		db.transaction(() => {
 			for (const [key, value] of Object.entries(brandingData)) if (key.startsWith("brand_")) updateStmt.run(key, value);
 		})();
@@ -22638,7 +22647,10 @@ ipcMain.handle("branding:reset", () => {
 			brand_logo_path: "",
 			brand_icon_path: ""
 		};
-		const updateStmt = db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)");
+		const updateStmt = db.prepare(`
+      INSERT OR REPLACE INTO settings (key, value, updated_at, synced)
+      VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), 0)
+    `);
 		db.transaction(() => {
 			for (const [key, value] of Object.entries(defaultBranding)) updateStmt.run(key, value);
 		})();
@@ -26413,7 +26425,10 @@ ipcMain.handle("sync:connect", async (_event, { uri }) => {
 	try {
 		requireAdmin();
 		if (!uri || !uri.startsWith("mongodb")) throw new Error("Invalid MongoDB URI. Must start with mongodb:// or mongodb+srv://");
-		getDb().prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").run("sync_mongo_uri", uri);
+		getDb().prepare(`
+      INSERT OR REPLACE INTO settings (key, value, updated_at, synced)
+      VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), 0)
+    `).run("sync_mongo_uri", uri);
 		await connectMongo(uri);
 		logSync("connect", "connection", "mongodb", "success");
 		return { connected: true };
@@ -26701,14 +26716,20 @@ ipcMain.handle("sync:auto-sync", async (_event, { enabled, intervalMinutes = 30 
 		const db = getDb();
 		if (enabled) {
 			startAutoSync(intervalMinutes * 60 * 1e3);
-			db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").run("sync_auto_interval", String(intervalMinutes));
+			db.prepare(`
+        INSERT OR REPLACE INTO settings (key, value, updated_at, synced)
+        VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), 0)
+      `).run("sync_auto_interval", String(intervalMinutes));
 			return {
 				autoSync: true,
 				intervalMinutes
 			};
 		} else {
 			stopAutoSync();
-			db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").run("sync_auto_interval", "0");
+			db.prepare(`
+        INSERT OR REPLACE INTO settings (key, value, updated_at, synced)
+        VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), 0)
+      `).run("sync_auto_interval", "0");
 			return { autoSync: false };
 		}
 	} catch (error) {

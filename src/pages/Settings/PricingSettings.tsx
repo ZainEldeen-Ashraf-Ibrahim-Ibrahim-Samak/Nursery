@@ -33,10 +33,18 @@ export default function PricingSettings() {
         setIsLoading(true)
         const data = await window.api.settings.get()
         if (data) {
-          setSettings((prev) => ({
-            ...prev,
-            ...data,
-          }))
+          setSettings((prev) => {
+            const pricingData = {} as typeof prev
+            for (const key of Object.keys(prev) as (keyof typeof prev)[]) {
+              if (data[key] !== undefined) {
+                pricingData[key] = data[key]
+              }
+            }
+            return {
+              ...prev,
+              ...pricingData,
+            }
+          })
         }
       } catch (err: any) {
         console.error('Failed to load pricing settings:', err)
