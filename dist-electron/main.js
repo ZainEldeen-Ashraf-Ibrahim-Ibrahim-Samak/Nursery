@@ -15476,6 +15476,23 @@ var migrations = [
         UPDATE payments SET synced = 0;
       `);
 		}
+	},
+	{
+		name: "022_employee_deductions",
+		up: (db) => {
+			db.exec(`
+        CREATE TABLE IF NOT EXISTS employee_deductions (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          employee_id INTEGER NOT NULL REFERENCES employees(id),
+          month TEXT NOT NULL,
+          year INTEGER NOT NULL,
+          reason TEXT NOT NULL,
+          amount REAL NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL,
+          synced INTEGER DEFAULT 0
+        );
+      `);
+		}
 	}
 ];
 function runMigrations(db) {
@@ -21528,7 +21545,7 @@ function requireAdmin() {
 	if (!user) throw new Error("UNAUTHORIZED: يجب تسجيل الدخول أولاً / Unauthorized");
 	if (user.role !== "admin") throw new Error("FORBIDDEN: غير مسموح بالوصول لغير المسؤولين / Forbidden");
 }
-function checkAuth$5() {
+function checkAuth$6() {
 	if (!getCurrentUser()) throw new Error("UNAUTHORIZED: يجب تسجيل الدخول أولاً / Unauthorized");
 }
 //#endregion
@@ -21830,7 +21847,7 @@ function getChildStatement(child, existingPayments, currentDate) {
 }
 //#endregion
 //#region electron/ipc/childrenIPC.ts
-function checkAuth$4() {
+function checkAuth$5() {
 	if (!getCurrentUser()) throw new Error("UNAUTHORIZED: يجب تسجيل الدخول أولاً / Unauthorized");
 }
 var GUARDIAN_PHONE_RE = /^(?:\+?2)?01[0-9]{9}$/;
@@ -21860,7 +21877,7 @@ function buildLessonFields(src) {
 }
 ipcMain.handle("children:get", async (_event, { search, service, activeOnly }) => {
 	try {
-		checkAuth$4();
+		checkAuth$5();
 		const db = getDb();
 		let query = "SELECT * FROM children WHERE 1=1";
 		const params = [];
@@ -21885,7 +21902,7 @@ ipcMain.handle("children:get", async (_event, { search, service, activeOnly }) =
 });
 ipcMain.handle("children:add", async (_event, childInput) => {
 	try {
-		checkAuth$4();
+		checkAuth$5();
 		const db = getDb();
 		const { name, guardian, guardian_phone, child_phone, national_id, reg_date, notes, services } = childInput;
 		const enrollments = services || (childInput.service ? [{
@@ -22014,7 +22031,7 @@ ipcMain.handle("children:deactivate", async (_event, { id }) => {
 });
 ipcMain.handle("children:statement", async (_event, { childId }) => {
 	try {
-		checkAuth$4();
+		checkAuth$5();
 		if (!childId) throw new Error("Child ID is required");
 		const db = getDb();
 		const child = db.prepare("SELECT * FROM children WHERE id = ?").get(childId);
@@ -22053,12 +22070,12 @@ function applyCloudTombstones(db, cloudTombstones) {
 }
 //#endregion
 //#region electron/ipc/childServicesIPC.ts
-function checkAuth$3() {
+function checkAuth$4() {
 	if (!getCurrentUser()) throw new Error("UNAUTHORIZED: يجب تسجيل الدخول أولاً / Unauthorized");
 }
 ipcMain.handle("childServices:list", async (_event, { childId }) => {
 	try {
-		checkAuth$3();
+		checkAuth$4();
 		const db = getDb();
 		if (!childId) throw new Error("childId is required");
 		return db.prepare("SELECT * FROM child_services WHERE child_id = ?").all(childId);
@@ -22165,12 +22182,12 @@ function calculateChildStatusRollup(payments) {
 	if (allUnpaid) return "unpaid";
 	return "partial";
 }
-function checkAuth$2() {
+function checkAuth$3() {
 	if (!getCurrentUser()) throw new Error("UNAUTHORIZED: يجب تسجيل الدخول أولاً / Unauthorized");
 }
 ipcMain.handle("payments:get", async (_event, { month, year }) => {
 	try {
-		checkAuth$2();
+		checkAuth$3();
 		const db = getDb();
 		if (!month || !year) throw new Error("Month and year are required");
 		const payments = db.prepare(`
@@ -22225,7 +22242,7 @@ ipcMain.handle("payments:get", async (_event, { month, year }) => {
 });
 ipcMain.handle("payments:generate", async (_event, { month, year }) => {
 	try {
-		checkAuth$2();
+		checkAuth$3();
 		const db = getDb();
 		if (!month || !year) throw new Error("Month and year are required");
 		const activeEnrollments = db.prepare(`
@@ -22302,7 +22319,7 @@ ipcMain.handle("payments:generate", async (_event, { month, year }) => {
 });
 ipcMain.handle("payments:update", async (_event, { id, quantity, paid, notes, payment_method_id }) => {
 	try {
-		checkAuth$2();
+		checkAuth$3();
 		const db = getDb();
 		if (!id) throw new Error("Payment ID is required");
 		const payment = db.prepare("SELECT * FROM payments WHERE id = ?").get(id);
@@ -22336,7 +22353,7 @@ ipcMain.handle("payments:update", async (_event, { id, quantity, paid, notes, pa
 });
 ipcMain.handle("payments:bulkPay", async (_event, { ids, payment_method_id }) => {
 	try {
-		checkAuth$2();
+		checkAuth$3();
 		const db = getDb();
 		if (!ids || !Array.isArray(ids) || ids.length === 0) throw new Error("Payment IDs array is required");
 		let methodName = null;
@@ -22516,12 +22533,13 @@ ipcMain.handle("salary:get", async (_event, { month, year }) => {
 				}
 			}
 			const bonus = row.bonus ?? 0;
-			const deductions = row.deductions ?? 0;
+			const deductionSum = db.prepare("SELECT COALESCE(SUM(amount), 0) as total FROM employee_deductions WHERE employee_id = ? AND month = ? AND year = ?").get(row.employee_id, month, Number(year))?.total ?? 0;
 			return {
 				...row,
 				salary_type_name: salaryTypeName,
 				salary_type_mode: salaryTypeMode,
-				actual_paid: row.stored_actual_paid ?? computedActualPaid + bonus - deductions
+				deductions: deductionSum,
+				actual_paid: row.stored_actual_paid ?? computedActualPaid + bonus - deductionSum
 			};
 		});
 	} catch (error) {
@@ -22536,7 +22554,9 @@ ipcMain.handle("salary:update", async (_event, { employee_id, month, year, bonus
 		if (!employee_id || !month || !year) throw new Error("Employee ID, month, and year are required");
 		const emp = db.prepare("SELECT net_salary FROM employees WHERE id = ?").get(employee_id);
 		if (!emp) throw new Error("الموظف غير موجود / Employee not found");
-		const actualPaid = override_amount !== null ? Number(override_amount) : Number(emp.net_salary) + Number(bonus) - Number(deductions);
+		const tableDeductionRow = db.prepare("SELECT COALESCE(SUM(amount), 0) as total, COUNT(*) as cnt FROM employee_deductions WHERE employee_id = ? AND month = ? AND year = ?").get(employee_id, month, Number(year));
+		const deductionSum = tableDeductionRow?.cnt > 0 ? tableDeductionRow?.total ?? 0 : Number(deductions);
+		const actualPaid = override_amount !== null ? Number(override_amount) : Number(emp.net_salary) + Number(bonus) - deductionSum;
 		const now = (/* @__PURE__ */ new Date()).toISOString();
 		db.prepare(`
       INSERT INTO salary_payments (employee_id, month, year, bonus, deductions, actual_paid, paid_date, notes, updated_at, synced)
@@ -22549,7 +22569,7 @@ ipcMain.handle("salary:update", async (_event, { employee_id, month, year, bonus
         notes = excluded.notes,
         updated_at = excluded.updated_at,
         synced = 0
-    `).run(employee_id, month, Number(year), Number(bonus), Number(deductions), actualPaid, paid_date, notes, now);
+    `).run(employee_id, month, Number(year), Number(bonus), deductionSum, actualPaid, paid_date, notes, now);
 		return db.prepare(`
       SELECT s.*, s.paid_date as pay_date, e.name as employee_name, e.role as employee_role
       FROM salary_payments s
@@ -22588,24 +22608,27 @@ ipcMain.handle("expenses:get", async (_event, { year }) => {
 		requireAdmin();
 		const db = getDb();
 		if (!year) throw new Error("Year is required");
-		const items = db.prepare("SELECT DISTINCT item, category FROM expenses ORDER BY item ASC").all();
-		if (items.length === 0) return [];
+		const itemNames = db.prepare("SELECT DISTINCT item FROM expenses ORDER BY item ASC").all().map((r) => r.item);
+		if (itemNames.length === 0) return [];
 		const rows = db.prepare("SELECT * FROM expenses WHERE year = ? ORDER BY item ASC").all(year);
 		const result = [];
-		for (const { item, category } of items) for (const month of arabicMonths$4) {
-			const found = rows.find((r) => r.item === item && r.month === month);
-			if (found) result.push(found);
-			else result.push({
-				id: 0,
-				item,
-				month,
-				year: Number(year),
-				amount: 0,
-				category: category ?? null,
-				notes: null,
-				created_at: "",
-				synced: 0
-			});
+		for (const item of itemNames) {
+			const category = db.prepare("SELECT category FROM expenses WHERE item = ? AND category IS NOT NULL LIMIT 1").get(item)?.category ?? null;
+			for (const month of arabicMonths$4) {
+				const found = rows.find((r) => r.item === item && r.month === month);
+				if (found) result.push(found);
+				else result.push({
+					id: 0,
+					item,
+					month,
+					year: Number(year),
+					amount: 0,
+					category,
+					notes: null,
+					created_at: "",
+					synced: 0
+				});
+			}
 		}
 		return result;
 	} catch (error) {
@@ -26114,7 +26137,7 @@ function buildPdfFile(type, params, savePath) {
 }
 //#endregion
 //#region electron/ipc/exportIPC.ts
-function checkAuth$1() {
+function checkAuth$2() {
 	const user = getCurrentUser();
 	if (!user) throw new Error("UNAUTHORIZED: يجب تسجيل الدخول أولاً / Unauthorized");
 	return user;
@@ -26155,7 +26178,7 @@ ipcMain.handle("export:full", async (_event, { year, format, lang }) => {
 });
 ipcMain.handle("export:month", async (_event, { month, year, format, lang }) => {
 	try {
-		checkAuth$1();
+		checkAuth$2();
 		const filename = lang === "ar" ? `مطالبات_${month}_${year}.${format}` : `billing_${month}_${year}.${format}`;
 		return await executeExport("month", {
 			month,
@@ -26170,7 +26193,7 @@ ipcMain.handle("export:month", async (_event, { month, year, format, lang }) => 
 });
 ipcMain.handle("export:child", async (_event, { childId, format, lang }) => {
 	try {
-		checkAuth$1();
+		checkAuth$2();
 		const filename = lang === "ar" ? `كشف_حساب_طفل_${childId}.${format}` : `child_statement_${childId}.${format}`;
 		return await executeExport("child", {
 			childId,
@@ -26844,6 +26867,21 @@ var paymentMethodSchema = new Schema({
 	synced: Number
 }, sharedOptions);
 var PaymentMethodModel = mongoose.models["sync_payment_methods"] || mongoose.model("sync_payment_methods", paymentMethodSchema);
+var employeeDeductionSchema = new Schema({
+	id: {
+		type: Number,
+		required: true,
+		unique: true
+	},
+	employee_id: Number,
+	month: String,
+	year: Number,
+	reason: String,
+	amount: Number,
+	created_at: String,
+	synced: Number
+}, sharedOptions);
+var EmployeeDeductionModel = mongoose.models["sync_employee_deductions"] || mongoose.model("sync_employee_deductions", employeeDeductionSchema);
 var SYNC_ENTITIES = [
 	{
 		name: "children",
@@ -26934,6 +26972,11 @@ var SYNC_ENTITIES = [
 		name: "payment_methods",
 		model: PaymentMethodModel,
 		table: "payment_methods"
+	},
+	{
+		name: "employee_deductions",
+		model: EmployeeDeductionModel,
+		table: "employee_deductions"
 	}
 ];
 //#endregion
@@ -27343,12 +27386,12 @@ function calculateDashboard(payments, expenses, salaries, targetProfitPct) {
 		gap
 	};
 }
-function checkAuth() {
+function checkAuth$1() {
 	if (!getCurrentUser()) throw new Error("UNAUTHORIZED: يجب تسجيل الدخول أولاً / Unauthorized");
 }
 ipcMain.handle("dashboard:get", async (_event, { month, year }) => {
 	try {
-		checkAuth();
+		checkAuth$1();
 		const db = getDb();
 		if (!month || !year) throw new Error("Month and year are required");
 		const targetProfitRow = db.prepare("SELECT value FROM settings WHERE key = 'target_profit_pct'").get();
@@ -27540,7 +27583,7 @@ ipcMain.handle("salaryTypes:delete", async (_event, { id }) => {
 //#region electron/ipc/serviceDefinitionsIPC.ts
 ipcMain.handle("serviceDefinitions:list", async () => {
 	try {
-		checkAuth$5();
+		checkAuth$6();
 		return getDb().prepare("SELECT * FROM service_definitions ORDER BY is_custom ASC, name ASC").all();
 	} catch (error) {
 		throw new Error(error.message || "Failed to list service definitions");
@@ -27600,7 +27643,7 @@ ipcMain.handle("serviceDefinitions:delete", async (_event, { id }) => {
 //#region electron/ipc/sessionsIPC.ts
 ipcMain.handle("sessions:list", async (_event, args) => {
 	try {
-		checkAuth$5();
+		checkAuth$6();
 		const db = getDb();
 		const { from, to } = args || {};
 		let query = `
@@ -27693,7 +27736,7 @@ ipcMain.handle("sessions:assignTeachers", async (_event, { session_id, employee_
 });
 ipcMain.handle("sessions:proRateCalc", async (_event, args) => {
 	try {
-		checkAuth$5();
+		checkAuth$6();
 		const db = getDb();
 		let reg_date = args.reg_date;
 		let pricePerSession = args.price_per_session ?? 0;
@@ -27734,7 +27777,7 @@ ipcMain.handle("sessions:proRateCalc", async (_event, args) => {
 //#region electron/ipc/attendanceIPC.ts
 ipcMain.handle("attendance:getSheet", async (_event, { session_id }) => {
 	try {
-		checkAuth$5();
+		checkAuth$6();
 		const db = getDb();
 		const user = getCurrentUser();
 		if (user?.role !== "admin") {
@@ -27757,7 +27800,7 @@ ipcMain.handle("attendance:getSheet", async (_event, { session_id }) => {
 });
 ipcMain.handle("attendance:record", async (_event, args) => {
 	try {
-		checkAuth$5();
+		checkAuth$6();
 		const db = getDb();
 		const user = getCurrentUser();
 		const now = (/* @__PURE__ */ new Date()).toISOString();
@@ -27868,7 +27911,7 @@ ipcMain.handle("attendance:getSummary", async (_event, { employee_id, month, yea
 //#region electron/ipc/paymentMethodsIPC.ts
 ipcMain.handle("paymentMethods:list", async () => {
 	try {
-		checkAuth$5();
+		checkAuth$6();
 		return getDb().prepare(`SELECT * FROM payment_methods ORDER BY name`).all();
 	} catch (e) {
 		throw new Error(e.message || "Failed to list payment methods");
@@ -27911,6 +27954,30 @@ ipcMain.handle("paymentMethods:delete", async (_event, { id }) => {
 	} catch (e) {
 		throw new Error(e.message || "Failed to delete payment method");
 	}
+});
+//#endregion
+//#region electron/ipc/deductionsIPC.ts
+function checkAuth() {
+	if (!getCurrentUser()) throw new Error("UNAUTHORIZED: يجب تسجيل الدخول أولاً / Unauthorized");
+}
+ipcMain.handle("deductions:list", async (_event, { employee_id, month, year }) => {
+	checkAuth();
+	return getDb().prepare("SELECT * FROM employee_deductions WHERE employee_id = ? AND month = ? AND year = ? ORDER BY created_at ASC").all(employee_id, month, Number(year));
+});
+ipcMain.handle("deductions:add", async (_event, { employee_id, month, year, reason, amount }) => {
+	requireAdmin();
+	const db = getDb();
+	if (!reason || !reason.trim()) throw new Error("السبب مطلوب / Reason is required");
+	const amountNum = Number(amount);
+	if (isNaN(amountNum) || amountNum <= 0) throw new Error("المبلغ يجب أن يكون موجباً / Amount must be positive");
+	const now = (/* @__PURE__ */ new Date()).toISOString();
+	const result = db.prepare("INSERT INTO employee_deductions (employee_id, month, year, reason, amount, created_at, synced) VALUES (?, ?, ?, ?, ?, ?, 0)").run(employee_id, month, Number(year), reason.trim(), amountNum, now);
+	return db.prepare("SELECT * FROM employee_deductions WHERE id = ?").get(result.lastInsertRowid);
+});
+ipcMain.handle("deductions:remove", async (_event, { id }) => {
+	requireAdmin();
+	getDb().prepare("DELETE FROM employee_deductions WHERE id = ?").run(id);
+	return { ok: true };
 });
 //#endregion
 //#region electron/main.ts

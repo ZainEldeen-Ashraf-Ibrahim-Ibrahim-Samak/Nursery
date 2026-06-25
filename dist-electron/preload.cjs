@@ -142,6 +142,11 @@ electron.contextBridge.exposeInMainWorld("api", {
 			year
 		})
 	},
+	deductions: {
+		list: (args) => electron.ipcRenderer.invoke("deductions:list", args),
+		add: (args) => electron.ipcRenderer.invoke("deductions:add", args),
+		remove: (args) => electron.ipcRenderer.invoke("deductions:remove", args)
+	},
 	paymentMethods: {
 		list: () => electron.ipcRenderer.invoke("paymentMethods:list"),
 		add: (args) => electron.ipcRenderer.invoke("paymentMethods:add", args),
