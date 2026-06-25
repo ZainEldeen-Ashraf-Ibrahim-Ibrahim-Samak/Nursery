@@ -9,15 +9,18 @@ interface UpdaterStatus {
   progress?: { percent: number; bytesPerSecond: number; transferred: number; total: number }
 }
 
+const isNetworkError = (msg: string) =>
+  msg.includes('ERR_HTTP2') || msg.includes('net::') || msg.includes('ECONNRESET') || msg.includes('ETIMEDOUT')
+
 export const UpdateBanner: React.FC = () => {
   const { t } = useTranslation()
   const [status, setStatus] = useState<UpdaterStatus['event'] | 'idle'>('idle')
   const [percent, setPercent] = useState<number>(0)
   const [errorMsg, setErrorMsg] = useState<string>('')
+  const [networkError, setNetworkError] = useState<boolean>(false)
   const [isVisible, setIsVisible] = useState<boolean>(false)
 
   useEffect(() => {
-    // If window.api or window.api.updater is not defined (e.g. running in web browser rather than Electron), do nothing
     if (!window.api?.updater) return
 
     const unsubscribe = window.api.updater.onStatusChange((payload) => {
@@ -29,34 +32,46 @@ export const UpdateBanner: React.FC = () => {
       } else if (payload.event === 'update-available') {
         setIsVisible(true)
       } else if (payload.event === 'update-not-available') {
-        // Auto hide after a few seconds
         setTimeout(() => setIsVisible(false), 5000)
       } else if (payload.event === 'download-progress' && payload.progress) {
+        setNetworkError(false)
         setIsVisible(true)
         setPercent(Math.round(payload.progress.percent))
       } else if (payload.event === 'update-downloaded') {
         setIsVisible(true)
       } else if (payload.event === 'error') {
+        const msg = payload.error || 'Unknown update error'
         setIsVisible(true)
-        setErrorMsg(payload.error || 'Unknown update error')
-        setTimeout(() => setIsVisible(false), 8000)
+        setErrorMsg(msg)
+        setNetworkError(isNetworkError(msg))
+        // Only auto-hide generic errors; keep network errors visible so user can act
+        if (!isNetworkError(msg)) {
+          setTimeout(() => setIsVisible(false), 8000)
+        }
       }
     })
 
-    return () => {
-      unsubscribe()
-    }
+    return () => { unsubscribe() }
   }, [])
 
   const handleRestart = () => {
-    if (window.api?.updater) {
-      window.api.updater.install()
-    }
+    window.api?.updater?.install()
+  }
+
+  const handleManualDownload = () => {
+    window.api?.updater?.openReleasePage()
+  }
+
+  const handleRetry = () => {
+    setNetworkError(false)
+    setErrorMsg('')
+    setStatus('idle')
+    setIsVisible(false)
+    window.api?.updater?.check()
   }
 
   if (!isVisible || status === 'idle') return null
 
-  // Helper for background/border colors based on status
   let bgClass = 'bg-teal-50 border-teal-200 text-teal-800'
   let iconColor = 'text-teal-500'
   if (status === 'error') {
@@ -73,7 +88,6 @@ export const UpdateBanner: React.FC = () => {
   return (
     <div className={`border-b px-6 py-3 flex items-center justify-between shadow-sm transition-all duration-300 ${bgClass}`}>
       <div className="flex items-center gap-3 text-start">
-        {/* Animated Icon */}
         <div className={`p-1 rounded-full bg-white/80 shadow-sm ${iconColor}`}>
           {(status === 'checking-for-update' || status === 'download-progress') ? (
             <svg className="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
@@ -94,7 +108,7 @@ export const UpdateBanner: React.FC = () => {
             {status === 'update-not-available' && t('update_not_available')}
             {status === 'download-progress' && t('download_progress', { percent })}
             {status === 'update-downloaded' && t('update_downloaded')}
-            {status === 'error' && t('update_error', { error: errorMsg })}
+            {status === 'error' && (networkError ? t('update_error_network') : t('update_error', { error: errorMsg }))}
           </div>
           {status === 'download-progress' && (
             <div className="w-64 bg-slate-200 h-1.5 rounded-full mt-1.5 overflow-hidden">
@@ -104,14 +118,33 @@ export const UpdateBanner: React.FC = () => {
         </div>
       </div>
 
-      {status === 'update-downloaded' && (
-        <button
-          onClick={handleRestart}
-          className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold text-xs rounded-lg shadow-sm transition-all cursor-pointer focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
-        >
-          {t('restart_install')}
-        </button>
-      )}
+      <div className="flex items-center gap-2">
+        {status === 'error' && networkError && (
+          <>
+            <button
+              onClick={handleManualDownload}
+              className="px-4 py-1.5 bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white font-bold text-xs rounded-lg shadow-sm transition-all cursor-pointer focus:outline-none focus:ring-2 focus:ring-rose-500 focus:ring-offset-2"
+            >
+              {t('download_manually')}
+            </button>
+            <button
+              onClick={handleRetry}
+              className="px-4 py-1.5 bg-white hover:bg-rose-50 text-rose-700 border border-rose-300 font-bold text-xs rounded-lg shadow-sm transition-all cursor-pointer focus:outline-none focus:ring-2 focus:ring-rose-400 focus:ring-offset-2"
+            >
+              {t('retry_update')}
+            </button>
+          </>
+        )}
+
+        {status === 'update-downloaded' && (
+          <button
+            onClick={handleRestart}
+            className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold text-xs rounded-lg shadow-sm transition-all cursor-pointer focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
+          >
+            {t('restart_install')}
+          </button>
+        )}
+      </div>
     </div>
   )
 }

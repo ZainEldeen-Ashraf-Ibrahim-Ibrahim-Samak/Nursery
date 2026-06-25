@@ -1,6 +1,6 @@
 // MUST be first: loads .env into process.env before any module reads it.
 import { checkRequiredConfig } from './env.js'
-import { app, BrowserWindow, protocol, net, dialog, ipcMain } from 'electron'
+import { app, BrowserWindow, protocol, net, dialog, ipcMain, shell } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import path from 'node:path'
 import fs from 'node:fs'
@@ -268,6 +268,10 @@ function initAutoUpdater() {
   ipcMain.handle('updater:install', () => {
     autoUpdater.quitAndInstall()
     return { success: true }
+  })
+
+  ipcMain.handle('updater:open-release-page', () => {
+    shell.openExternal('https://github.com/ZainEldeen-Ashraf-Ibrahim-Ibrahim-Samak/Nursery/releases/latest')
   })
 }
 

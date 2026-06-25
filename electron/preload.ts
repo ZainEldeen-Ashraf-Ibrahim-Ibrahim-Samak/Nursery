@@ -123,6 +123,7 @@ const api = {
   updater: {
     check: () => ipcRenderer.invoke('updater:check'),
     install: () => ipcRenderer.invoke('updater:install'),
+    openReleasePage: () => ipcRenderer.invoke('updater:open-release-page'),
     onStatusChange: (
       callback: (payload: {
         event: 'checking-for-update' | 'update-available' | 'update-not-available' | 'error' | 'download-progress' | 'update-downloaded'
