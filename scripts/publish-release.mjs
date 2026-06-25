@@ -74,6 +74,15 @@ async function getOrCreateRelease() {
 
   if (create.status !== 201) throw new Error(`Failed to create release: ${JSON.stringify(create.body)}`)
   console.log(`✓ Created release ${TAG} (id: ${create.body.id})`)
+
+  // GitHub needs a few seconds to propagate a new release before assets can be uploaded
+  process.stdout.write('  Waiting for release to be ready')
+  for (let i = 0; i < 5; i++) {
+    await new Promise((r) => setTimeout(r, 1000))
+    process.stdout.write('.')
+  }
+  process.stdout.write('\n')
+
   return create.body
 }
 
@@ -141,13 +150,15 @@ function uploadAsset(releaseId, name, filePath) {
 
     req.on('error', reject)
 
-    // Stream the file in chunks so we can track progress
+    // Stream file in chunks with backpressure so large files don't overflow the socket
     const stream = fs.createReadStream(filePath)
     stream.on('data', (chunk) => {
       uploaded += chunk.length
       drawProgress(uploaded, size, name)
-      req.write(chunk)
+      const ok = req.write(chunk)
+      if (!ok) stream.pause()
     })
+    req.on('drain', () => stream.resume())
     stream.on('end', () => req.end())
     stream.on('error', reject)
   })
