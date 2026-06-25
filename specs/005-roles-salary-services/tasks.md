@@ -184,9 +184,9 @@
 
 - [X] T058 [P] Add contract tests for the 5 new IPC channel groups in `tests/contract/`: `roles.test.ts`, `salaryTypes.test.ts`, `serviceDefinitions.test.ts`, `sessions.test.ts`, `attendance.test.ts`
 - [X] T059 [P] Add unit tests for all 4 salary formula modes in `tests/unit/salaryFormula.test.ts`: fixed-monthly, per-session-fixed, per-session-pct, hybrid; include edge case of 0 sessions
-- [ ] T060 [P] Add unit test for pro-rate calculation in `tests/unit/proRate.test.ts`: enrolled on day of last session, enrolled on first session, enrolled on non-session day (zero sessions remaining)
-- [ ] T061 [P] Add unit test for migration 014 idempotency in `tests/unit/migration-role.test.ts`: run migration twice on the same DB; verify no duplicate `employee_roles` rows
-- [ ] T062 Bilingual review: search all new translation keys used in components → verify every key has a value in both `src/i18n/en.json` and `src/i18n/ar.json`; fix any missing entries
+- [X] T060 [P] Add unit test for pro-rate calculation in `tests/unit/proRate.test.ts`: enrolled on day of last session, enrolled on first session, enrolled on non-session day (zero sessions remaining)
+- [X] T061 [P] Add unit test for migration 014 idempotency in `tests/unit/migration-role.test.ts`: run migration twice on the same DB; verify no duplicate `employee_roles` rows
+- [X] T062 Bilingual review: search all new translation keys used in components → verify every key has a value in both `src/i18n/en.json` and `src/i18n/ar.json`; fix any missing entries
 - [ ] T063 Sync smoke test: run `sync:push` then `sync:pull` with all 7 new entity types having at least one record each; verify no duplicates and `synced=1` after round-trip
 - [ ] T064 Run full quickstart.md validation sequence: migrations, role migration, service seed, salary type creation, custom service, session creation, attendance recording, salary calculation with real payable session count
 

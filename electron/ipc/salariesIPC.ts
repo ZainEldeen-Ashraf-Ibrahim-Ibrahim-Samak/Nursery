@@ -46,7 +46,7 @@ ipcMain.handle('employees:add', async (_event, employeeInput) => {
     const result = db.prepare(`
       INSERT INTO employees (name, role, role_id, salary_type_override_id, base_salary, housing, transport, net_salary, is_active, created_at, updated_at, synced)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, 0)
-    `).run(roleText, roleText, role_id ?? null, salary_type_override_id, Number(base_salary), Number(housing), Number(transport), netSalary, now, now)
+    `).run(name, roleText, role_id ?? null, salary_type_override_id, Number(base_salary), Number(housing), Number(transport), netSalary, now, now)
 
     const createdId = Number(result.lastInsertRowid)
     const createdEmployee = db.prepare(`
