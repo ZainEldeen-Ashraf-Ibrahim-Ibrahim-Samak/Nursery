@@ -31,7 +31,7 @@ export default function ChildForm() {
   const isEdit = !!id
 
   const { addChild, updateChild, children, fetchChildren, error, clearError } = useChildrenStore()
-  const { services: serviceDefs, fetchServices } = useServiceDefinitionsStore()
+  const { fetchServices } = useServiceDefinitionsStore()
 
   // Form states
   const [formData, setFormData] = useState({
@@ -307,7 +307,7 @@ export default function ChildForm() {
           } catch (err) {
             // Offline / not configured — keep photo as data URL so it persists locally
             console.warn('Photo upload failed, storing locally:', err)
-            setPhotoNotice(isAr ? 'فشل رفع الصورة — تم الحفظ محلياً' : 'Photo upload failed — saved locally')
+            setPhotoNotice(i18n.language === 'ar' ? 'فشل رفع الصورة — تم الحفظ محلياً' : 'Photo upload failed — saved locally')
             photo_url = photo // store data URL as fallback
             photo_public_id = null
           }

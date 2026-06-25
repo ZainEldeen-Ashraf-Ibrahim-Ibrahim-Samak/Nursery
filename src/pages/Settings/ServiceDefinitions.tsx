@@ -81,7 +81,7 @@ export default function ServiceDefinitions() {
               <div className="space-y-1">
                 <div className="flex items-center gap-2">
                   <p className="font-semibold text-slate-800">{s.name}</p>
-                  <Badge variant={s.is_custom ? 'primary' : 'neutral'}>{s.is_custom ? (isAr ? 'مخصصة' : 'Custom') : (isAr ? 'افتراضية' : 'Built-in')}</Badge>
+                  <Badge variant={s.is_custom ? 'info' : 'neutral'}>{s.is_custom ? (isAr ? 'مخصصة' : 'Custom') : (isAr ? 'افتراضية' : 'Built-in')}</Badge>
                 </div>
                 <div className="flex gap-3 text-xs text-slate-500">
                   {s.price_monthly != null && <span>{isAr ? 'شهري:' : 'Monthly:'} {s.price_monthly} EGP</span>}

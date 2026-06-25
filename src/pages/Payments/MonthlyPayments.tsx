@@ -411,6 +411,7 @@ export default function MonthlyPayments() {
                         isSelected={selectedIds.includes(payment.id)}
                         onToggleSelect={() => handleToggleSelectRow(payment.id)}
                         onUpdate={handleUpdateRow}
+                        paymentMethods={paymentMethods}
                       />
                     ))
                   )}

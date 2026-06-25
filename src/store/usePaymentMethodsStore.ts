@@ -19,7 +19,7 @@ interface PaymentMethodsState {
   clearError: () => void
 }
 
-export const usePaymentMethodsStore = create<PaymentMethodsState>((set, get) => ({
+export const usePaymentMethodsStore = create<PaymentMethodsState>((set) => ({
   methods: [],
   isLoading: false,
   error: null,

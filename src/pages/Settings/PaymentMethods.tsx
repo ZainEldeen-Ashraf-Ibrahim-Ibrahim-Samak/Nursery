@@ -1,4 +1,3 @@
-import * as React from 'react'
 import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { usePaymentMethodsStore } from '../../store/usePaymentMethodsStore.js'
@@ -62,7 +61,7 @@ export default function PaymentMethods() {
         </p>
       </div>
 
-      {error && <Alert variant="error" onClose={clearError}>{error}</Alert>}
+      {error && <Alert variant="danger" onClose={clearError}>{error}</Alert>}
 
       {/* Add new method */}
       <div className="flex gap-2 items-center">

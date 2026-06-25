@@ -49,7 +49,7 @@ export default function ExpensesList() {
   // Add Item Modal
   const [isAddItemModalOpen, setIsAddItemModalOpen] = useState(false)
   const [newItemName, setNewItemName] = useState('')
-  const [newItemCategory, setNewItemCategory] = useState<'ثابت' | 'متغير'>('ثابت')
+  const [newItemCategory, setNewItemCategory] = useState<'ثابت' | 'متغير' | ''>('ثابت')
   const [formError, setFormError] = useState<string | null>(null)
 
   // Remove Item Confirm

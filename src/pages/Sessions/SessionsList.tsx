@@ -6,7 +6,6 @@ import { Button } from '../../components/ui/Button.js'
 import { Modal } from '../../components/ui/Modal.js'
 import { Input } from '../../components/ui/Input.js'
 import { Alert } from '../../components/ui/Alert.js'
-import { Badge } from '../../components/ui/Badge.js'
 import type { ScheduledSession, AttendanceRecord, AttendanceStatus } from '../../types/index.js'
 
 export default function SessionsList() {
@@ -100,12 +99,6 @@ export default function SessionsList() {
     if (s === 'absent_excused') return isAr ? 'غائب بعذر' : 'Excused'
     return isAr ? 'غائب' : 'Absent'
   }
-  const statusVariant = (s: AttendanceStatus): 'success' | 'warning' | 'danger' => {
-    if (s === 'attended') return 'success'
-    if (s === 'absent_excused') return 'warning'
-    return 'danger'
-  }
-
   return (
     <div className="p-6 space-y-6">
       <div className="flex justify-between items-center">
