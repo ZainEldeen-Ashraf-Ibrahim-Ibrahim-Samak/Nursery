@@ -26906,6 +26906,7 @@ ipcMain.handle("dashboard:get", async (_event, { month, year }) => {
 //#region electron/main.ts
 var __filename = fileURLToPath(import.meta.url);
 var __dirname = path.dirname(__filename);
+app.commandLine.appendSwitch("disable-http2");
 protocol.registerSchemesAsPrivileged([{
 	scheme: "asset",
 	privileges: {
@@ -27039,7 +27040,13 @@ function initAutoUpdater() {
 			info
 		});
 	});
+	let _updateRetried = false;
 	import_main.autoUpdater.on("error", (err) => {
+		if ((err.message?.includes("ERR_HTTP2") || err.message?.includes("net::")) && !_updateRetried) {
+			_updateRetried = true;
+			setTimeout(() => import_main.autoUpdater.downloadUpdate().catch(() => {}), 3e3);
+			return;
+		}
 		mainWindow?.webContents.send("updater:status", {
 			event: "error",
 			error: err.message
