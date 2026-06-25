@@ -510,6 +510,20 @@ const migrations: Migration[] = [
     }
   },
   {
+    name: '019_backfill_synced_columns',
+    up: (db) => {
+      // Tables created before the synced column was added (existing live DBs) need
+      // this column added retroactively. ALTER TABLE is idempotent via try/catch.
+      const addCol = (ddl: string) => { try { db.exec(ddl) } catch { /* already exists */ } }
+      addCol('ALTER TABLE salary_types ADD COLUMN synced INTEGER DEFAULT 0;')
+      addCol('ALTER TABLE employee_roles ADD COLUMN synced INTEGER DEFAULT 0;')
+      addCol('ALTER TABLE service_definitions ADD COLUMN synced INTEGER DEFAULT 0;')
+      addCol('ALTER TABLE scheduled_sessions ADD COLUMN synced INTEGER DEFAULT 0;')
+      addCol('ALTER TABLE session_teachers ADD COLUMN synced INTEGER DEFAULT 0;')
+      addCol('ALTER TABLE attendance_records ADD COLUMN synced INTEGER DEFAULT 0;')
+    }
+  },
+  {
     name: '013_session_monthly_setting',
     up: (db) => {
       db.exec(`
