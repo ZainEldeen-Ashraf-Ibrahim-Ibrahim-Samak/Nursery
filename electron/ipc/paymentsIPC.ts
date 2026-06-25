@@ -227,42 +227,46 @@ ipcMain.handle('payments:generate', async (_event, { month, year }) => {
   }
 })
 
-ipcMain.handle('payments:update', async (_event, { id, quantity, paid, notes }) => {
+ipcMain.handle('payments:update', async (_event, { id, quantity, paid, notes, payment_method_id }) => {
   try {
     checkAuth()
     const db = getDb()
-    
-    if (!id) {
-      throw new Error('Payment ID is required')
-    }
-    
-    // Load current payment record
-    const payment = db.prepare('SELECT * FROM payments WHERE id = ?').get(id) as Payment | undefined
-    if (!payment) {
-      throw new Error('سجل الدفع غير موجود / Payment record not found')
-    }
-    
+
+    if (!id) throw new Error('Payment ID is required')
+
+    const payment = db.prepare('SELECT * FROM payments WHERE id = ?').get(id) as any
+    if (!payment) throw new Error('سجل الدفع غير موجود / Payment record not found')
+
     const newQuantity = quantity !== undefined ? Number(quantity) : payment.quantity
     const newPaid = paid !== undefined ? Number(paid) : payment.paid
     const newNotes = notes !== undefined ? notes : payment.notes
-    
+    const newMethodId = payment_method_id !== undefined ? payment_method_id : payment.payment_method_id ?? null
+
+    let newMethodName: string | null = payment.payment_method_name ?? null
+    if (payment_method_id !== undefined) {
+      newMethodName = null
+      if (payment_method_id !== null) {
+        const m = db.prepare('SELECT name FROM payment_methods WHERE id = ?').get(payment_method_id) as any
+        newMethodName = m?.name ?? null
+      }
+    }
+
     const { total, balance, status } = calculatePayment(newQuantity, payment.price, newPaid)
     const now = new Date().toISOString()
-    
+
     db.prepare(`
-      UPDATE payments 
-      SET quantity = ?, paid = ?, total = ?, balance = ?, status = ?, notes = ?, updated_at = ?, synced = 0
+      UPDATE payments
+      SET quantity = ?, paid = ?, total = ?, balance = ?, status = ?, notes = ?,
+          payment_method_id = ?, payment_method_name = ?, updated_at = ?, synced = 0
       WHERE id = ?
-    `).run(newQuantity, newPaid, total, balance, status, newNotes, now, id)
-    
-    // Return updated record with joined child name
+    `).run(newQuantity, newPaid, total, balance, status, newNotes, newMethodId, newMethodName, now, id)
+
     const updated = db.prepare(`
       SELECT p.*, c.name as child_name
-      FROM payments p
-      JOIN children c ON p.child_id = c.id
+      FROM payments p JOIN children c ON p.child_id = c.id
       WHERE p.id = ?
     `).get(id) as Payment
-    
+
     return updated
   } catch (error: any) {
     console.error('Failed to update payment:', error)
@@ -270,35 +274,44 @@ ipcMain.handle('payments:update', async (_event, { id, quantity, paid, notes }) 
   }
 })
 
-ipcMain.handle('payments:bulkPay', async (_event, { ids }) => {
+ipcMain.handle('payments:bulkPay', async (_event, { ids, payment_method_id }) => {
   try {
     checkAuth()
     const db = getDb()
-    
+
     if (!ids || !Array.isArray(ids) || ids.length === 0) {
       throw new Error('Payment IDs array is required')
     }
-    
+
+    // Resolve method name once
+    let methodName: string | null = null
+    const methodId: number | null = payment_method_id ?? null
+    if (methodId !== null) {
+      const m = db.prepare('SELECT name FROM payment_methods WHERE id = ?').get(methodId) as any
+      methodName = m?.name ?? null
+    }
+
     const now = new Date().toISOString()
     let updatedCount = 0
-    
+
     const loadStmt = db.prepare('SELECT * FROM payments WHERE id = ?')
     const updateStmt = db.prepare(`
       UPDATE payments
-      SET paid = total, balance = 0, status = 'paid', updated_at = ?, synced = 0
+      SET paid = total, balance = 0, status = 'paid',
+          payment_method_id = ?, payment_method_name = ?, updated_at = ?, synced = 0
       WHERE id = ?
     `)
-    
+
     const transaction = db.transaction(() => {
       for (const id of ids) {
         const payment = loadStmt.get(id) as Payment | undefined
         if (payment) {
-          updateStmt.run(now, id)
+          updateStmt.run(methodId, methodName, now, id)
           updatedCount++
         }
       }
     })
-    
+
     transaction()
     return { updated: updatedCount }
   } catch (error: any) {

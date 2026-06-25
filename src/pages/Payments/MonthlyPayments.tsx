@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { usePaymentsStore } from '../../store/usePaymentsStore.js'
+import { usePaymentMethodsStore } from '../../store/usePaymentMethodsStore.js'
 import { useExport } from '../../hooks/useExport.js'
 import PaymentRow from './PaymentRow.js'
 import { Card } from '../../components/ui/Card.js'
@@ -44,6 +45,7 @@ const yearsList = [2024, 2025, 2026, 2027, 2028, 2029, 2030]
 
 export default function MonthlyPayments() {
   const { t, i18n } = useTranslation()
+  const isAr = i18n.language === 'ar'
   const { exportMonth } = useExport()
 
   const {
@@ -62,8 +64,13 @@ export default function MonthlyPayments() {
     clearError,
   } = usePaymentsStore()
 
+  const { methods: paymentMethods, fetchMethods: fetchPaymentMethods } = usePaymentMethodsStore()
+
+  useEffect(() => { fetchPaymentMethods() }, [])
+
   // Selection state
   const [selectedIds, setSelectedIds] = useState<number[]>([])
+  const [bulkMethodId, setBulkMethodId] = useState<number | ''>('')
   const [isExportingExcel, setIsExportingExcel] = useState(false)
   const [isExportingPdf, setIsExportingPdf] = useState(false)
 
@@ -120,16 +127,14 @@ export default function MonthlyPayments() {
   const handleBulkPay = async () => {
     if (selectedIds.length === 0) return
     setIsBulkPaying(true)
-    const count = await bulkPay(selectedIds)
+    const count = await bulkPay(selectedIds, bulkMethodId !== '' ? Number(bulkMethodId) : null)
     setIsBulkPaying(false)
-    if (count > 0) {
-      setSelectedIds([])
-    }
+    if (count > 0) setSelectedIds([])
   }
 
   // Update row
-  const handleUpdateRow = async (id: number, quantity: number, paid: number, notes: string) => {
-    return await updatePayment({ id, quantity, paid, notes })
+  const handleUpdateRow = async (id: number, quantity: number, paid: number, notes: string, payment_method_id?: number | null) => {
+    return await updatePayment({ id, quantity, paid, notes, payment_method_id })
   }
 
   // Generate payments for this period
@@ -286,18 +291,25 @@ export default function MonthlyPayments() {
             {selectedIds.length > 0 && (
               <div className="bg-primary/5 px-6 py-3 border-b border-slate-200 flex items-center justify-between transition-all">
                 <span className="text-sm font-semibold text-primary">
-                  {i18n.language === 'ar'
+                  {isAr
                     ? `تم تحديد ${selectedIds.length} من أصل ${payments.length} مطالبات`
                     : `Selected ${selectedIds.length} of ${payments.length} records`}
                 </span>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={handleBulkPay}
-                  isLoading={isBulkPaying}
-                >
-                  💵 {t('bulk_pay_selected')}
-                </Button>
+                <div className="flex items-center gap-2">
+                  <select
+                    value={bulkMethodId}
+                    onChange={(e) => setBulkMethodId(e.target.value === '' ? '' : Number(e.target.value))}
+                    className="text-sm border border-slate-300 rounded px-2 py-1 focus:outline-none focus:border-primary"
+                  >
+                    <option value="">{isAr ? '— طريقة الدفع —' : '— Payment method —'}</option>
+                    {paymentMethods.filter(m => m.is_active === 1).map(m => (
+                      <option key={m.id} value={m.id}>{m.name}</option>
+                    ))}
+                  </select>
+                  <Button variant="secondary" size="sm" onClick={handleBulkPay} isLoading={isBulkPaying}>
+                    💵 {t('bulk_pay_selected')}
+                  </Button>
+                </div>
               </div>
             )}
 
@@ -322,6 +334,7 @@ export default function MonthlyPayments() {
                     <th scope="col" className="px-4 py-3 text-start font-semibold">{i18n.language === 'ar' ? 'المدفوع' : 'Paid'}</th>
                     <th scope="col" className="px-4 py-3 text-start font-semibold">{i18n.language === 'ar' ? 'المتبقي' : 'Balance'}</th>
                     <th scope="col" className="px-4 py-3 text-start font-semibold">{t('status')}</th>
+                    <th scope="col" className="px-4 py-3 text-start font-semibold">{isAr ? 'طريقة الدفع' : 'Payment Method'}</th>
                     <th scope="col" className="px-4 py-3 text-start font-semibold">{t('notes')}</th>
                     <th scope="col" className="px-4 py-3 text-center font-semibold">{t('actions')}</th>
                   </tr>
@@ -353,7 +366,7 @@ export default function MonthlyPayments() {
                           <td className="px-4 py-3 font-bold text-slate-900 whitespace-nowrap text-start">
                             {childGroup.child_name}
                           </td>
-                          <td className="px-4 py-3 text-xs text-slate-500 font-semibold" colSpan={3}>
+                          <td className="px-4 py-3 text-xs text-slate-500 font-semibold" colSpan={4}>
                             {i18n.language === 'ar' ? `إجمالي الطفل (${childGroup.services.length} خدمات)` : `Child Total (${childGroup.services.length} services)`}
                           </td>
                           <td className="px-4 py-3 font-mono font-bold text-slate-800 whitespace-nowrap text-start">
@@ -385,6 +398,7 @@ export default function MonthlyPayments() {
                             isSelected={selectedIds.includes(payment.id)}
                             onToggleSelect={() => handleToggleSelectRow(payment.id)}
                             onUpdate={handleUpdateRow}
+                            paymentMethods={paymentMethods}
                           />
                         ))}
                       </React.Fragment>

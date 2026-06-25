@@ -23,8 +23,9 @@ interface PaymentsState {
     quantity?: number
     paid?: number
     notes?: string
+    payment_method_id?: number | null
   }) => Promise<Payment | null>
-  bulkPay: (ids: number[]) => Promise<number>
+  bulkPay: (ids: number[], payment_method_id?: number | null) => Promise<number>
   clearError: () => void
 }
 
@@ -100,10 +101,10 @@ export const usePaymentsStore = create<PaymentsState>((set, get) => ({
     }
   },
 
-  updatePayment: async ({ id, quantity, paid, notes }) => {
+  updatePayment: async ({ id, quantity, paid, notes, payment_method_id }) => {
     set({ isLoading: true, error: null })
     try {
-      const result = await window.api.payments.update({ id, quantity, paid, notes })
+      const result = await window.api.payments.update({ id, quantity, paid, notes, payment_method_id })
       
       // Update byChild as well (simplified approach: just call fetchPayments instead of manual recalcs)
       // Since we want to be fast, maybe we should just call fetchPayments anyway.
@@ -121,10 +122,10 @@ export const usePaymentsStore = create<PaymentsState>((set, get) => ({
     }
   },
 
-  bulkPay: async (ids) => {
+  bulkPay: async (ids, payment_method_id) => {
     set({ isLoading: true, error: null })
     try {
-      const result = await window.api.payments.bulkPay({ ids })
+      const result = await window.api.payments.bulkPay({ ids, payment_method_id })
       await get().fetchPayments()
       return result.updated
     } catch (err: any) {

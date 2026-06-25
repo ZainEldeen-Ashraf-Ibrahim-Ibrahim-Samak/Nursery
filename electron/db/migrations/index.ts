@@ -532,6 +532,30 @@ const migrations: Migration[] = [
     }
   },
   {
+    name: '021_payment_methods',
+    up: (db) => {
+      const addCol = (ddl: string) => { try { db.exec(ddl) } catch { /* already exists */ } }
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS payment_methods (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL UNIQUE,
+          is_active INTEGER DEFAULT 1,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          synced INTEGER DEFAULT 0
+        );
+      `)
+      // Seed default methods
+      const now = new Date().toISOString()
+      const defaults = ['كاش', 'تحويل بنكي', 'فيزا / ماستركارد', 'فودافون كاش']
+      for (const name of defaults) {
+        db.prepare(`INSERT OR IGNORE INTO payment_methods (name, is_active, created_at, updated_at, synced) VALUES (?, 1, ?, ?, 0)`).run(name, now, now)
+      }
+      addCol('ALTER TABLE payments ADD COLUMN payment_method_id INTEGER REFERENCES payment_methods(id);')
+      addCol('ALTER TABLE payments ADD COLUMN payment_method_name TEXT;')
+    }
+  },
+  {
     name: '013_session_monthly_setting',
     up: (db) => {
       db.exec(`

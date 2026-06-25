@@ -6,8 +6,9 @@ import SecuritySettings from './SecuritySettings.js'
 import UsersList from '../Users/UsersList.js'
 import SalaryTypes from './SalaryTypes.js'
 import ServiceDefinitions from './ServiceDefinitions.js'
+import PaymentMethods from './PaymentMethods.js'
 
-type TabType = 'pricing' | 'branding' | 'security' | 'users' | 'salary_types' | 'services'
+type TabType = 'pricing' | 'branding' | 'security' | 'users' | 'salary_types' | 'services' | 'payment_methods'
 
 interface TabDef {
   id: TabType
@@ -66,6 +67,14 @@ const TAB_DEFS: TabDef[] = [
     icon: '🏷️',
     descAr: 'تعريف الخدمات المتاحة وأسعارها',
     descEn: 'Define available services and pricing',
+  },
+  {
+    id: 'payment_methods',
+    labelAr: 'طرق الدفع',
+    labelEn: 'Payment Methods',
+    icon: '💳',
+    descAr: 'إدارة طرق الدفع المتاحة للمدفوعات',
+    descEn: 'Manage available payment methods',
   },
 ]
 
@@ -135,6 +144,7 @@ export default function Settings() {
         {activeTab === 'users' && <UsersList />}
         {activeTab === 'salary_types' && <SalaryTypes />}
         {activeTab === 'services' && <ServiceDefinitions />}
+        {activeTab === 'payment_methods' && <PaymentMethods />}
       </div>
     </div>
   )

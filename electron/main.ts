@@ -29,6 +29,7 @@ import './ipc/salaryTypesIPC.js'
 import './ipc/serviceDefinitionsIPC.js'
 import './ipc/sessionsIPC.js'
 import './ipc/attendanceIPC.js'
+import './ipc/paymentMethodsIPC.js'
 import { startAutoSync, getMongoUri } from './ipc/syncIPC.js'
 import { connectMongo } from './services/mongoSync.js'
 

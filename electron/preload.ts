@@ -162,6 +162,14 @@ const api = {
     getSummary: (employee_id: number, month: string, year: number) => ipcRenderer.invoke('attendance:getSummary', { employee_id, month, year }),
   },
 
+  // Payment Methods
+  paymentMethods: {
+    list: () => ipcRenderer.invoke('paymentMethods:list'),
+    add: (args: { name: string }) => ipcRenderer.invoke('paymentMethods:add', args),
+    update: (args: { id: number; patch: any }) => ipcRenderer.invoke('paymentMethods:update', args),
+    delete: (args: { id: number }) => ipcRenderer.invoke('paymentMethods:delete', args),
+  },
+
   // Auto-Updater
   updater: {
     check: () => ipcRenderer.invoke('updater:check'),

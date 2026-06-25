@@ -4,12 +4,14 @@ import { useTranslation } from 'react-i18next'
 import { Badge } from '../../components/ui/Badge.js'
 import { Button } from '../../components/ui/Button.js'
 import type { Payment } from '../../types/index.js'
+import type { PaymentMethod } from '../../store/usePaymentMethodsStore.js'
 
 interface PaymentRowProps {
   payment: Payment
   isSelected: boolean
   onToggleSelect: () => void
-  onUpdate: (id: number, quantity: number, paid: number, notes: string) => Promise<any>
+  onUpdate: (id: number, quantity: number, paid: number, notes: string, payment_method_id?: number | null) => Promise<any>
+  paymentMethods: PaymentMethod[]
 }
 
 export default function PaymentRow({
@@ -17,13 +19,16 @@ export default function PaymentRow({
   isSelected,
   onToggleSelect,
   onUpdate,
+  paymentMethods,
 }: PaymentRowProps) {
   const { t, i18n } = useTranslation()
+  const isAr = i18n.language === 'ar'
 
   // Local state for editing fields to prevent slow keystrokes
   const [localQty, setLocalQty] = useState(payment.quantity.toString())
   const [localPaid, setLocalPaid] = useState(payment.paid.toString())
   const [localNotes, setLocalNotes] = useState(payment.notes || '')
+  const [localMethodId, setLocalMethodId] = useState<number | null>(payment.payment_method_id ?? null)
   const [isSaving, setIsSaving] = useState(false)
 
   // Keep local state in sync when payment changes from database (e.g. bulk pay)
@@ -31,6 +36,7 @@ export default function PaymentRow({
     setLocalQty(payment.quantity.toString())
     setLocalPaid(payment.paid.toString())
     setLocalNotes(payment.notes || '')
+    setLocalMethodId(payment.payment_method_id ?? null)
   }, [payment])
 
   const handleBlur = async () => {
@@ -48,12 +54,20 @@ export default function PaymentRow({
     if (
       qtyNum !== payment.quantity ||
       paidNum !== payment.paid ||
-      localNotes !== (payment.notes || '')
+      localNotes !== (payment.notes || '') ||
+      localMethodId !== (payment.payment_method_id ?? null)
     ) {
       setIsSaving(true)
-      await onUpdate(payment.id, qtyNum, paidNum, localNotes)
+      await onUpdate(payment.id, qtyNum, paidNum, localNotes, localMethodId)
       setIsSaving(false)
     }
+  }
+
+  const handleMethodChange = async (newMethodId: number | null) => {
+    setLocalMethodId(newMethodId)
+    setIsSaving(true)
+    await onUpdate(payment.id, payment.quantity, payment.paid, localNotes, newMethodId)
+    setIsSaving(false)
   }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -65,7 +79,7 @@ export default function PaymentRow({
   // Handle pay in full click
   const handlePayFull = async () => {
     setIsSaving(true)
-    await onUpdate(payment.id, payment.quantity, payment.total, localNotes)
+    await onUpdate(payment.id, payment.quantity, payment.total, localNotes, localMethodId)
     setIsSaving(false)
   }
 
@@ -184,6 +198,21 @@ export default function PaymentRow({
         {getStatusBadge()}
       </td>
 
+      {/* Payment Method */}
+      <td className="px-4 py-3 whitespace-nowrap text-start w-40">
+        <select
+          value={localMethodId ?? ''}
+          onChange={(e) => handleMethodChange(e.target.value === '' ? null : Number(e.target.value))}
+          disabled={isSaving}
+          className="w-full text-sm border border-slate-200 rounded px-2 py-1 focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary bg-white"
+        >
+          <option value="">{isAr ? '— غير محدد —' : '— None —'}</option>
+          {paymentMethods.filter(m => m.is_active === 1 || m.id === localMethodId).map(m => (
+            <option key={m.id} value={m.id}>{m.name}</option>
+          ))}
+        </select>
+      </td>
+
       {/* Notes (Editable inline input) */}
       <td className="px-4 py-3 w-40 text-start">
         <input
@@ -193,7 +222,7 @@ export default function PaymentRow({
           onBlur={handleBlur}
           onKeyDown={handleKeyDown}
           disabled={isSaving}
-          placeholder={i18n.language === 'ar' ? 'ملاحظات...' : 'Notes...'}
+          placeholder={isAr ? 'ملاحظات...' : 'Notes...'}
           className="w-full px-2 py-1 text-sm border border-slate-200 rounded focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary placeholder-slate-300"
         />
       </td>

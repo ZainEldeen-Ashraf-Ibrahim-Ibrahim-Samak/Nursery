@@ -142,6 +142,8 @@ const paymentSchema = new Schema({
   balance: Number,
   status: String,
   notes: String,
+  payment_method_id: Number,
+  payment_method_name: String,
   created_at: String,
   updated_at: String,
   synced: Number
@@ -396,6 +398,20 @@ const attendanceConflictSchema = new Schema({
 export const AttendanceConflictModel: Model<any> = mongoose.models['sync_attendance_conflicts'] ||
   mongoose.model('sync_attendance_conflicts', attendanceConflictSchema)
 
+// ── Payment Methods ───────────────────────────────────────────────────────────
+
+const paymentMethodSchema = new Schema({
+  id: { type: Number, required: true, unique: true },
+  name: String,
+  is_active: Number,
+  created_at: String,
+  updated_at: String,
+  synced: Number
+}, sharedOptions)
+
+export const PaymentMethodModel: Model<any> = mongoose.models['sync_payment_methods'] ||
+  mongoose.model('sync_payment_methods', paymentMethodSchema)
+
 // ── Entity registry ───────────────────────────────────────────────────────────
 
 export const SYNC_ENTITIES: {
@@ -420,4 +436,5 @@ export const SYNC_ENTITIES: {
   { name: 'session_teachers', model: SessionTeacherModel, table: 'session_teachers' },
   { name: 'attendance_records', model: AttendanceRecordModel, table: 'attendance_records' },
   { name: 'attendance_conflicts', model: AttendanceConflictModel, table: 'attendance_conflicts' },
+  { name: 'payment_methods', model: PaymentMethodModel, table: 'payment_methods' },
 ]

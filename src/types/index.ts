@@ -84,6 +84,9 @@ export interface Payment {
   child_name?: string
   // Pro-rating audit (feature 005)
   prorated_calculated?: number | null
+  // Payment method (feature 005 extension)
+  payment_method_id?: number | null
+  payment_method_name?: string | null
 }
 
 export interface EmployeeRole {
