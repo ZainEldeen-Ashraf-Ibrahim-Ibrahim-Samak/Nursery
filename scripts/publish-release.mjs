@@ -9,6 +9,10 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import https from 'node:https'
+import { config } from 'dotenv'
+
+// Load .env so GH_TOKEN works without manually setting it in the terminal
+config()
 
 const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'))
 const VERSION = pkg.version
@@ -91,11 +95,24 @@ async function deleteExistingAsset(releaseId, name) {
   console.log(`  Replaced existing ${name}`)
 }
 
+function drawProgress(uploaded, total, name) {
+  const BAR = 40
+  const pct = total > 0 ? uploaded / total : 0
+  const filled = Math.round(pct * BAR)
+  const bar = '█'.repeat(filled) + '░'.repeat(BAR - filled)
+  const mb = (b) => (b / 1024 / 1024).toFixed(1)
+  const speed = ''
+  process.stdout.write(
+    `\r  [${bar}] ${Math.round(pct * 100)}%  ${mb(uploaded)}/${mb(total)} MB  ${name}   `
+  )
+}
+
 function uploadAsset(releaseId, name, filePath) {
   return new Promise((resolve, reject) => {
-    const data = fs.readFileSync(filePath)
-    const size = data.length
-    console.log(`  Uploading ${name} (${(size / 1024 / 1024).toFixed(1)} MB)...`)
+    const size = fs.statSync(filePath).size
+    console.log(`\n  Uploading ${name} (${(size / 1024 / 1024).toFixed(1)} MB)`)
+
+    let uploaded = 0
 
     const req = https.request({
       hostname: 'uploads.github.com',
@@ -112,17 +129,27 @@ function uploadAsset(releaseId, name, filePath) {
       let body = ''
       res.on('data', (c) => (body += c))
       res.on('end', () => {
+        process.stdout.write('\n')
         if (res.statusCode === 201) {
-          console.log(`  ✓ ${name} uploaded`)
+          console.log(`  ✓ ${name}`)
           resolve()
         } else {
           reject(new Error(`Upload failed (${res.statusCode}): ${body}`))
         }
       })
     })
+
     req.on('error', reject)
-    req.write(data)
-    req.end()
+
+    // Stream the file in chunks so we can track progress
+    const stream = fs.createReadStream(filePath)
+    stream.on('data', (chunk) => {
+      uploaded += chunk.length
+      drawProgress(uploaded, size, name)
+      req.write(chunk)
+    })
+    stream.on('end', () => req.end())
+    stream.on('error', reject)
   })
 }
 
