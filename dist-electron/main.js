@@ -386,7 +386,13 @@ var import_main$1 = /* @__PURE__ */ __toESM((/* @__PURE__ */ __commonJSMin(((exp
 */
 import_main$1.default.config();
 try {
-	if (app?.isPackaged) import_main$1.default.config({ path: path.join(path.dirname(app.getPath("exe")), ".env") });
+	if (app?.isPackaged) {
+		const exeDir = path.dirname(app.getPath("exe"));
+		const envPath = path.join(exeDir, ".env");
+		const envExamplePath = path.join(exeDir, ".env.example");
+		import_main$1.default.config({ path: envPath });
+		import_main$1.default.config({ path: envExamplePath });
+	}
 } catch {}
 var DEV_SECRET = "dev_insecure_jwt_secret_do_not_use_in_production";
 function isProduction() {
