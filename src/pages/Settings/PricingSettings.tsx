@@ -13,6 +13,7 @@ type SettingsKey =
   | 'hosting_monthly'
   | 'hosting_daily'
   | 'hosting_hourly'
+  | 'session_monthly'
   | 'session_hourly'
   | 'session_daily'
   | 'target_profit_pct'
@@ -30,6 +31,7 @@ const PRICING_KEYS: SettingsKey[] = [
   'hosting_monthly',
   'hosting_daily',
   'hosting_hourly',
+  'session_monthly',
   'session_hourly',
   'session_daily',
   'target_profit_pct',
@@ -45,6 +47,7 @@ const DEFAULT_SETTINGS: SettingsState = {
   hosting_monthly: '0',
   hosting_daily: '0',
   hosting_hourly: '0',
+  session_monthly: '0',
   session_hourly: '0',
   session_daily: '0',
   target_profit_pct: '0.20',
@@ -71,6 +74,7 @@ export default function PricingSettings() {
     hosting_monthly: isAr ? 'الإيواء / الشهر' : 'Hosting / Month',
     hosting_daily: isAr ? 'الإيواء / اليوم' : 'Hosting / Day',
     hosting_hourly: isAr ? 'الإيواء / الساعة' : 'Hosting / Hour',
+    session_monthly: isAr ? 'الجلسة / الشهر' : 'Session / Month',
     session_hourly: isAr ? 'الجلسة / الساعة' : 'Session / Hour',
     session_daily: isAr ? 'الجلسة / اليوم' : 'Session / Day',
     target_profit_pct: isAr ? 'نسبة الربح المستهدفة' : 'Target Profit Rate',
@@ -292,6 +296,14 @@ export default function PricingSettings() {
             <span className="text-primary">💬</span> {t('services.session')}
           </h2>
           <div className="space-y-3">
+            <Input
+              label={`${t('units.month')} (EGP)`}
+              type="number"
+              value={settings.session_monthly}
+              onChange={(e) => handleChange('session_monthly', e.target.value)}
+              min={0}
+              error={fieldErrors.session_monthly}
+            />
             <Input
               label={`${t('units.session')} / ${t('units.hour')} (EGP)`}
               type="number"

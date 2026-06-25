@@ -353,6 +353,15 @@ const migrations: Migration[] = [
     }
   },
   {
+    name: '013_session_monthly_setting',
+    up: (db) => {
+      db.exec(`
+        INSERT OR IGNORE INTO settings (key, value, updated_at, synced)
+        VALUES ('session_monthly', '1200', strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), 0);
+      `)
+    }
+  },
+  {
     name: '012_repush_payments_with_service_id',
     up: (db) => {
       // Payments pushed to MongoDB before service_id was added to the Mongoose schema

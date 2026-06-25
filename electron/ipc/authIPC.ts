@@ -136,10 +136,10 @@ ipcMain.handle('users:create', async (_event, { username, password, role, name }
     }
     
     const hashedPassword = await bcrypt.hash(password, 10)
-    
+
     const result = db.prepare(`
-      INSERT INTO users (username, password, role, name, is_active)
-      VALUES (?, ?, ?, ?, 1)
+      INSERT INTO users (username, password, role, name, is_active, updated_at, synced)
+      VALUES (?, ?, ?, ?, 1, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), 0)
     `).run(username, hashedPassword, role, name || null)
     
     return {
@@ -170,9 +170,9 @@ ipcMain.handle('users:update', async (_event, { id, patch }) => {
       throw new Error('المستخدم غير موجود / User not found')
     }
     
-    let query = 'UPDATE users SET '
+    let query = "UPDATE users SET updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), synced = 0, "
     const params: any[] = []
-    
+
     if (patch.username !== undefined) {
       // Check if username is taken
       const existing = db.prepare('SELECT id FROM users WHERE username = ? AND id != ?').get(patch.username, id)
@@ -239,7 +239,7 @@ ipcMain.handle('users:deactivate', async (_event, { id }) => {
       throw new Error('لا يمكن إلغاء تنشيط حسابك الحالي / Cannot deactivate your own active session')
     }
     
-    db.prepare('UPDATE users SET is_active = 0 WHERE id = ?').run(id)
+    db.prepare("UPDATE users SET is_active = 0, synced = 0, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?").run(id)
     return { ok: true }
   } catch (error: any) {
     console.error('Failed to deactivate user:', error)
@@ -257,6 +257,10 @@ ipcMain.handle('users:delete', async (_event, { id }) => {
       throw new Error('لا يمكن حذف حسابك الحالي / Cannot delete your own active session')
     }
     
+    db.prepare(`
+      INSERT OR IGNORE INTO tombstones (entity, record_id, created_at, synced)
+      VALUES ('users', ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), 0)
+    `).run(id)
     db.prepare('DELETE FROM users WHERE id = ?').run(id)
     return { ok: true }
   } catch (error: any) {

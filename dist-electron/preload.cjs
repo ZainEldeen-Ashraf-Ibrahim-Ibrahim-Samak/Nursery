@@ -86,6 +86,7 @@ electron.contextBridge.exposeInMainWorld("api", {
 	},
 	sync: {
 		connect: (args) => electron.ipcRenderer.invoke("sync:connect", args),
+		reconnect: () => electron.ipcRenderer.invoke("sync:reconnect"),
 		disconnect: () => electron.ipcRenderer.invoke("sync:disconnect"),
 		push: () => electron.ipcRenderer.invoke("sync:push"),
 		pull: () => electron.ipcRenderer.invoke("sync:pull"),

@@ -44,6 +44,7 @@ export async function seedDatabase(db: Db): Promise<void> {
       { key: 'hosting_daily', value: seedSetting('SEED_HOSTING_DAILY', '200') },
       { key: 'hosting_hourly', value: seedSetting('SEED_HOSTING_HOURLY', '40') },
 
+      { key: 'session_monthly', value: seedSetting('SEED_SESSION_MONTHLY', '1200') },
       { key: 'session_hourly', value: seedSetting('SEED_SESSION_HOURLY', '100') },
       { key: 'session_daily', value: seedSetting('SEED_SESSION_DAILY', '400') },
 

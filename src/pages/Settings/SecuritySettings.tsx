@@ -48,8 +48,10 @@ export default function SecuritySettings() {
     status,
     isConnecting,
     autoSyncEnabled,
+    autoSyncIntervalMinutes,
     fetchStatus,
     connect,
+    reconnect,
     disconnect,
     setAutoSync,
     error: syncError,
@@ -71,12 +73,20 @@ export default function SecuritySettings() {
   // ── MongoDB / auto-sync ──────────────────────────────────────────────────
   const [mongoUri, setMongoUri] = useState('')
   const [mongoUriError, setMongoUriError] = useState<string | undefined>()
+  const [showNewUriForm, setShowNewUriForm] = useState(false)
   const [autoInterval, setAutoInterval] = useState('30')
   const [autoIntervalError, setAutoIntervalError] = useState<string | undefined>()
 
   useEffect(() => {
     fetchStatus()
   }, [])
+
+  // Sync interval input when persisted value loads after restart
+  useEffect(() => {
+    if (autoSyncIntervalMinutes) {
+      setAutoInterval(String(autoSyncIntervalMinutes))
+    }
+  }, [autoSyncIntervalMinutes])
 
   const isConnected = status?.connected ?? false
 
@@ -255,41 +265,66 @@ export default function SecuritySettings() {
           </Alert>
         )}
 
-        <div className="flex items-end gap-3 max-w-2xl">
-          <div className="flex-1">
-            <Input
-              type="text"
-              label={isAr ? 'رابط الاتصال' : 'Connection URI'}
-              value={mongoUri}
-              onChange={(e) => {
-                setMongoUri(e.target.value)
-                if (mongoUriError) setMongoUriError(undefined)
-              }}
-              placeholder="mongodb+srv://user:pass@cluster.mongodb.net/db"
-              error={mongoUriError}
-              disabled={isConnecting || isConnected}
-            />
+        {isConnected ? (
+          <Button variant="secondary" onClick={disconnect}>
+            {isAr ? 'قطع الاتصال' : 'Disconnect'}
+          </Button>
+        ) : status?.uri && !showNewUriForm ? (
+          <div className="space-y-2">
+            <p className="text-xs text-slate-400">
+              {isAr ? 'رابط محفوظ:' : 'Saved URI:'}{' '}
+              <span className="font-mono">{status.uri}</span>
+            </p>
+            <div className="flex gap-2">
+              <Button
+                variant="primary"
+                onClick={() => reconnect()}
+                isLoading={isConnecting}
+                disabled={isConnecting}
+              >
+                {isAr ? 'إعادة الاتصال' : 'Reconnect'}
+              </Button>
+              <Button variant="outline" onClick={() => setShowNewUriForm(true)}>
+                {isAr ? 'تغيير الرابط' : 'Change URI'}
+              </Button>
+            </div>
           </div>
-          {isConnected ? (
-            <Button variant="secondary" onClick={disconnect}>
-              {isAr ? 'قطع الاتصال' : 'Disconnect'}
-            </Button>
-          ) : (
-            <Button
-              onClick={handleConnect}
-              isLoading={isConnecting}
-              disabled={isConnecting}
-              variant="primary"
-            >
-              {isAr ? 'اتصال' : 'Connect'}
-            </Button>
-          )}
-        </div>
-        {status?.uri && (
-          <p className="text-xs text-slate-400">
-            {isAr ? 'رابط محفوظ:' : 'Saved URI:'}{' '}
-            <span className="font-mono">{status.uri}</span>
-          </p>
+        ) : (
+          <div className="space-y-2">
+            {showNewUriForm && status?.uri && (
+              <button
+                type="button"
+                className="text-xs text-slate-400 hover:text-slate-600 underline"
+                onClick={() => { setShowNewUriForm(false); setMongoUri(''); setMongoUriError(undefined) }}
+              >
+                ← {isAr ? 'استخدام الرابط المحفوظ' : 'Use saved URI'}
+              </button>
+            )}
+            <div className="flex items-end gap-3 max-w-2xl">
+              <div className="flex-1">
+                <Input
+                  type="text"
+                  label={isAr ? 'رابط الاتصال' : 'Connection URI'}
+                  value={mongoUri}
+                  onChange={(e) => {
+                    setMongoUri(e.target.value)
+                    if (mongoUriError) setMongoUriError(undefined)
+                  }}
+                  placeholder="mongodb+srv://user:pass@cluster.mongodb.net/db"
+                  error={mongoUriError}
+                  disabled={isConnecting}
+                />
+              </div>
+              <Button
+                onClick={handleConnect}
+                isLoading={isConnecting}
+                disabled={isConnecting}
+                variant="primary"
+              >
+                {isAr ? 'اتصال' : 'Connect'}
+              </Button>
+            </div>
+          </div>
         )}
       </Card>
 
@@ -334,9 +369,14 @@ export default function SecuritySettings() {
             {autoSyncEnabled ? (isAr ? 'إيقاف المزامنة' : 'Disable Sync') : isAr ? 'تفعيل المزامنة' : 'Enable Sync'}
           </Button>
         </div>
-        {!isConnected && (
+        {!isConnected && !autoSyncEnabled && (
           <p className="text-xs text-amber-600 font-medium">
             ⚠ {isAr ? 'يجب الاتصال بقاعدة البيانات السحابية أولاً لتفعيل المزامنة.' : 'Connect to MongoDB first to enable auto-sync.'}
+          </p>
+        )}
+        {!isConnected && autoSyncEnabled && (
+          <p className="text-xs text-blue-600 font-medium">
+            ℹ {isAr ? 'المزامنة التلقائية مفعّلة — ستعمل تلقائياً عند إعادة الاتصال.' : 'Auto-sync is enabled — it will run automatically once reconnected.'}
           </p>
         )}
       </Card>

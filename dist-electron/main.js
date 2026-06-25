@@ -15221,6 +15221,15 @@ var migrations = [
 		}
 	},
 	{
+		name: "013_session_monthly_setting",
+		up: (db) => {
+			db.exec(`
+        INSERT OR IGNORE INTO settings (key, value, updated_at, synced)
+        VALUES ('session_monthly', '1200', strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), 0);
+      `);
+		}
+	},
+	{
 		name: "012_repush_payments_with_service_id",
 		up: (db) => {
 			db.exec(`
@@ -17188,6 +17197,10 @@ async function seedDatabase(db) {
 			{
 				key: "hosting_hourly",
 				value: seedSetting("SEED_HOSTING_HOURLY", "40")
+			},
+			{
+				key: "session_monthly",
+				value: seedSetting("SEED_SESSION_MONTHLY", "1200")
 			},
 			{
 				key: "session_hourly",
@@ -21374,8 +21387,8 @@ ipcMain.handle("users:create", async (_event, { username, password, role, name }
 		if (db.prepare("SELECT id FROM users WHERE username = ?").get(username)) throw new Error("اسم المستخدم موجود بالفعل / Username already exists");
 		const hashedPassword = await bcryptjs_default.hash(password, 10);
 		const result = db.prepare(`
-      INSERT INTO users (username, password, role, name, is_active)
-      VALUES (?, ?, ?, ?, 1)
+      INSERT INTO users (username, password, role, name, is_active, updated_at, synced)
+      VALUES (?, ?, ?, ?, 1, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), 0)
     `).run(username, hashedPassword, role, name || null);
 		return {
 			id: Number(result.lastInsertRowid),
@@ -21395,7 +21408,7 @@ ipcMain.handle("users:update", async (_event, { id, patch }) => {
 		const db = getDb();
 		if (!id || !patch) throw new Error("User ID and patch data are required");
 		if (!db.prepare("SELECT * FROM users WHERE id = ?").get(id)) throw new Error("المستخدم غير موجود / User not found");
-		let query = "UPDATE users SET ";
+		let query = "UPDATE users SET updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), synced = 0, ";
 		const params = [];
 		if (patch.username !== void 0) {
 			if (db.prepare("SELECT id FROM users WHERE username = ? AND id != ?").get(patch.username, id)) throw new Error("اسم المستخدم موجود بالفعل / Username already exists");
@@ -21438,7 +21451,7 @@ ipcMain.handle("users:deactivate", async (_event, { id }) => {
 		const db = getDb();
 		const currentUser = getCurrentUser();
 		if (currentUser && currentUser.id === id) throw new Error("لا يمكن إلغاء تنشيط حسابك الحالي / Cannot deactivate your own active session");
-		db.prepare("UPDATE users SET is_active = 0 WHERE id = ?").run(id);
+		db.prepare("UPDATE users SET is_active = 0, synced = 0, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?").run(id);
 		return { ok: true };
 	} catch (error) {
 		console.error("Failed to deactivate user:", error);
@@ -21451,6 +21464,10 @@ ipcMain.handle("users:delete", async (_event, { id }) => {
 		const db = getDb();
 		const currentUser = getCurrentUser();
 		if (currentUser && currentUser.id === id) throw new Error("لا يمكن حذف حسابك الحالي / Cannot delete your own active session");
+		db.prepare(`
+      INSERT OR IGNORE INTO tombstones (entity, record_id, created_at, synced)
+      VALUES ('users', ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), 0)
+    `).run(id);
 		db.prepare("DELETE FROM users WHERE id = ?").run(id);
 		return { ok: true };
 	} catch (error) {
@@ -26445,6 +26462,23 @@ ipcMain.handle("sync:connect", async (_event, { uri }) => {
 	}
 });
 /**
+* sync:reconnect — Reconnect using the URI already saved in settings / env.
+* Admin only.
+*/
+ipcMain.handle("sync:reconnect", async () => {
+	try {
+		requireAdmin();
+		const mongoUri = getMongoUri();
+		if (!mongoUri) throw new Error("No MongoDB URI configured. Enter a URI first.");
+		await connectMongo(mongoUri);
+		logSync("reconnect", "connection", "mongodb", "success");
+		return { connected: true };
+	} catch (error) {
+		logSync("reconnect", "connection", "mongodb", "error", error.message);
+		throw new Error(error.message || "Failed to reconnect to MongoDB");
+	}
+});
+/**
 * sync:disconnect — Disconnect from MongoDB.
 * Admin only.
 */
@@ -26937,6 +26971,23 @@ app.whenReady().then(async () => {
 		if (!currentLogo || !currentLogo.value) db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('brand_logo_path', 'branding/logo.png')").run();
 		const currentIcon = db.prepare("SELECT value FROM settings WHERE key = 'brand_icon_path'").get();
 		if (!currentIcon || !currentIcon.value) db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('brand_icon_path', 'branding/icon.png')").run();
+		const envMongoUri = process.env.MONGO_URI?.trim();
+		if (envMongoUri) {
+			const existingUri = db.prepare("SELECT value FROM settings WHERE key = 'sync_mongo_uri'").get();
+			if (!existingUri) {
+				db.prepare(`
+          INSERT INTO settings (key, value, updated_at, synced)
+          VALUES ('sync_mongo_uri', ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), 0)
+        `).run(envMongoUri);
+				console.log("[startup] Seeded MONGO_URI from env into settings.");
+			} else if (!existingUri.value) {
+				db.prepare(`
+          UPDATE settings SET value = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), synced = 0
+          WHERE key = 'sync_mongo_uri'
+        `).run(envMongoUri);
+				console.log("[startup] Updated empty sync_mongo_uri from env.");
+			}
+		}
 		const mongoUri = getMongoUri();
 		if (mongoUri) {
 			console.log("Connecting to MongoDB on startup...");

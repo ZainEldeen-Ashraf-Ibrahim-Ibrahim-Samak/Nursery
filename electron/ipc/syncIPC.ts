@@ -86,6 +86,24 @@ ipcMain.handle('sync:connect', async (_event, { uri }) => {
 })
 
 /**
+ * sync:reconnect — Reconnect using the URI already saved in settings / env.
+ * Admin only.
+ */
+ipcMain.handle('sync:reconnect', async () => {
+  try {
+    requireAdmin()
+    const mongoUri = getMongoUri()
+    if (!mongoUri) throw new Error('No MongoDB URI configured. Enter a URI first.')
+    await connectMongo(mongoUri)
+    logSync('reconnect', 'connection', 'mongodb', 'success')
+    return { connected: true }
+  } catch (error: any) {
+    logSync('reconnect', 'connection', 'mongodb', 'error', error.message)
+    throw new Error(error.message || 'Failed to reconnect to MongoDB')
+  }
+})
+
+/**
  * sync:disconnect — Disconnect from MongoDB.
  * Admin only.
  */

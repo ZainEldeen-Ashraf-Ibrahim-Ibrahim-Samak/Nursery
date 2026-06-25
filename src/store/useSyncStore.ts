@@ -2,10 +2,15 @@ import { create } from 'zustand'
 
 interface PendingCounts {
   children: number
+  child_services: number
   payments: number
   employees: number
   salary_payments: number
   expenses: number
+  users: number
+  settings: number
+  imported_snapshots: number
+  tombstones: number
 }
 
 interface SyncStatus {
@@ -40,6 +45,7 @@ interface SyncState {
 
   fetchStatus: () => Promise<void>
   connect: (uri: string) => Promise<boolean>
+  reconnect: () => Promise<boolean>
   disconnect: () => Promise<void>
   push: () => Promise<void>
   pull: () => Promise<void>
@@ -90,6 +96,19 @@ export const useSyncStore = create<SyncState>((set, get) => ({
     set({ isConnecting: true, error: null })
     try {
       await window.api.sync.connect({ uri })
+      await get().fetchStatus()
+      set({ isConnecting: false })
+      return true
+    } catch (err: any) {
+      set({ error: handleError(err), isConnecting: false })
+      return false
+    }
+  },
+
+  reconnect: async () => {
+    set({ isConnecting: true, error: null })
+    try {
+      await window.api.sync.reconnect()
       await get().fetchStatus()
       set({ isConnecting: false })
       return true

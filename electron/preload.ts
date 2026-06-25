@@ -110,6 +110,7 @@ const api = {
   // Sync
   sync: {
     connect: (args: { uri: string }) => ipcRenderer.invoke('sync:connect', args),
+    reconnect: () => ipcRenderer.invoke('sync:reconnect'),
     disconnect: () => ipcRenderer.invoke('sync:disconnect'),
     push: () => ipcRenderer.invoke('sync:push'),
     pull: () => ipcRenderer.invoke('sync:pull'),

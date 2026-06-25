@@ -3,8 +3,9 @@ import { useTranslation } from 'react-i18next'
 import PricingSettings from './PricingSettings.js'
 import BrandingSettings from './BrandingSettings.js'
 import SecuritySettings from './SecuritySettings.js'
+import UsersList from '../Users/UsersList.js'
 
-type TabType = 'pricing' | 'branding' | 'security'
+type TabType = 'pricing' | 'branding' | 'security' | 'users'
 
 interface TabDef {
   id: TabType
@@ -39,6 +40,14 @@ const TAB_DEFS: TabDef[] = [
     icon: '🔒',
     descAr: 'كلمة المرور والمزامنة السحابية',
     descEn: 'Password and cloud sync',
+  },
+  {
+    id: 'users',
+    labelAr: 'المستخدمون',
+    labelEn: 'User Accounts',
+    icon: '👥',
+    descAr: 'إدارة حسابات المسؤولين والموظفين',
+    descEn: 'Manage admin and employee accounts',
   },
 ]
 
@@ -105,6 +114,7 @@ export default function Settings() {
         {activeTab === 'pricing' && <PricingSettings />}
         {activeTab === 'branding' && <BrandingSettings />}
         {activeTab === 'security' && <SecuritySettings />}
+        {activeTab === 'users' && <UsersList />}
       </div>
     </div>
   )

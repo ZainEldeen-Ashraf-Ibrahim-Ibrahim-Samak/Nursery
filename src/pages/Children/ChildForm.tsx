@@ -172,6 +172,7 @@ export default function ChildForm() {
           if (row.unit === 'يوم') priceKey = 'hosting_daily'
           if (row.unit === 'ساعة') priceKey = 'hosting_hourly'
         } else if (row.service === 'جلسة') {
+          if (row.unit === 'شهر') priceKey = 'session_monthly'
           if (row.unit === 'جلسة' || row.unit === 'ساعة') priceKey = 'session_hourly'
           if (row.unit === 'يوم') priceKey = 'session_daily'
         }
