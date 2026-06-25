@@ -19,7 +19,12 @@ import { app } from 'electron'
 dotenv.config()
 try {
   if (app?.isPackaged) {
-    dotenv.config({ path: path.join(path.dirname(app.getPath('exe')), '.env') })
+    const exeDir = path.dirname(app.getPath('exe'))
+    const envPath = path.join(exeDir, '.env')
+    const envExamplePath = path.join(exeDir, '.env.example')
+    // Load .env if present; fall back to .env.example so the app works on first install.
+    dotenv.config({ path: envPath })
+    dotenv.config({ path: envExamplePath })
   }
 } catch {
   // app/exe path unavailable (e.g. test runner) — ignore.

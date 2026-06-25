@@ -16,13 +16,15 @@ files:
   # Bundled inside the asar so the existing `path.join(__dirname, '../assets/...')` resolves.
   - assets/branding/**/*
   - assets/default-branding/**/*
+
 extraFiles:
-  - from: .env
-    to: .env
+  - from: .env.example
+    to: .env.example
 
 win:
   target: nsis
   icon: assets/branding/icon.ico
+  executableName: NurseryManagementSystem
 mac:
   target: dmg
   icon: assets/branding/icon.icns
