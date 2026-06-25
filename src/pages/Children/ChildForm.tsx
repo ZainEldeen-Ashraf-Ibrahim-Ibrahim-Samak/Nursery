@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { useChildrenStore } from '../../store/useChildrenStore.js'
+import { useServiceDefinitionsStore } from '../../store/useServiceDefinitionsStore.js'
 import { Button } from '../../components/ui/Button.js'
 import { Input } from '../../components/ui/Input.js'
 import { Select } from '../../components/ui/Select.js'
@@ -30,6 +31,7 @@ export default function ChildForm() {
   const isEdit = !!id
 
   const { addChild, updateChild, children, fetchChildren, error, clearError } = useChildrenStore()
+  const { services: serviceDefs, fetchServices } = useServiceDefinitionsStore()
 
   // Form states
   const [formData, setFormData] = useState({
@@ -58,13 +60,14 @@ export default function ChildForm() {
   const [isLoadingChild, setIsLoadingChild] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [photoNotice, setPhotoNotice] = useState<string | null>(null)
+  const [proRateResult, setProRateResult] = useState<{ remaining_sessions: number; total_sessions: number; prorated_amount: number } | null>(null)
 
   // Derived: sessions and computed fee (baseline is fixed at 8 per clarification)
   const sessionsBaseline = 8
   const totalSessions = sessionsBaseline + (Number(formData.extra_lessons) || 0)
   const monthlyFee = totalSessions * (Number(formData.session_price) || 0)
 
-  // Fetch Settings (pricing defaults)
+  // Fetch Settings (pricing defaults) and service definitions
   useEffect(() => {
     async function loadSettings() {
       try {
@@ -75,7 +78,20 @@ export default function ChildForm() {
       }
     }
     loadSettings()
+    fetchServices()
   }, [])
+
+  // Pro-rate calculation when reg_date or services change (new children only)
+  useEffect(() => {
+    if (isEdit) return
+    const servicePrice = formData.services[0]?.price
+    if (!formData.reg_date || !servicePrice) { setProRateResult(null); return }
+    const regDate = new Date(formData.reg_date)
+    if (regDate.getDate() === 1) { setProRateResult(null); return }
+    window.api.sessions.proRateCalc({ reg_date: formData.reg_date, price_per_session: servicePrice })
+      .then((r: any) => setProRateResult(r))
+      .catch(() => setProRateResult(null))
+  }, [formData.reg_date, formData.services, isEdit])
 
   // Load the teacher options (from the Employees list, feature 004)
   useEffect(() => {
@@ -162,23 +178,35 @@ export default function ChildForm() {
 
       // Auto-price if service or unit changes
       if (field === 'service' || field === 'unit') {
-        let priceKey = ''
-        if (row.service === 'حضانة') {
-          if (row.unit === 'شهر') priceKey = 'nursery_monthly'
-          if (row.unit === 'يوم') priceKey = 'nursery_daily'
-          if (row.unit === 'ساعة') priceKey = 'nursery_hourly'
-        } else if (row.service === 'استضافة') {
-          if (row.unit === 'شهر') priceKey = 'hosting_monthly'
-          if (row.unit === 'يوم') priceKey = 'hosting_daily'
-          if (row.unit === 'ساعة') priceKey = 'hosting_hourly'
-        } else if (row.service === 'جلسة') {
-          if (row.unit === 'شهر') priceKey = 'session_monthly'
-          if (row.unit === 'جلسة' || row.unit === 'ساعة') priceKey = 'session_hourly'
-          if (row.unit === 'يوم') priceKey = 'session_daily'
+        // First try service_definitions table (dynamic, admin-managed)
+        const currentServiceDefs = useServiceDefinitionsStore.getState().services
+        const svcDef = currentServiceDefs.find((d) =>
+          d.name === row.service || d.name.toLowerCase() === (row.service as string).toLowerCase()
+        )
+        let resolved = 0
+        if (svcDef) {
+          if (row.unit === 'شهر' && svcDef.price_monthly != null) resolved = svcDef.price_monthly
+          else if (row.unit === 'يوم' && svcDef.price_daily != null) resolved = svcDef.price_daily
+          else if ((row.unit === 'ساعة' || row.unit === 'جلسة') && svcDef.price_hourly != null) resolved = svcDef.price_hourly
+        } else {
+          // Fallback: legacy settings keys
+          let priceKey = ''
+          if (row.service === 'حضانة') {
+            if (row.unit === 'شهر') priceKey = 'nursery_monthly'
+            if (row.unit === 'يوم') priceKey = 'nursery_daily'
+            if (row.unit === 'ساعة') priceKey = 'nursery_hourly'
+          } else if (row.service === 'استضافة') {
+            if (row.unit === 'شهر') priceKey = 'hosting_monthly'
+            if (row.unit === 'يوم') priceKey = 'hosting_daily'
+            if (row.unit === 'ساعة') priceKey = 'hosting_hourly'
+          } else if (row.service === 'جلسة') {
+            if (row.unit === 'شهر') priceKey = 'session_monthly'
+            if (row.unit === 'جلسة' || row.unit === 'ساعة') priceKey = 'session_hourly'
+            if (row.unit === 'يوم') priceKey = 'session_daily'
+          }
+          if (priceKey && settings[priceKey] !== undefined) resolved = Number(settings[priceKey])
         }
-        if (priceKey && settings[priceKey] !== undefined) {
-          row.price = Number(settings[priceKey])
-        }
+        if (resolved > 0) row.price = resolved
       }
 
       newServices[index] = row
@@ -277,10 +305,10 @@ export default function ChildForm() {
             photo_url = uploaded.url
             photo_public_id = uploaded.publicId
           } catch (err) {
-            // Offline / not configured — save the child without a photo (FR-004a).
-            console.warn('Photo upload failed:', err)
-            setPhotoNotice(t('photo_upload_failed'))
-            photo_url = null
+            // Offline / not configured — keep photo as data URL so it persists locally
+            console.warn('Photo upload failed, storing locally:', err)
+            setPhotoNotice(isAr ? 'فشل رفع الصورة — تم الحفظ محلياً' : 'Photo upload failed — saved locally')
+            photo_url = photo // store data URL as fallback
             photo_public_id = null
           }
         } else {
@@ -449,6 +477,24 @@ export default function ChildForm() {
               />
             </div>
           </div>
+
+          {/* Pro-rated first payment notice (US6) */}
+          {!isEdit && proRateResult && (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm">
+              <p className="font-semibold text-amber-800 mb-1">
+                {i18n.language === 'ar' ? 'دفعة أول شهر (محسوبة تناسبياً)' : 'First Month — Pro-rated Payment'}
+              </p>
+              <p className="text-amber-700">
+                {i18n.language === 'ar'
+                  ? `الجلسات المتبقية في الشهر: ${proRateResult.remaining_sessions} من ${proRateResult.total_sessions}`
+                  : `Remaining sessions this month: ${proRateResult.remaining_sessions} of ${proRateResult.total_sessions}`}
+              </p>
+              <p className="text-amber-900 font-bold mt-1">
+                {i18n.language === 'ar' ? 'المبلغ المقترح: ' : 'Suggested amount: '}
+                {new Intl.NumberFormat(i18n.language === 'ar' ? 'ar-EG' : 'en-US', { style: 'currency', currency: 'EGP', maximumFractionDigits: 0 }).format(proRateResult.prorated_amount)}
+              </p>
+            </div>
+          )}
 
           {/* Teacher, lesson days & fee (feature 004) */}
           <div className="space-y-4 border-t border-slate-100 pt-6">

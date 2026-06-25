@@ -119,6 +119,49 @@ const api = {
       ipcRenderer.invoke('sync:auto-sync', args),
   },
 
+  // Roles
+  roles: {
+    list: () => ipcRenderer.invoke('roles:list'),
+    add: (args: { name: string }) => ipcRenderer.invoke('roles:add', args),
+    update: (args: { id: number; patch: { name?: string; salary_type_id?: number | null } }) => ipcRenderer.invoke('roles:update', args),
+    delete: (args: { id: number }) => ipcRenderer.invoke('roles:delete', args),
+  },
+
+  // Salary Types
+  salaryTypes: {
+    list: () => ipcRenderer.invoke('salaryTypes:list'),
+    add: (args: any) => ipcRenderer.invoke('salaryTypes:add', args),
+    update: (args: { id: number; patch: any }) => ipcRenderer.invoke('salaryTypes:update', args),
+    delete: (args: { id: number }) => ipcRenderer.invoke('salaryTypes:delete', args),
+  },
+
+  // Service Definitions
+  serviceDefinitions: {
+    list: () => ipcRenderer.invoke('serviceDefinitions:list'),
+    add: (args: any) => ipcRenderer.invoke('serviceDefinitions:add', args),
+    update: (args: { id: number; patch: any }) => ipcRenderer.invoke('serviceDefinitions:update', args),
+    delete: (args: { id: number }) => ipcRenderer.invoke('serviceDefinitions:delete', args),
+  },
+
+  // Sessions
+  sessions: {
+    list: (args?: { from?: string; to?: string }) => ipcRenderer.invoke('sessions:list', args),
+    add: (args: any) => ipcRenderer.invoke('sessions:add', args),
+    update: (id: number, patch: any) => ipcRenderer.invoke('sessions:update', { id, patch }),
+    delete: (id: number) => ipcRenderer.invoke('sessions:delete', { id }),
+    assignTeachers: (session_id: number, employee_ids: number[]) => ipcRenderer.invoke('sessions:assignTeachers', { session_id, employee_ids }),
+    proRateCalc: (args: { reg_date: string; price_per_session: number }) => ipcRenderer.invoke('sessions:proRateCalc', args),
+  },
+
+  // Attendance
+  attendance: {
+    getSheet: (sessionId: number) => ipcRenderer.invoke('attendance:getSheet', { session_id: sessionId }),
+    record: (sessionId: number, records: any[]) => ipcRenderer.invoke('attendance:record', { session_id: sessionId, records }),
+    getConflicts: () => ipcRenderer.invoke('attendance:getConflicts'),
+    resolveConflict: (conflict_id: number, final_status: string) => ipcRenderer.invoke('attendance:resolveConflict', { conflict_id, final_status }),
+    getSummary: (employee_id: number, month: string, year: number) => ipcRenderer.invoke('attendance:getSummary', { employee_id, month, year }),
+  },
+
   // Auto-Updater
   updater: {
     check: () => ipcRenderer.invoke('updater:check'),

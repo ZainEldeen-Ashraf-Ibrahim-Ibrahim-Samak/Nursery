@@ -82,12 +82,108 @@ export interface Payment {
   
   // Optional join field for UI
   child_name?: string
+  // Pro-rating audit (feature 005)
+  prorated_calculated?: number | null
+}
+
+export interface EmployeeRole {
+  id: number
+  name: string
+  salary_type_id: number | null
+  created_at: string
+  updated_at: string
+  synced: number
+}
+
+export type SalaryMode = 'fixed_monthly' | 'per_session_fixed' | 'per_session_pct' | 'hybrid'
+
+export interface SalaryType {
+  id: number
+  name: string
+  mode: SalaryMode
+  monthly_rate: number | null
+  session_rate: number | null
+  session_pct: number | null
+  created_at: string
+  updated_at: string
+  synced: number
+}
+
+export interface ServiceDefinition {
+  id: number
+  name: string
+  is_custom: number // 0 = built-in, 1 = custom
+  price_monthly: number | null
+  price_daily: number | null
+  price_hourly: number | null
+  created_at: string
+  updated_at: string
+  synced: number
+}
+
+export interface ScheduledSession {
+  id: number
+  session_date: string
+  service_id: number | null
+  service_name?: string | null
+  group_name: string | null
+  notes: string | null
+  teachers?: Teacher[]
+  created_at: string
+  updated_at: string
+  synced: number
+}
+
+export interface SessionTeacher {
+  id: number
+  session_id: number
+  employee_id: number
+  synced: number
+}
+
+export type AttendanceStatus = 'attended' | 'absent_excused' | 'absent_unexcused'
+
+export interface AttendanceRecord {
+  id: number
+  session_id: number
+  child_id: number
+  child_name?: string
+  status: AttendanceStatus
+  excuse_notes: string | null
+  recorded_by: number | null
+  recorded_at: string
+  updated_at: string
+  synced: number
+}
+
+export interface AttendanceConflict {
+  id: number
+  attendance_record_id: number
+  overwritten_status: AttendanceStatus
+  overwritten_by: string | null
+  overwritten_at: string
+  winning_status: AttendanceStatus
+  winning_by: string | null
+  winning_at: string
+  reviewed: number
+  created_at: string
+}
+
+export interface AttendanceSummary {
+  total_sessions: number
+  payable_sessions: number
+  excused_absences: number
+  unexcused_absences: number
+  breakdown: { status: string; cnt: number }[]
 }
 
 export interface Employee {
   id: number
   name: string
   role: string
+  role_id?: number | null
+  role_name?: string | null
+  salary_type_override_id?: number | null
   base_salary: number
   housing: number
   transport: number

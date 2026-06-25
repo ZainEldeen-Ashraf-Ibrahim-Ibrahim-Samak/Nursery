@@ -4,8 +4,10 @@ import PricingSettings from './PricingSettings.js'
 import BrandingSettings from './BrandingSettings.js'
 import SecuritySettings from './SecuritySettings.js'
 import UsersList from '../Users/UsersList.js'
+import SalaryTypes from './SalaryTypes.js'
+import ServiceDefinitions from './ServiceDefinitions.js'
 
-type TabType = 'pricing' | 'branding' | 'security' | 'users'
+type TabType = 'pricing' | 'branding' | 'security' | 'users' | 'salary_types' | 'services'
 
 interface TabDef {
   id: TabType
@@ -48,6 +50,22 @@ const TAB_DEFS: TabDef[] = [
     icon: '👥',
     descAr: 'إدارة حسابات المسؤولين والموظفين',
     descEn: 'Manage admin and employee accounts',
+  },
+  {
+    id: 'salary_types',
+    labelAr: 'أنواع الرواتب',
+    labelEn: 'Salary Types',
+    icon: '📊',
+    descAr: 'تعريف أنواع الرواتب وتعيينها للوظائف',
+    descEn: 'Define salary types and assign to roles',
+  },
+  {
+    id: 'services',
+    labelAr: 'الخدمات',
+    labelEn: 'Services',
+    icon: '🏷️',
+    descAr: 'تعريف الخدمات المتاحة وأسعارها',
+    descEn: 'Define available services and pricing',
   },
 ]
 
@@ -115,6 +133,8 @@ export default function Settings() {
         {activeTab === 'branding' && <BrandingSettings />}
         {activeTab === 'security' && <SecuritySettings />}
         {activeTab === 'users' && <UsersList />}
+        {activeTab === 'salary_types' && <SalaryTypes />}
+        {activeTab === 'services' && <ServiceDefinitions />}
       </div>
     </div>
   )

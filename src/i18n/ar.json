@@ -164,6 +164,65 @@
       "thu": "الخميس",
       "fri": "الجمعة",
       "sat": "السبت"
-    }
+    },
+
+    "role_dropdown_label": "الوظيفة",
+    "add_new_role": "+ وظيفة جديدة",
+    "new_role_name_placeholder": "اسم الوظيفة الجديدة",
+    "delete_role_confirm": "هل أنت متأكد من حذف هذه الوظيفة؟ يجب إعادة تعيين الموظفين المرتبطين بها أولاً.",
+    "role_no_salary_type_warning": "هذه الوظيفة لا تمتلك نوع راتب. يرجى تعيينه من الإعدادات.",
+    "roles_without_salary_type_warning": "تحذير: الوظائف التالية لا تملك نوع راتب: {{roles}}. يرجى إعدادها من الإعدادات ← أنواع الرواتب.",
+    "salary_type_override_label": "تجاوز نوع الراتب (اختياري)",
+    "salary_type_role_default": "— استخدام افتراضي الوظيفة —",
+
+    "salary_type_mode_fixed_monthly": "راتب شهري ثابت",
+    "salary_type_mode_per_session_fixed": "مبلغ ثابت لكل جلسة",
+    "salary_type_mode_per_session_pct": "نسبة مئوية من الجلسة",
+    "salary_type_mode_hybrid": "هجين (شهري + لكل جلسة)",
+    "salary_type_monthly_rate_label": "المبلغ الشهري (جنيه)",
+    "salary_type_session_rate_label": "مبلغ الجلسة الواحدة (جنيه)",
+    "salary_type_session_pct_label": "نسبة الجلسة (0–1، مثال: 0.15 = 15%)",
+    "salary_types_page_title": "أنواع الرواتب",
+    "add_salary_type": "إضافة نوع راتب",
+    "edit_salary_type": "تعديل نوع الراتب",
+    "delete_salary_type_confirm": "حذف نوع الراتب هذا؟ يجب تحديث الوظائف والموظفين المرتبطين أولاً.",
+    "payable_sessions_badge": "{{payable}}/{{total}} جلسة",
+
+    "service_definitions_page_title": "الخدمات",
+    "add_service": "إضافة خدمة",
+    "edit_service": "تعديل الخدمة",
+    "service_price_monthly": "السعر الشهري (جنيه)",
+    "service_price_daily": "السعر اليومي (جنيه)",
+    "service_price_hourly": "السعر بالساعة (جنيه)",
+    "service_builtin_badge": "افتراضية",
+    "service_custom_badge": "مخصصة",
+    "delete_service_confirm": "حذف هذه الخدمة؟ يجب إعادة تسجيل الأطفال المشتركين فيها أولاً.",
+
+    "sessions_page_title": "الجلسات",
+    "add_session": "إضافة جلسة",
+    "edit_session": "تعديل الجلسة",
+    "session_date_label": "تاريخ الجلسة",
+    "session_group_label": "اسم المجموعة (اختياري)",
+    "session_teachers_label": "المعلمون المعينون",
+    "attendance_sheet_title": "كشف الحضور",
+    "attendance_status_attended": "حاضر",
+    "attendance_status_absent_excused": "غائب بعذر",
+    "attendance_status_absent_unexcused": "غائب بدون عذر",
+    "excuse_notes_placeholder": "سبب الغياب بعذر...",
+    "save_attendance": "حفظ الحضور",
+    "attendance_conflicts_title": "تعارضات الحضور",
+    "resolve_conflict": "حل التعارض",
+
+    "base_service_label": "الخدمة الأساسية",
+    "additional_classes_label": "الحصص الإضافية",
+    "total_monthly_fee_label": "إجمالي الرسوم الشهرية",
+
+    "sessions_remaining_label": "الجلسات المتبقية",
+    "calculated_first_payment_label": "الدفعة الأولى المحسوبة",
+    "prorate_adjust_hint": "يمكنك تعديل هذا المبلغ",
+    "confirm_first_payment": "تأكيد الدفعة الأولى",
+
+    "uploading_photo": "جارٍ رفع الصورة...",
+    "photo_upload_failed": "فشل رفع الصورة — تم حفظ الطفل بدون صورة"
   }
 }

@@ -264,6 +264,12 @@ export default function SalariesList() {
         <div>
           <div className="font-semibold text-slate-900">{row.employee_name}</div>
           <div className="text-xs text-slate-400">{row.employee_role}</div>
+          {(row as any).salary_type_name && (
+            <div className="text-xs text-primary font-medium mt-0.5">{(row as any).salary_type_name}</div>
+          )}
+          {(row as any).payable_sessions != null && (
+            <div className="text-xs text-slate-400">{i18n.language === 'ar' ? `جلسات: ${(row as any).payable_sessions}/${(row as any).total_sessions}` : `Sessions: ${(row as any).payable_sessions}/${(row as any).total_sessions}`}</div>
+          )}
         </div>
       )
     },

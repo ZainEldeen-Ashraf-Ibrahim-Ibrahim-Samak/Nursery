@@ -122,32 +122,55 @@ ipcMain.handle('payments:generate', async (_event, { month, year }) => {
       throw new Error('Month and year are required')
     }
     
-    // Fetch all active enrollments for active children
+    // Fetch active enrollments + child extra session data
     const activeEnrollments = db.prepare(`
-      SELECT cs.* 
+      SELECT cs.*, c.extra_lessons, c.session_price, c.sessions_baseline, c.reg_date
       FROM child_services cs
       JOIN children c ON cs.child_id = c.id
       WHERE c.is_active = 1
     `).all() as any[]
-    
+
     let createdCount = 0
     const now = new Date().toISOString()
-    
+
     const checkStmt = db.prepare('SELECT id FROM payments WHERE child_id = ? AND service_id = ? AND month = ? AND year = ?')
+    const checkExtraStmt = db.prepare(`SELECT id FROM payments WHERE child_id = ? AND month = ? AND year = ? AND service = 'حصص إضافية'`)
     const insertStmt = db.prepare(`
       INSERT INTO payments (
-        child_id, service_id, month, year, service, unit, quantity, price, total, paid, balance, status, created_at, updated_at, synced
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, 0)
+        child_id, service_id, month, year, service, unit, quantity, price, total, paid, balance, status, notes, created_at, updated_at, synced
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, 0)
     `)
-    
+
     const transaction = db.transaction(() => {
       for (const enrollment of activeEnrollments) {
         const existing = checkStmt.get(enrollment.child_id, enrollment.id, month, year)
         if (!existing) {
           const quantity = 1
           const { total, balance, status } = calculatePayment(quantity, enrollment.price, 0)
-          
-          insertStmt.run(
+
+          // Compute pro-rated amount if child registered mid-month
+          let proratedCalc: number | null = null
+          if (enrollment.reg_date) {
+            const regDate = new Date(enrollment.reg_date)
+            const arabicMonthNames = ['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر']
+            const monthIndex = arabicMonthNames.indexOf(month)
+            if (monthIndex !== -1) {
+              const payYear = Number(year)
+              const regYear = regDate.getFullYear()
+              const regMonth = regDate.getMonth()
+              if (regYear === payYear && regMonth === monthIndex && regDate.getDate() > 1) {
+                const daysInMonth = new Date(payYear, monthIndex + 1, 0).getDate()
+                const daysRemaining = daysInMonth - regDate.getDate() + 1
+                proratedCalc = Math.round((enrollment.price * daysRemaining) / daysInMonth)
+              }
+            }
+          }
+
+          db.prepare(`
+            INSERT INTO payments (
+              child_id, service_id, month, year, service, unit, quantity, price, total, paid, balance, status, notes, prorated_calculated, created_at, updated_at, synced
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, 0)
+          `).run(
             enrollment.child_id,
             enrollment.id,
             month,
@@ -159,14 +182,43 @@ ipcMain.handle('payments:generate', async (_event, { month, year }) => {
             total,
             balance,
             status,
+            null,
+            proratedCalc,
             now,
             now
           )
           createdCount++
         }
+
+        // Create a separate row for additional sessions if any
+        const extraLessons = Number(enrollment.extra_lessons) || 0
+        const sessionPrice = Number(enrollment.session_price) || 0
+        if (extraLessons > 0 && sessionPrice > 0) {
+          const existingExtra = checkExtraStmt.get(enrollment.child_id, month, year)
+          if (!existingExtra) {
+            const extraTotal = extraLessons * sessionPrice
+            insertStmt.run(
+              enrollment.child_id,
+              enrollment.id, // use same service_id as parent
+              month,
+              year,
+              'حصص إضافية',
+              'جلسة',
+              extraLessons,
+              sessionPrice,
+              extraTotal,
+              extraTotal, // balance = total (unpaid start)
+              'unpaid',
+              `${extraLessons} × ${sessionPrice}`,
+              now,
+              now
+            )
+            createdCount++
+          }
+        }
       }
     })
-    
+
     transaction()
     return { created: createdCount }
   } catch (error: any) {

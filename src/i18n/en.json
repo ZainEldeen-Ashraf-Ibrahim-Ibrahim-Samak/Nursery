@@ -164,6 +164,65 @@
       "thu": "Thu",
       "fri": "Fri",
       "sat": "Sat"
-    }
+    },
+
+    "role_dropdown_label": "Role",
+    "add_new_role": "+ New role",
+    "new_role_name_placeholder": "New role name",
+    "delete_role_confirm": "Are you sure you want to delete this role? Employees assigned to it must be reassigned first.",
+    "role_no_salary_type_warning": "This role has no salary type configured. Please assign one in Settings.",
+    "roles_without_salary_type_warning": "Warning: The following roles have no salary type: {{roles}}. Please configure them in Settings → Salary Types.",
+    "salary_type_override_label": "Salary type override (optional)",
+    "salary_type_role_default": "— Use role default —",
+
+    "salary_type_mode_fixed_monthly": "Fixed Monthly",
+    "salary_type_mode_per_session_fixed": "Per Session (Fixed)",
+    "salary_type_mode_per_session_pct": "Per Session (Percentage)",
+    "salary_type_mode_hybrid": "Hybrid (Monthly + Per Session)",
+    "salary_type_monthly_rate_label": "Monthly Rate (EGP)",
+    "salary_type_session_rate_label": "Per Session Rate (EGP)",
+    "salary_type_session_pct_label": "Session Percentage (0–1, e.g. 0.15 = 15%)",
+    "salary_types_page_title": "Salary Types",
+    "add_salary_type": "Add Salary Type",
+    "edit_salary_type": "Edit Salary Type",
+    "delete_salary_type_confirm": "Delete this salary type? Roles or employees using it must be updated first.",
+    "payable_sessions_badge": "{{payable}}/{{total}} sessions",
+
+    "service_definitions_page_title": "Services",
+    "add_service": "Add Service",
+    "edit_service": "Edit Service",
+    "service_price_monthly": "Monthly Price (EGP)",
+    "service_price_daily": "Daily Price (EGP)",
+    "service_price_hourly": "Hourly Price (EGP)",
+    "service_builtin_badge": "Built-in",
+    "service_custom_badge": "Custom",
+    "delete_service_confirm": "Delete this service? Children enrolled in it must be re-enrolled first.",
+
+    "sessions_page_title": "Sessions",
+    "add_session": "Add Session",
+    "edit_session": "Edit Session",
+    "session_date_label": "Session Date",
+    "session_group_label": "Group Name (optional)",
+    "session_teachers_label": "Assigned Teachers",
+    "attendance_sheet_title": "Attendance Sheet",
+    "attendance_status_attended": "Attended",
+    "attendance_status_absent_excused": "Absent (Excused)",
+    "attendance_status_absent_unexcused": "Absent (Unexcused)",
+    "excuse_notes_placeholder": "Reason for excused absence...",
+    "save_attendance": "Save Attendance",
+    "attendance_conflicts_title": "Attendance Conflicts",
+    "resolve_conflict": "Resolve",
+
+    "base_service_label": "Base Service",
+    "additional_classes_label": "Additional Classes",
+    "total_monthly_fee_label": "Total Monthly Fee",
+
+    "sessions_remaining_label": "Sessions remaining",
+    "calculated_first_payment_label": "Calculated first payment",
+    "prorate_adjust_hint": "You may adjust this amount",
+    "confirm_first_payment": "Confirm First Payment",
+
+    "uploading_photo": "Uploading photo...",
+    "photo_upload_failed": "Photo upload failed — child saved without photo"
   }
 }

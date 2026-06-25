@@ -134,6 +134,7 @@ const paymentSchema = new Schema({
   unit: String,
   quantity: Number,
   price: Number,
+  prorated_calculated: Number,
   month: String,
   year: Number,
   total: Number,
@@ -217,6 +218,8 @@ const employeeSchema = new Schema({
   id: { type: Number, required: true, unique: true },
   name: String,
   role: String,
+  role_id: Number,
+  salary_type_override_id: Number,
   base_salary: Number,
   housing: Number,
   transport: Number,
@@ -282,6 +285,117 @@ const importedSnapshotSchema = new Schema({
 export const ImportedSnapshotModel: Model<any> = mongoose.models['sync_imported_snapshots'] ||
   mongoose.model('sync_imported_snapshots', importedSnapshotSchema)
 
+// ── Salary Types ─────────────────────────────────────────────────────────────
+
+const salaryTypeSchema = new Schema({
+  id: { type: Number, required: true, unique: true },
+  name: String,
+  mode: String,
+  monthly_rate: Number,
+  session_rate: Number,
+  session_pct: Number,
+  created_at: String,
+  updated_at: String,
+  synced: Number
+}, sharedOptions)
+
+export const SalaryTypeModel: Model<any> = mongoose.models['sync_salary_types'] ||
+  mongoose.model('sync_salary_types', salaryTypeSchema)
+
+// ── Employee Roles ────────────────────────────────────────────────────────────
+
+const employeeRoleSchema = new Schema({
+  id: { type: Number, required: true, unique: true },
+  name: String,
+  salary_type_id: Number,
+  created_at: String,
+  updated_at: String,
+  synced: Number
+}, sharedOptions)
+
+export const EmployeeRoleModel: Model<any> = mongoose.models['sync_employee_roles'] ||
+  mongoose.model('sync_employee_roles', employeeRoleSchema)
+
+// ── Service Definitions ───────────────────────────────────────────────────────
+
+const serviceDefinitionSchema = new Schema({
+  id: { type: Number, required: true, unique: true },
+  name: String,
+  is_custom: Number,
+  price_monthly: Number,
+  price_daily: Number,
+  price_hourly: Number,
+  created_at: String,
+  updated_at: String,
+  synced: Number
+}, sharedOptions)
+
+export const ServiceDefinitionModel: Model<any> = mongoose.models['sync_service_definitions'] ||
+  mongoose.model('sync_service_definitions', serviceDefinitionSchema)
+
+// ── Scheduled Sessions ────────────────────────────────────────────────────────
+
+const scheduledSessionSchema = new Schema({
+  id: { type: Number, required: true, unique: true },
+  session_date: String,
+  service_id: Number,
+  group_name: String,
+  notes: String,
+  created_at: String,
+  updated_at: String,
+  synced: Number
+}, sharedOptions)
+
+export const ScheduledSessionModel: Model<any> = mongoose.models['sync_scheduled_sessions'] ||
+  mongoose.model('sync_scheduled_sessions', scheduledSessionSchema)
+
+// ── Session Teachers ──────────────────────────────────────────────────────────
+
+const sessionTeacherSchema = new Schema({
+  id: { type: Number, required: true, unique: true },
+  session_id: Number,
+  employee_id: Number,
+  synced: Number
+}, sharedOptions)
+
+export const SessionTeacherModel: Model<any> = mongoose.models['sync_session_teachers'] ||
+  mongoose.model('sync_session_teachers', sessionTeacherSchema)
+
+// ── Attendance Records ────────────────────────────────────────────────────────
+
+const attendanceRecordSchema = new Schema({
+  id: { type: Number, required: true, unique: true },
+  session_id: Number,
+  child_id: Number,
+  status: String,
+  excuse_notes: String,
+  recorded_by: Number,
+  recorded_at: String,
+  updated_at: String,
+  synced: Number
+}, sharedOptions)
+
+export const AttendanceRecordModel: Model<any> = mongoose.models['sync_attendance_records'] ||
+  mongoose.model('sync_attendance_records', attendanceRecordSchema)
+
+// ── Attendance Conflicts ──────────────────────────────────────────────────────
+
+const attendanceConflictSchema = new Schema({
+  id: { type: Number, required: true, unique: true },
+  attendance_record_id: Number,
+  overwritten_status: String,
+  overwritten_by: String,
+  overwritten_at: String,
+  winning_status: String,
+  winning_by: String,
+  winning_at: String,
+  reviewed: Number,
+  created_at: String
+}, sharedOptions)
+
+export const AttendanceConflictModel: Model<any> = mongoose.models['sync_attendance_conflicts'] ||
+  mongoose.model('sync_attendance_conflicts', attendanceConflictSchema)
+
 // ── Entity registry ───────────────────────────────────────────────────────────
 
 export const SYNC_ENTITIES: {
@@ -298,5 +412,12 @@ export const SYNC_ENTITIES: {
   { name: 'users', model: UserModel, table: 'users' },
   { name: 'settings', model: SettingModel, table: 'settings' },
   { name: 'imported_snapshots', model: ImportedSnapshotModel, table: 'imported_snapshots' },
-  { name: 'tombstones', model: TombstoneModel, table: 'tombstones' }
+  { name: 'tombstones', model: TombstoneModel, table: 'tombstones' },
+  { name: 'salary_types', model: SalaryTypeModel, table: 'salary_types' },
+  { name: 'employee_roles', model: EmployeeRoleModel, table: 'employee_roles' },
+  { name: 'service_definitions', model: ServiceDefinitionModel, table: 'service_definitions' },
+  { name: 'scheduled_sessions', model: ScheduledSessionModel, table: 'scheduled_sessions' },
+  { name: 'session_teachers', model: SessionTeacherModel, table: 'session_teachers' },
+  { name: 'attendance_records', model: AttendanceRecordModel, table: 'attendance_records' },
+  { name: 'attendance_conflicts', model: AttendanceConflictModel, table: 'attendance_conflicts' },
 ]

@@ -25,6 +25,7 @@ import StorageManager from './pages/Storage/StorageManager.js'
 import SyncManager from './pages/Sync/SyncManager.js'
 import Settings from './pages/Settings/Settings.js'
 import UsersList from './pages/Users/UsersList.js'
+import SessionsList from './pages/Sessions/SessionsList.js'
 
 // Layout component wrapping protected routes
 const AppLayout: React.FC = () => {
@@ -168,6 +169,9 @@ export default function App() {
               </RoleGuard>
             }
           />
+
+          {/* Sessions & Attendance - admin and employee */}
+          <Route path="sessions" element={<SessionsList />} />
 
           {/* Fallback to Dashboard */}
           <Route path="*" element={<Navigate to="/" replace />} />

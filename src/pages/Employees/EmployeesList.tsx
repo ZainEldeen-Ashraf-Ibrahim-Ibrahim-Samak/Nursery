@@ -2,6 +2,8 @@ import * as React from 'react'
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useSalariesStore } from '../../store/useSalariesStore.js'
+import { useRolesStore } from '../../store/useRolesStore.js'
+import { useSalaryTypesStore } from '../../store/useSalaryTypesStore.js'
 import { useExport } from '../../hooks/useExport.js'
 import { SearchBar } from '../../components/ui/SearchBar.js'
 import { Select } from '../../components/ui/Select.js'
@@ -38,6 +40,9 @@ export default function EmployeesList() {
     clearError,
   } = useSalariesStore()
 
+  const { roles, fetchRoles, addRole } = useRolesStore()
+  const { salaryTypes, fetchSalaryTypes } = useSalaryTypesStore()
+
   const [successMsg, setSuccessMsg] = useState('')
 
   // Filters / sort / pagination
@@ -52,12 +57,18 @@ export default function EmployeesList() {
   const [isFormOpen, setIsFormOpen] = useState(false)
   const [editing, setEditing] = useState<Employee | null>(null)
   const [name, setName] = useState('')
-  const [role, setRole] = useState('')
+  const [roleId, setRoleId] = useState<number | ''>('')
+  const [salaryTypeOverrideId, setSalaryTypeOverrideId] = useState<number | ''>('')
   const [baseSalary, setBaseSalary] = useState('')
   const [housing, setHousing] = useState('')
   const [transport, setTransport] = useState('')
   const [formError, setFormError] = useState('')
   const [isSubmitLoading, setIsSubmitLoading] = useState(false)
+
+  // Inline add-new-role state
+  const [showAddRole, setShowAddRole] = useState(false)
+  const [newRoleName, setNewRoleName] = useState('')
+  const [isAddingRole, setIsAddingRole] = useState(false)
 
   // Deactivate confirm
   const [toDeactivate, setToDeactivate] = useState<Employee | null>(null)
@@ -82,6 +93,8 @@ export default function EmployeesList() {
 
   useEffect(() => {
     fetchEmployees()
+    fetchRoles()
+    fetchSalaryTypes()
   }, [])
 
   // Reset to first page when filters change
@@ -151,24 +164,43 @@ export default function EmployeesList() {
 
   const openCreate = () => {
     setEditing(null)
-    setName(''); setRole(''); setBaseSalary(''); setHousing(''); setTransport('')
-    setFormError('')
+    setName(''); setRoleId(''); setSalaryTypeOverrideId('')
+    setBaseSalary(''); setHousing(''); setTransport('')
+    setFormError(''); setShowAddRole(false); setNewRoleName('')
     setIsFormOpen(true)
   }
 
   const openEdit = (emp: Employee) => {
     setEditing(emp)
-    setName(emp.name); setRole(emp.role)
+    setName(emp.name)
+    setRoleId(emp.role_id ?? '')
+    setSalaryTypeOverrideId(emp.salary_type_override_id ?? '')
     setBaseSalary(String(emp.base_salary)); setHousing(String(emp.housing)); setTransport(String(emp.transport))
-    setFormError('')
+    setFormError(''); setShowAddRole(false); setNewRoleName('')
     setIsFormOpen(true)
+  }
+
+  const handleAddNewRole = async () => {
+    if (!newRoleName.trim()) return
+    setIsAddingRole(true)
+    const result = await addRole(newRoleName.trim())
+    setIsAddingRole(false)
+    if (result) {
+      setRoleId(result.id)
+      setNewRoleName('')
+      setShowAddRole(false)
+    }
   }
 
   const handleSubmit = async (e?: React.FormEvent) => {
     e?.preventDefault()
     setFormError('')
-    if (!name.trim() || !role.trim()) {
-      setFormError(isAr ? 'الاسم والوظيفة مطلوبان.' : 'Name and role are required.')
+    if (!name.trim()) {
+      setFormError(isAr ? 'الاسم مطلوب.' : 'Name is required.')
+      return
+    }
+    if (!roleId) {
+      setFormError(isAr ? 'يجب اختيار الوظيفة.' : 'Role is required.')
       return
     }
     if (baseSalary === '' || isNaN(Number(baseSalary))) {
@@ -176,9 +208,10 @@ export default function EmployeesList() {
       return
     }
     setIsSubmitLoading(true)
-    const payload = {
+    const payload: any = {
       name: name.trim(),
-      role: role.trim(),
+      role_id: Number(roleId),
+      salary_type_override_id: salaryTypeOverrideId !== '' ? Number(salaryTypeOverrideId) : null,
       base_salary: Number(baseSalary),
       housing: Number(housing) || 0,
       transport: Number(transport) || 0,
@@ -190,6 +223,9 @@ export default function EmployeesList() {
       setIsFormOpen(false)
     }
   }
+
+  // Roles without a salary type (FR-037 warning)
+  const rolesWithoutSalaryType = useMemo(() => roles.filter((r) => r.salary_type_id == null), [roles])
 
   const confirmDeactivate = async () => {
     if (!toDeactivate) return
@@ -207,7 +243,11 @@ export default function EmployeesList() {
     {
       key: 'role',
       header: sortHeader('role', isAr ? 'الوظيفة' : 'Role'),
-      render: (e: Employee) => <span className="text-slate-600">{e.role}</span>,
+      render: (e: Employee) => (
+        <span className="text-slate-600">
+          {(e as any).role_name ?? e.role}
+        </span>
+      ),
     },
     {
       key: 'base_salary',
@@ -286,6 +326,15 @@ export default function EmployeesList() {
         </Card>
       </div>
 
+      {/* FR-037 warning: roles with no salary type */}
+      {rolesWithoutSalaryType.length > 0 && (
+        <Alert variant="warning">
+          {isAr
+            ? `تحذير: الوظائف التالية لا تملك نوع راتب محدداً: ${rolesWithoutSalaryType.map((r) => r.name).join('، ')} — يرجى تعيين نوع راتب من إعدادات الرواتب.`
+            : `Warning: The following roles have no salary type configured: ${rolesWithoutSalaryType.map((r) => r.name).join(', ')} — please assign a salary type in Settings.`}
+        </Alert>
+      )}
+
       {/* Messages */}
       {successMsg && <Alert variant="success" onClose={() => setSuccessMsg('')}>{successMsg}</Alert>}
       {error && <Alert variant="danger" title={t('error')} onClose={clearError}>{error}</Alert>}
@@ -350,14 +399,54 @@ export default function EmployeesList() {
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           {formError && <Alert variant="danger" onClose={() => setFormError('')}>{formError}</Alert>}
           <Input label={isAr ? 'الاسم' : 'Name'} value={name} onChange={(e) => setName(e.target.value)} disabled={isSubmitLoading} required />
-          <Input
-            label={isAr ? 'الوظيفة' : 'Role'}
-            value={role}
-            onChange={(e) => setRole(e.target.value)}
-            placeholder={isAr ? 'مثال: معلمة حضانة' : 'e.g. Nursery teacher'}
-            disabled={isSubmitLoading}
-            required
-          />
+
+          {/* Dynamic role selector */}
+          <div className="space-y-1.5">
+            <label className="block text-sm font-medium text-slate-700">{isAr ? 'الوظيفة' : 'Role'} *</label>
+            <div className="flex gap-2 items-center">
+              <Select
+                value={String(roleId)}
+                onChange={(e) => setRoleId(e.target.value ? Number(e.target.value) : '')}
+                options={[
+                  { value: '', label: isAr ? '— اختر وظيفة —' : '— Select role —' },
+                  ...roles.map((r) => ({ value: String(r.id), label: r.name + (r.salary_type_id == null ? (isAr ? ' ⚠️' : ' ⚠️') : '') }))
+                ]}
+                disabled={isSubmitLoading}
+              />
+              <Button variant="outline" size="sm" type="button" onClick={() => setShowAddRole(!showAddRole)} disabled={isSubmitLoading}>
+                {isAr ? '+ دور جديد' : '+ New role'}
+              </Button>
+            </div>
+            {showAddRole && (
+              <div className="flex gap-2 mt-2">
+                <Input
+                  value={newRoleName}
+                  onChange={(e) => setNewRoleName(e.target.value)}
+                  placeholder={isAr ? 'اسم الوظيفة الجديدة' : 'New role name'}
+                  disabled={isAddingRole}
+                  onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddNewRole())}
+                />
+                <Button variant="primary" size="sm" type="button" onClick={handleAddNewRole} isLoading={isAddingRole} disabled={!newRoleName.trim()}>
+                  {isAr ? 'إضافة' : 'Add'}
+                </Button>
+              </div>
+            )}
+          </div>
+
+          {/* Optional salary type override */}
+          <div className="space-y-1.5">
+            <label className="block text-sm font-medium text-slate-700">{isAr ? 'تجاوز نوع الراتب (اختياري)' : 'Salary type override (optional)'}</label>
+            <Select
+              value={String(salaryTypeOverrideId)}
+              onChange={(e) => setSalaryTypeOverrideId(e.target.value ? Number(e.target.value) : '')}
+              options={[
+                { value: '', label: isAr ? '— استخدام افتراضي الوظيفة —' : '— Use role default —' },
+                ...salaryTypes.map((s) => ({ value: String(s.id), label: s.name }))
+              ]}
+              disabled={isSubmitLoading}
+            />
+          </div>
+
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <Input label={isAr ? 'الراتب الأساسي' : 'Base Salary'} type="number" value={baseSalary} onChange={(e) => setBaseSalary(e.target.value)} disabled={isSubmitLoading} min={0} required />
             <Input label={isAr ? 'بدل سكن' : 'Housing'} type="number" value={housing} onChange={(e) => setHousing(e.target.value)} disabled={isSubmitLoading} min={0} />

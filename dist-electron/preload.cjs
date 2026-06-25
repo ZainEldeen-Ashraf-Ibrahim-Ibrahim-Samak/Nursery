@@ -93,6 +93,55 @@ electron.contextBridge.exposeInMainWorld("api", {
 		status: () => electron.ipcRenderer.invoke("sync:status"),
 		autoSync: (args) => electron.ipcRenderer.invoke("sync:auto-sync", args)
 	},
+	roles: {
+		list: () => electron.ipcRenderer.invoke("roles:list"),
+		add: (args) => electron.ipcRenderer.invoke("roles:add", args),
+		update: (args) => electron.ipcRenderer.invoke("roles:update", args),
+		delete: (args) => electron.ipcRenderer.invoke("roles:delete", args)
+	},
+	salaryTypes: {
+		list: () => electron.ipcRenderer.invoke("salaryTypes:list"),
+		add: (args) => electron.ipcRenderer.invoke("salaryTypes:add", args),
+		update: (args) => electron.ipcRenderer.invoke("salaryTypes:update", args),
+		delete: (args) => electron.ipcRenderer.invoke("salaryTypes:delete", args)
+	},
+	serviceDefinitions: {
+		list: () => electron.ipcRenderer.invoke("serviceDefinitions:list"),
+		add: (args) => electron.ipcRenderer.invoke("serviceDefinitions:add", args),
+		update: (args) => electron.ipcRenderer.invoke("serviceDefinitions:update", args),
+		delete: (args) => electron.ipcRenderer.invoke("serviceDefinitions:delete", args)
+	},
+	sessions: {
+		list: (args) => electron.ipcRenderer.invoke("sessions:list", args),
+		add: (args) => electron.ipcRenderer.invoke("sessions:add", args),
+		update: (id, patch) => electron.ipcRenderer.invoke("sessions:update", {
+			id,
+			patch
+		}),
+		delete: (id) => electron.ipcRenderer.invoke("sessions:delete", { id }),
+		assignTeachers: (session_id, employee_ids) => electron.ipcRenderer.invoke("sessions:assignTeachers", {
+			session_id,
+			employee_ids
+		}),
+		proRateCalc: (args) => electron.ipcRenderer.invoke("sessions:proRateCalc", args)
+	},
+	attendance: {
+		getSheet: (sessionId) => electron.ipcRenderer.invoke("attendance:getSheet", { session_id: sessionId }),
+		record: (sessionId, records) => electron.ipcRenderer.invoke("attendance:record", {
+			session_id: sessionId,
+			records
+		}),
+		getConflicts: () => electron.ipcRenderer.invoke("attendance:getConflicts"),
+		resolveConflict: (conflict_id, final_status) => electron.ipcRenderer.invoke("attendance:resolveConflict", {
+			conflict_id,
+			final_status
+		}),
+		getSummary: (employee_id, month, year) => electron.ipcRenderer.invoke("attendance:getSummary", {
+			employee_id,
+			month,
+			year
+		})
+	},
 	updater: {
 		check: () => electron.ipcRenderer.invoke("updater:check"),
 		install: () => electron.ipcRenderer.invoke("updater:install"),

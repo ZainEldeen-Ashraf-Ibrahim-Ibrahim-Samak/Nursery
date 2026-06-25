@@ -353,6 +353,153 @@ const migrations: Migration[] = [
     }
   },
   {
+    name: '014_employee_roles_salary_types',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS salary_types (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL UNIQUE,
+          mode TEXT NOT NULL CHECK(mode IN ('fixed_monthly','per_session_fixed','per_session_pct','hybrid')),
+          monthly_rate REAL,
+          session_rate REAL,
+          session_pct REAL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          synced INTEGER DEFAULT 0
+        );
+
+        CREATE TABLE IF NOT EXISTS employee_roles (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL UNIQUE,
+          salary_type_id INTEGER REFERENCES salary_types(id),
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          synced INTEGER DEFAULT 0
+        );
+      `)
+
+      // Additive columns on employees
+      const addCol = (ddl: string) => { try { db.exec(ddl) } catch { /* already exists */ } }
+      addCol('ALTER TABLE employees ADD COLUMN role_id INTEGER REFERENCES employee_roles(id);')
+      addCol('ALTER TABLE employees ADD COLUMN salary_type_override_id INTEGER REFERENCES salary_types(id);')
+
+      // Auto-migrate existing role strings into employee_roles
+      const now = new Date().toISOString()
+      const roles = db.prepare("SELECT DISTINCT role FROM employees WHERE role IS NOT NULL AND role != ''").all() as { role: string }[]
+      for (const { role } of roles) {
+        db.prepare(`
+          INSERT OR IGNORE INTO employee_roles (name, created_at, updated_at, synced) VALUES (?, ?, ?, 0)
+        `).run(role, now, now)
+      }
+      db.exec(`
+        UPDATE employees SET role_id = (
+          SELECT id FROM employee_roles WHERE employee_roles.name = employees.role
+        ) WHERE role_id IS NULL;
+      `)
+    }
+  },
+  {
+    name: '015_service_definitions',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS service_definitions (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL UNIQUE,
+          is_custom INTEGER DEFAULT 1,
+          price_monthly REAL,
+          price_daily REAL,
+          price_hourly REAL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          synced INTEGER DEFAULT 0
+        );
+      `)
+      const now = new Date().toISOString()
+      const get = (key: string): number | null => {
+        const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(key) as { value: string } | undefined
+        return row?.value ? Number(row.value) : null
+      }
+      const seeds = [
+        { name: 'حضانة', monthly: get('nursery_monthly'), daily: get('nursery_daily'), hourly: get('nursery_hourly') },
+        { name: 'استضافة', monthly: get('hosting_monthly'), daily: get('hosting_daily'), hourly: get('hosting_hourly') },
+        { name: 'جلسة', monthly: get('session_monthly'), daily: get('session_daily'), hourly: get('session_hourly') },
+      ]
+      for (const s of seeds) {
+        db.prepare(`
+          INSERT OR IGNORE INTO service_definitions (name, is_custom, price_monthly, price_daily, price_hourly, created_at, updated_at, synced)
+          VALUES (?, 0, ?, ?, ?, ?, ?, 0)
+        `).run(s.name, s.monthly, s.daily, s.hourly, now, now)
+      }
+    }
+  },
+  {
+    name: '016_scheduled_sessions',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS scheduled_sessions (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          session_date TEXT NOT NULL,
+          service_id INTEGER REFERENCES service_definitions(id),
+          group_name TEXT,
+          notes TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          synced INTEGER DEFAULT 0
+        );
+
+        CREATE TABLE IF NOT EXISTS session_teachers (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          session_id INTEGER NOT NULL REFERENCES scheduled_sessions(id) ON DELETE CASCADE,
+          employee_id INTEGER NOT NULL REFERENCES employees(id),
+          synced INTEGER DEFAULT 0,
+          UNIQUE(session_id, employee_id)
+        );
+      `)
+    }
+  },
+  {
+    name: '017_attendance',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS attendance_records (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          session_id INTEGER NOT NULL REFERENCES scheduled_sessions(id) ON DELETE CASCADE,
+          child_id INTEGER NOT NULL REFERENCES children(id) ON DELETE CASCADE,
+          status TEXT NOT NULL CHECK(status IN ('attended','absent_excused','absent_unexcused')),
+          excuse_notes TEXT,
+          recorded_by INTEGER REFERENCES users(id),
+          recorded_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          synced INTEGER DEFAULT 0,
+          UNIQUE(session_id, child_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS attendance_conflicts (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          attendance_record_id INTEGER NOT NULL REFERENCES attendance_records(id),
+          overwritten_status TEXT NOT NULL,
+          overwritten_by TEXT,
+          overwritten_at TEXT NOT NULL,
+          winning_status TEXT NOT NULL,
+          winning_by TEXT,
+          winning_at TEXT NOT NULL,
+          reviewed INTEGER DEFAULT 0,
+          created_at TEXT NOT NULL
+        );
+      `)
+    }
+  },
+  {
+    name: '018_payment_prorated_column',
+    up: (db) => {
+      try {
+        db.exec('ALTER TABLE payments ADD COLUMN prorated_calculated REAL;')
+      } catch {
+        // Already exists
+      }
+    }
+  },
+  {
     name: '013_session_monthly_setting',
     up: (db) => {
       db.exec(`

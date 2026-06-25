@@ -15221,6 +15221,162 @@ var migrations = [
 		}
 	},
 	{
+		name: "014_employee_roles_salary_types",
+		up: (db) => {
+			db.exec(`
+        CREATE TABLE IF NOT EXISTS salary_types (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL UNIQUE,
+          mode TEXT NOT NULL CHECK(mode IN ('fixed_monthly','per_session_fixed','per_session_pct','hybrid')),
+          monthly_rate REAL,
+          session_rate REAL,
+          session_pct REAL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          synced INTEGER DEFAULT 0
+        );
+
+        CREATE TABLE IF NOT EXISTS employee_roles (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL UNIQUE,
+          salary_type_id INTEGER REFERENCES salary_types(id),
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          synced INTEGER DEFAULT 0
+        );
+      `);
+			const addCol = (ddl) => {
+				try {
+					db.exec(ddl);
+				} catch {}
+			};
+			addCol("ALTER TABLE employees ADD COLUMN role_id INTEGER REFERENCES employee_roles(id);");
+			addCol("ALTER TABLE employees ADD COLUMN salary_type_override_id INTEGER REFERENCES salary_types(id);");
+			const now = (/* @__PURE__ */ new Date()).toISOString();
+			const roles = db.prepare("SELECT DISTINCT role FROM employees WHERE role IS NOT NULL AND role != ''").all();
+			for (const { role } of roles) db.prepare(`
+          INSERT OR IGNORE INTO employee_roles (name, created_at, updated_at, synced) VALUES (?, ?, ?, 0)
+        `).run(role, now, now);
+			db.exec(`
+        UPDATE employees SET role_id = (
+          SELECT id FROM employee_roles WHERE employee_roles.name = employees.role
+        ) WHERE role_id IS NULL;
+      `);
+		}
+	},
+	{
+		name: "015_service_definitions",
+		up: (db) => {
+			db.exec(`
+        CREATE TABLE IF NOT EXISTS service_definitions (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL UNIQUE,
+          is_custom INTEGER DEFAULT 1,
+          price_monthly REAL,
+          price_daily REAL,
+          price_hourly REAL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          synced INTEGER DEFAULT 0
+        );
+      `);
+			const now = (/* @__PURE__ */ new Date()).toISOString();
+			const get = (key) => {
+				const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(key);
+				return row?.value ? Number(row.value) : null;
+			};
+			const seeds = [
+				{
+					name: "حضانة",
+					monthly: get("nursery_monthly"),
+					daily: get("nursery_daily"),
+					hourly: get("nursery_hourly")
+				},
+				{
+					name: "استضافة",
+					monthly: get("hosting_monthly"),
+					daily: get("hosting_daily"),
+					hourly: get("hosting_hourly")
+				},
+				{
+					name: "جلسة",
+					monthly: get("session_monthly"),
+					daily: get("session_daily"),
+					hourly: get("session_hourly")
+				}
+			];
+			for (const s of seeds) db.prepare(`
+          INSERT OR IGNORE INTO service_definitions (name, is_custom, price_monthly, price_daily, price_hourly, created_at, updated_at, synced)
+          VALUES (?, 0, ?, ?, ?, ?, ?, 0)
+        `).run(s.name, s.monthly, s.daily, s.hourly, now, now);
+		}
+	},
+	{
+		name: "016_scheduled_sessions",
+		up: (db) => {
+			db.exec(`
+        CREATE TABLE IF NOT EXISTS scheduled_sessions (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          session_date TEXT NOT NULL,
+          service_id INTEGER REFERENCES service_definitions(id),
+          group_name TEXT,
+          notes TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          synced INTEGER DEFAULT 0
+        );
+
+        CREATE TABLE IF NOT EXISTS session_teachers (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          session_id INTEGER NOT NULL REFERENCES scheduled_sessions(id) ON DELETE CASCADE,
+          employee_id INTEGER NOT NULL REFERENCES employees(id),
+          synced INTEGER DEFAULT 0,
+          UNIQUE(session_id, employee_id)
+        );
+      `);
+		}
+	},
+	{
+		name: "017_attendance",
+		up: (db) => {
+			db.exec(`
+        CREATE TABLE IF NOT EXISTS attendance_records (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          session_id INTEGER NOT NULL REFERENCES scheduled_sessions(id) ON DELETE CASCADE,
+          child_id INTEGER NOT NULL REFERENCES children(id) ON DELETE CASCADE,
+          status TEXT NOT NULL CHECK(status IN ('attended','absent_excused','absent_unexcused')),
+          excuse_notes TEXT,
+          recorded_by INTEGER REFERENCES users(id),
+          recorded_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          synced INTEGER DEFAULT 0,
+          UNIQUE(session_id, child_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS attendance_conflicts (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          attendance_record_id INTEGER NOT NULL REFERENCES attendance_records(id),
+          overwritten_status TEXT NOT NULL,
+          overwritten_by TEXT,
+          overwritten_at TEXT NOT NULL,
+          winning_status TEXT NOT NULL,
+          winning_by TEXT,
+          winning_at TEXT NOT NULL,
+          reviewed INTEGER DEFAULT 0,
+          created_at TEXT NOT NULL
+        );
+      `);
+		}
+	},
+	{
+		name: "018_payment_prorated_column",
+		up: (db) => {
+			try {
+				db.exec("ALTER TABLE payments ADD COLUMN prorated_calculated REAL;");
+			} catch {}
+		}
+	},
+	{
 		name: "013_session_monthly_setting",
 		up: (db) => {
 			db.exec(`
@@ -21297,6 +21453,9 @@ function requireAdmin() {
 	if (!user) throw new Error("UNAUTHORIZED: يجب تسجيل الدخول أولاً / Unauthorized");
 	if (user.role !== "admin") throw new Error("FORBIDDEN: غير مسموح بالوصول لغير المسؤولين / Forbidden");
 }
+function checkAuth$5() {
+	if (!getCurrentUser()) throw new Error("UNAUTHORIZED: يجب تسجيل الدخول أولاً / Unauthorized");
+}
 //#endregion
 //#region electron/ipc/authIPC.ts
 var currentUserSession = null;
@@ -21995,7 +22154,7 @@ ipcMain.handle("payments:generate", async (_event, { month, year }) => {
 		const db = getDb();
 		if (!month || !year) throw new Error("Month and year are required");
 		const activeEnrollments = db.prepare(`
-      SELECT cs.* 
+      SELECT cs.*, c.extra_lessons, c.session_price, c.sessions_baseline, c.reg_date
       FROM child_services cs
       JOIN children c ON cs.child_id = c.id
       WHERE c.is_active = 1
@@ -22003,17 +22162,61 @@ ipcMain.handle("payments:generate", async (_event, { month, year }) => {
 		let createdCount = 0;
 		const now = (/* @__PURE__ */ new Date()).toISOString();
 		const checkStmt = db.prepare("SELECT id FROM payments WHERE child_id = ? AND service_id = ? AND month = ? AND year = ?");
+		const checkExtraStmt = db.prepare(`SELECT id FROM payments WHERE child_id = ? AND month = ? AND year = ? AND service = 'حصص إضافية'`);
 		const insertStmt = db.prepare(`
       INSERT INTO payments (
-        child_id, service_id, month, year, service, unit, quantity, price, total, paid, balance, status, created_at, updated_at, synced
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, 0)
+        child_id, service_id, month, year, service, unit, quantity, price, total, paid, balance, status, notes, created_at, updated_at, synced
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, 0)
     `);
 		db.transaction(() => {
-			for (const enrollment of activeEnrollments) if (!checkStmt.get(enrollment.child_id, enrollment.id, month, year)) {
-				const quantity = 1;
-				const { total, balance, status } = calculatePayment(quantity, enrollment.price, 0);
-				insertStmt.run(enrollment.child_id, enrollment.id, month, year, enrollment.service, enrollment.unit, quantity, enrollment.price, total, balance, status, now, now);
-				createdCount++;
+			for (const enrollment of activeEnrollments) {
+				if (!checkStmt.get(enrollment.child_id, enrollment.id, month, year)) {
+					const quantity = 1;
+					const { total, balance, status } = calculatePayment(quantity, enrollment.price, 0);
+					let proratedCalc = null;
+					if (enrollment.reg_date) {
+						const regDate = new Date(enrollment.reg_date);
+						const monthIndex = [
+							"يناير",
+							"فبراير",
+							"مارس",
+							"أبريل",
+							"مايو",
+							"يونيو",
+							"يوليو",
+							"أغسطس",
+							"سبتمبر",
+							"أكتوبر",
+							"نوفمبر",
+							"ديسمبر"
+						].indexOf(month);
+						if (monthIndex !== -1) {
+							const payYear = Number(year);
+							const regYear = regDate.getFullYear();
+							const regMonth = regDate.getMonth();
+							if (regYear === payYear && regMonth === monthIndex && regDate.getDate() > 1) {
+								const daysInMonth = new Date(payYear, monthIndex + 1, 0).getDate();
+								const daysRemaining = daysInMonth - regDate.getDate() + 1;
+								proratedCalc = Math.round(enrollment.price * daysRemaining / daysInMonth);
+							}
+						}
+					}
+					db.prepare(`
+            INSERT INTO payments (
+              child_id, service_id, month, year, service, unit, quantity, price, total, paid, balance, status, notes, prorated_calculated, created_at, updated_at, synced
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, 0)
+          `).run(enrollment.child_id, enrollment.id, month, year, enrollment.service, enrollment.unit, quantity, enrollment.price, total, balance, status, null, proratedCalc, now, now);
+					createdCount++;
+				}
+				const extraLessons = Number(enrollment.extra_lessons) || 0;
+				const sessionPrice = Number(enrollment.session_price) || 0;
+				if (extraLessons > 0 && sessionPrice > 0) {
+					if (!checkExtraStmt.get(enrollment.child_id, month, year)) {
+						const extraTotal = extraLessons * sessionPrice;
+						insertStmt.run(enrollment.child_id, enrollment.id, month, year, "حصص إضافية", "جلسة", extraLessons, sessionPrice, extraTotal, extraTotal, "unpaid", `${extraLessons} × ${sessionPrice}`, now, now);
+						createdCount++;
+					}
+				}
 			}
 		})();
 		return { created: createdCount };
@@ -22080,7 +22283,12 @@ ipcMain.handle("payments:bulkPay", async (_event, { ids }) => {
 ipcMain.handle("employees:get", async () => {
 	try {
 		requireAdmin();
-		return getDb().prepare("SELECT * FROM employees ORDER BY name ASC").all();
+		return getDb().prepare(`
+      SELECT e.*, er.name as role_name, er.salary_type_id as role_salary_type_id
+      FROM employees e
+      LEFT JOIN employee_roles er ON e.role_id = er.id
+      ORDER BY e.name ASC
+    `).all();
 	} catch (error) {
 		console.error("Failed to get employees:", error);
 		throw new Error(error.message || "Failed to get employees");
@@ -22090,16 +22298,24 @@ ipcMain.handle("employees:add", async (_event, employeeInput) => {
 	try {
 		requireAdmin();
 		const db = getDb();
-		const { name, role, base_salary, housing = 0, transport = 0 } = employeeInput;
-		if (!name || !role || base_salary === void 0) throw new Error("جميع الحقول الإلزامية مطلوبة / Missing required fields");
+		const { name, role_id, base_salary, housing = 0, transport = 0, salary_type_override_id = null } = employeeInput;
+		if (!name || base_salary === void 0) throw new Error("جميع الحقول الإلزامية مطلوبة / Missing required fields");
+		let roleText = employeeInput.role ?? "";
+		if (role_id) {
+			const roleRow = db.prepare("SELECT name FROM employee_roles WHERE id = ?").get(role_id);
+			if (!roleRow) throw new Error("الدور غير موجود / Role not found");
+			roleText = roleRow.name;
+		}
 		const netSalary = Number(base_salary) + Number(housing) + Number(transport);
 		const now = (/* @__PURE__ */ new Date()).toISOString();
 		const result = db.prepare(`
-      INSERT INTO employees (name, role, base_salary, housing, transport, net_salary, is_active, created_at, updated_at, synced)
-      VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, 0)
-    `).run(name, role, Number(base_salary), Number(housing), Number(transport), netSalary, now, now);
+      INSERT INTO employees (name, role, role_id, salary_type_override_id, base_salary, housing, transport, net_salary, is_active, created_at, updated_at, synced)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, 0)
+    `).run(roleText, roleText, role_id ?? null, salary_type_override_id, Number(base_salary), Number(housing), Number(transport), netSalary, now, now);
 		const createdId = Number(result.lastInsertRowid);
-		return db.prepare("SELECT * FROM employees WHERE id = ?").get(createdId);
+		return db.prepare(`
+      SELECT e.*, er.name as role_name FROM employees e LEFT JOIN employee_roles er ON e.role_id = er.id WHERE e.id = ?
+    `).get(createdId);
 	} catch (error) {
 		console.error("Failed to add employee:", error);
 		throw new Error(error.message || "Failed to add employee");
@@ -22113,17 +22329,27 @@ ipcMain.handle("employees:update", async (_event, { id, patch }) => {
 		const emp = db.prepare("SELECT * FROM employees WHERE id = ?").get(id);
 		if (!emp) throw new Error("الموظف غير موجود / Employee not found");
 		const name = patch.name !== void 0 ? patch.name : emp.name;
-		const role = patch.role !== void 0 ? patch.role : emp.role;
+		let role = patch.role !== void 0 ? patch.role : emp.role;
+		let role_id = patch.role_id !== void 0 ? patch.role_id : emp.role_id;
+		const salary_type_override_id = patch.salary_type_override_id !== void 0 ? patch.salary_type_override_id : emp.salary_type_override_id;
 		const base_salary = patch.base_salary !== void 0 ? Number(patch.base_salary) : emp.base_salary;
 		const housing = patch.housing !== void 0 ? Number(patch.housing) : emp.housing;
 		const transport = patch.transport !== void 0 ? Number(patch.transport) : emp.transport;
+		if (patch.role_id !== void 0 && patch.role_id !== null) {
+			const roleRow = db.prepare("SELECT name FROM employee_roles WHERE id = ?").get(patch.role_id);
+			if (!roleRow) throw new Error("الدور غير موجود / Role not found");
+			role = roleRow.name;
+			role_id = patch.role_id;
+		}
 		const netSalary = base_salary + housing + transport;
 		db.prepare(`
       UPDATE employees
-      SET name = ?, role = ?, base_salary = ?, housing = ?, transport = ?, net_salary = ?, updated_at = ?, synced = 0
+      SET name = ?, role = ?, role_id = ?, salary_type_override_id = ?, base_salary = ?, housing = ?, transport = ?, net_salary = ?, updated_at = ?, synced = 0
       WHERE id = ?
-    `).run(name, role, base_salary, housing, transport, netSalary, (/* @__PURE__ */ new Date()).toISOString(), id);
-		return db.prepare("SELECT * FROM employees WHERE id = ?").get(id);
+    `).run(name, role, role_id, salary_type_override_id, base_salary, housing, transport, netSalary, (/* @__PURE__ */ new Date()).toISOString(), id);
+		return db.prepare(`
+      SELECT e.*, er.name as role_name FROM employees e LEFT JOIN employee_roles er ON e.role_id = er.id WHERE e.id = ?
+    `).get(id);
 	} catch (error) {
 		console.error("Failed to update employee:", error);
 		throw new Error(error.message || "Failed to update employee");
@@ -22146,39 +22372,86 @@ ipcMain.handle("salary:get", async (_event, { month, year }) => {
 		requireAdmin();
 		const db = getDb();
 		if (!month || !year) throw new Error("Month and year are required");
-		return db.prepare(`
-      SELECT 
+		const rows = db.prepare(`
+      SELECT
         COALESCE(s.id, -e.id) as id,
         e.id as employee_id,
         e.name as employee_name,
         e.role as employee_role,
+        e.role_id,
+        e.salary_type_override_id,
         e.net_salary as net_salary,
         COALESCE(s.month, ?) as month,
         COALESCE(s.year, ?) as year,
         COALESCE(s.bonus, 0) as bonus,
         COALESCE(s.deductions, 0) as deductions,
-        COALESCE(s.actual_paid, e.net_salary) as actual_paid,
+        s.actual_paid as stored_actual_paid,
         s.paid_date,
         s.paid_date as pay_date,
-        s.notes
+        s.notes,
+        er.salary_type_id as role_salary_type_id,
+        COALESCE(e.salary_type_override_id, er.salary_type_id) as effective_salary_type_id
       FROM employees e
       LEFT JOIN salary_payments s ON e.id = s.employee_id AND s.month = ? AND s.year = ?
+      LEFT JOIN employee_roles er ON e.role_id = er.id
       WHERE e.is_active = 1 OR s.id IS NOT NULL
       ORDER BY e.name ASC
     `).all(month, year, month, year);
+		const monthNum = String(month === "يناير" ? 1 : month === "فبراير" ? 2 : month === "مارس" ? 3 : month === "أبريل" ? 4 : month === "مايو" ? 5 : month === "يونيو" ? 6 : month === "يوليو" ? 7 : month === "أغسطس" ? 8 : month === "سبتمبر" ? 9 : month === "أكتوبر" ? 10 : month === "نوفمبر" ? 11 : 12).padStart(2, "0");
+		const yearStr = String(year);
+		const monthStart = `${yearStr}-${monthNum}-01`;
+		const monthEnd = `${yearStr}-${monthNum}-31`;
+		return rows.map((row) => {
+			let salaryTypeName = null;
+			let salaryTypeMode = null;
+			let computedActualPaid = row.net_salary;
+			if (row.effective_salary_type_id) {
+				const st = db.prepare("SELECT * FROM salary_types WHERE id = ?").get(row.effective_salary_type_id);
+				if (st) {
+					salaryTypeName = st.name;
+					salaryTypeMode = st.mode;
+					let payableSessions = 0;
+					const sessionIds = db.prepare(`
+            SELECT ss.id FROM scheduled_sessions ss
+            JOIN session_teachers stc ON stc.session_id = ss.id
+            WHERE stc.employee_id = ? AND ss.session_date >= ? AND ss.session_date <= ?
+          `).all(row.employee_id, monthStart, monthEnd).map((s) => s.id);
+					if (sessionIds.length > 0) {
+						const placeholders = sessionIds.map(() => "?").join(",");
+						payableSessions = db.prepare(`
+              SELECT COUNT(*) as cnt FROM attendance_records WHERE session_id IN (${placeholders}) AND status != 'absent_excused'
+            `).get(...sessionIds).cnt;
+					}
+					if (st.mode === "fixed_monthly") computedActualPaid = st.monthly_rate ?? row.net_salary;
+					else if (st.mode === "per_session_fixed") computedActualPaid = payableSessions * (st.session_rate ?? 0);
+					else if (st.mode === "per_session_pct") computedActualPaid = payableSessions * (st.session_pct ?? 0) * 100;
+					else if (st.mode === "hybrid") computedActualPaid = (st.monthly_rate ?? 0) + payableSessions * (st.session_rate ?? 0);
+					row.payable_sessions = payableSessions;
+					row.total_sessions = sessionIds.length;
+				}
+			}
+			const bonus = row.bonus ?? 0;
+			const deductions = row.deductions ?? 0;
+			return {
+				...row,
+				salary_type_name: salaryTypeName,
+				salary_type_mode: salaryTypeMode,
+				actual_paid: row.stored_actual_paid ?? computedActualPaid + bonus - deductions
+			};
+		});
 	} catch (error) {
 		console.error("Failed to get salary payments:", error);
 		throw new Error(error.message || "Failed to get salary payments");
 	}
 });
-ipcMain.handle("salary:update", async (_event, { employee_id, month, year, bonus = 0, deductions = 0, paid_date = null, notes = null }) => {
+ipcMain.handle("salary:update", async (_event, { employee_id, month, year, bonus = 0, deductions = 0, paid_date = null, notes = null, override_amount = null }) => {
 	try {
 		requireAdmin();
 		const db = getDb();
 		if (!employee_id || !month || !year) throw new Error("Employee ID, month, and year are required");
 		const emp = db.prepare("SELECT net_salary FROM employees WHERE id = ?").get(employee_id);
 		if (!emp) throw new Error("الموظف غير موجود / Employee not found");
-		const actualPaid = Number(emp.net_salary) + Number(bonus) - Number(deductions);
+		const actualPaid = override_amount !== null ? Number(override_amount) : Number(emp.net_salary) + Number(bonus) - Number(deductions);
 		const now = (/* @__PURE__ */ new Date()).toISOString();
 		db.prepare(`
       INSERT INTO salary_payments (employee_id, month, year, bonus, deductions, actual_paid, paid_date, notes, updated_at, synced)
@@ -26230,6 +26503,7 @@ var paymentSchema = new Schema({
 	unit: String,
 	quantity: Number,
 	price: Number,
+	prorated_calculated: Number,
 	month: String,
 	year: Number,
 	total: Number,
@@ -26305,6 +26579,8 @@ var employeeSchema = new Schema({
 	},
 	name: String,
 	role: String,
+	role_id: Number,
+	salary_type_override_id: Number,
 	base_salary: Number,
 	housing: Number,
 	transport: Number,
@@ -26364,6 +26640,110 @@ var importedSnapshotSchema = new Schema({
 	synced: Number
 }, sharedOptions);
 var ImportedSnapshotModel = mongoose.models["sync_imported_snapshots"] || mongoose.model("sync_imported_snapshots", importedSnapshotSchema);
+var salaryTypeSchema = new Schema({
+	id: {
+		type: Number,
+		required: true,
+		unique: true
+	},
+	name: String,
+	mode: String,
+	monthly_rate: Number,
+	session_rate: Number,
+	session_pct: Number,
+	created_at: String,
+	updated_at: String,
+	synced: Number
+}, sharedOptions);
+var SalaryTypeModel = mongoose.models["sync_salary_types"] || mongoose.model("sync_salary_types", salaryTypeSchema);
+var employeeRoleSchema = new Schema({
+	id: {
+		type: Number,
+		required: true,
+		unique: true
+	},
+	name: String,
+	salary_type_id: Number,
+	created_at: String,
+	updated_at: String,
+	synced: Number
+}, sharedOptions);
+var EmployeeRoleModel = mongoose.models["sync_employee_roles"] || mongoose.model("sync_employee_roles", employeeRoleSchema);
+var serviceDefinitionSchema = new Schema({
+	id: {
+		type: Number,
+		required: true,
+		unique: true
+	},
+	name: String,
+	is_custom: Number,
+	price_monthly: Number,
+	price_daily: Number,
+	price_hourly: Number,
+	created_at: String,
+	updated_at: String,
+	synced: Number
+}, sharedOptions);
+var ServiceDefinitionModel = mongoose.models["sync_service_definitions"] || mongoose.model("sync_service_definitions", serviceDefinitionSchema);
+var scheduledSessionSchema = new Schema({
+	id: {
+		type: Number,
+		required: true,
+		unique: true
+	},
+	session_date: String,
+	service_id: Number,
+	group_name: String,
+	notes: String,
+	created_at: String,
+	updated_at: String,
+	synced: Number
+}, sharedOptions);
+var ScheduledSessionModel = mongoose.models["sync_scheduled_sessions"] || mongoose.model("sync_scheduled_sessions", scheduledSessionSchema);
+var sessionTeacherSchema = new Schema({
+	id: {
+		type: Number,
+		required: true,
+		unique: true
+	},
+	session_id: Number,
+	employee_id: Number,
+	synced: Number
+}, sharedOptions);
+var SessionTeacherModel = mongoose.models["sync_session_teachers"] || mongoose.model("sync_session_teachers", sessionTeacherSchema);
+var attendanceRecordSchema = new Schema({
+	id: {
+		type: Number,
+		required: true,
+		unique: true
+	},
+	session_id: Number,
+	child_id: Number,
+	status: String,
+	excuse_notes: String,
+	recorded_by: Number,
+	recorded_at: String,
+	updated_at: String,
+	synced: Number
+}, sharedOptions);
+var AttendanceRecordModel = mongoose.models["sync_attendance_records"] || mongoose.model("sync_attendance_records", attendanceRecordSchema);
+var attendanceConflictSchema = new Schema({
+	id: {
+		type: Number,
+		required: true,
+		unique: true
+	},
+	attendance_record_id: Number,
+	overwritten_status: String,
+	overwritten_by: String,
+	overwritten_at: String,
+	winning_status: String,
+	winning_by: String,
+	winning_at: String,
+	reviewed: Number,
+	created_at: String
+}, sharedOptions);
+var AttendanceConflictModel = mongoose.models["sync_attendance_conflicts"] || mongoose.model("sync_attendance_conflicts", attendanceConflictSchema);
 var SYNC_ENTITIES = [
 	{
 		name: "children",
@@ -26414,6 +26794,41 @@ var SYNC_ENTITIES = [
 		name: "tombstones",
 		model: TombstoneModel,
 		table: "tombstones"
+	},
+	{
+		name: "salary_types",
+		model: SalaryTypeModel,
+		table: "salary_types"
+	},
+	{
+		name: "employee_roles",
+		model: EmployeeRoleModel,
+		table: "employee_roles"
+	},
+	{
+		name: "service_definitions",
+		model: ServiceDefinitionModel,
+		table: "service_definitions"
+	},
+	{
+		name: "scheduled_sessions",
+		model: ScheduledSessionModel,
+		table: "scheduled_sessions"
+	},
+	{
+		name: "session_teachers",
+		model: SessionTeacherModel,
+		table: "session_teachers"
+	},
+	{
+		name: "attendance_records",
+		model: AttendanceRecordModel,
+		table: "attendance_records"
+	},
+	{
+		name: "attendance_conflicts",
+		model: AttendanceConflictModel,
+		table: "attendance_conflicts"
 	}
 ];
 //#endregion
@@ -26900,6 +27315,405 @@ ipcMain.handle("dashboard:get", async (_event, { month, year }) => {
 	} catch (error) {
 		console.error("Failed to get dashboard data:", error);
 		throw new Error(error.message || "Failed to retrieve dashboard data");
+	}
+});
+//#endregion
+//#region electron/ipc/rolesIPC.ts
+ipcMain.handle("roles:list", async () => {
+	try {
+		requireAdmin();
+		return getDb().prepare("SELECT * FROM employee_roles ORDER BY name ASC").all();
+	} catch (error) {
+		throw new Error(error.message || "Failed to list roles");
+	}
+});
+ipcMain.handle("roles:add", async (_event, { name }) => {
+	try {
+		requireAdmin();
+		const db = getDb();
+		if (!name?.trim()) throw new Error("اسم الدور مطلوب / Role name is required");
+		const now = (/* @__PURE__ */ new Date()).toISOString();
+		const result = db.prepare("INSERT INTO employee_roles (name, created_at, updated_at, synced) VALUES (?, ?, ?, 0)").run(name.trim(), now, now);
+		return db.prepare("SELECT * FROM employee_roles WHERE id = ?").get(Number(result.lastInsertRowid));
+	} catch (error) {
+		throw new Error(error.message || "Failed to add role");
+	}
+});
+ipcMain.handle("roles:update", async (_event, { id, patch }) => {
+	try {
+		requireAdmin();
+		const db = getDb();
+		const role = db.prepare("SELECT * FROM employee_roles WHERE id = ?").get(id);
+		if (!role) throw new Error("الدور غير موجود / Role not found");
+		const name = patch.name !== void 0 ? patch.name : role.name;
+		const salary_type_id = patch.salary_type_id !== void 0 ? patch.salary_type_id : role.salary_type_id;
+		db.prepare("UPDATE employee_roles SET name = ?, salary_type_id = ?, updated_at = ?, synced = 0 WHERE id = ?").run(name, salary_type_id, (/* @__PURE__ */ new Date()).toISOString(), id);
+		if (patch.name !== void 0) db.prepare("UPDATE employees SET role = ?, updated_at = ?, synced = 0 WHERE role_id = ?").run(name, (/* @__PURE__ */ new Date()).toISOString(), id);
+		return db.prepare("SELECT * FROM employee_roles WHERE id = ?").get(id);
+	} catch (error) {
+		throw new Error(error.message || "Failed to update role");
+	}
+});
+ipcMain.handle("roles:delete", async (_event, { id }) => {
+	try {
+		requireAdmin();
+		const db = getDb();
+		const active = db.prepare("SELECT COUNT(*) as cnt FROM employees WHERE role_id = ? AND is_active = 1").get(id);
+		if (active.cnt > 0) throw new Error(`لا يمكن حذف الدور — يوجد ${active.cnt} موظف نشط / Cannot delete role — ${active.cnt} active employee(s) assigned`);
+		db.prepare("DELETE FROM employee_roles WHERE id = ?").run(id);
+		return { ok: true };
+	} catch (error) {
+		throw new Error(error.message || "Failed to delete role");
+	}
+});
+//#endregion
+//#region electron/ipc/salaryTypesIPC.ts
+ipcMain.handle("salaryTypes:list", async () => {
+	try {
+		requireAdmin();
+		return getDb().prepare("SELECT * FROM salary_types ORDER BY name ASC").all();
+	} catch (error) {
+		throw new Error(error.message || "Failed to list salary types");
+	}
+});
+ipcMain.handle("salaryTypes:add", async (_event, input) => {
+	try {
+		requireAdmin();
+		const db = getDb();
+		const { name, mode, monthly_rate = null, session_rate = null, session_pct = null } = input;
+		if (!name?.trim()) throw new Error("الاسم مطلوب / Name is required");
+		if (![
+			"fixed_monthly",
+			"per_session_fixed",
+			"per_session_pct",
+			"hybrid"
+		].includes(mode)) throw new Error("نوع الراتب غير صالح / Invalid salary mode");
+		if (mode === "per_session_pct" && (session_pct == null || session_pct <= 0 || session_pct > 1)) throw new Error("نسبة الجلسة يجب أن تكون بين 0 و 1 / Session percentage must be between 0 and 1");
+		const now = (/* @__PURE__ */ new Date()).toISOString();
+		const result = db.prepare(`
+      INSERT INTO salary_types (name, mode, monthly_rate, session_rate, session_pct, created_at, updated_at, synced)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 0)
+    `).run(name.trim(), mode, monthly_rate, session_rate, session_pct, now, now);
+		return db.prepare("SELECT * FROM salary_types WHERE id = ?").get(Number(result.lastInsertRowid));
+	} catch (error) {
+		throw new Error(error.message || "Failed to add salary type");
+	}
+});
+ipcMain.handle("salaryTypes:update", async (_event, { id, patch }) => {
+	try {
+		requireAdmin();
+		const db = getDb();
+		const st = db.prepare("SELECT * FROM salary_types WHERE id = ?").get(id);
+		if (!st) throw new Error("نوع الراتب غير موجود / Salary type not found");
+		const name = patch.name !== void 0 ? patch.name : st.name;
+		const mode = patch.mode !== void 0 ? patch.mode : st.mode;
+		const monthly_rate = patch.monthly_rate !== void 0 ? patch.monthly_rate : st.monthly_rate;
+		const session_rate = patch.session_rate !== void 0 ? patch.session_rate : st.session_rate;
+		const session_pct = patch.session_pct !== void 0 ? patch.session_pct : st.session_pct;
+		db.prepare(`
+      UPDATE salary_types SET name = ?, mode = ?, monthly_rate = ?, session_rate = ?, session_pct = ?, updated_at = ?, synced = 0 WHERE id = ?
+    `).run(name, mode, monthly_rate, session_rate, session_pct, (/* @__PURE__ */ new Date()).toISOString(), id);
+		return db.prepare("SELECT * FROM salary_types WHERE id = ?").get(id);
+	} catch (error) {
+		throw new Error(error.message || "Failed to update salary type");
+	}
+});
+ipcMain.handle("salaryTypes:delete", async (_event, { id }) => {
+	try {
+		requireAdmin();
+		const db = getDb();
+		const roleRef = db.prepare("SELECT COUNT(*) as cnt FROM employee_roles WHERE salary_type_id = ?").get(id);
+		const empRef = db.prepare("SELECT COUNT(*) as cnt FROM employees WHERE salary_type_override_id = ?").get(id);
+		if (roleRef.cnt > 0 || empRef.cnt > 0) throw new Error(`لا يمكن الحذف — مستخدم في ${roleRef.cnt} دور و ${empRef.cnt} موظف / Cannot delete — referenced by ${roleRef.cnt} role(s) and ${empRef.cnt} employee(s)`);
+		db.prepare("DELETE FROM salary_types WHERE id = ?").run(id);
+		return { ok: true };
+	} catch (error) {
+		throw new Error(error.message || "Failed to delete salary type");
+	}
+});
+//#endregion
+//#region electron/ipc/serviceDefinitionsIPC.ts
+ipcMain.handle("serviceDefinitions:list", async () => {
+	try {
+		checkAuth$5();
+		return getDb().prepare("SELECT * FROM service_definitions ORDER BY is_custom ASC, name ASC").all();
+	} catch (error) {
+		throw new Error(error.message || "Failed to list service definitions");
+	}
+});
+ipcMain.handle("serviceDefinitions:add", async (_event, input) => {
+	try {
+		requireAdmin();
+		const db = getDb();
+		const { name, price_monthly = null, price_daily = null, price_hourly = null } = input;
+		if (!name?.trim()) throw new Error("الاسم مطلوب / Name is required");
+		if (price_monthly == null && price_daily == null && price_hourly == null) throw new Error("يجب تحديد سعر واحد على الأقل / At least one price is required");
+		const now = (/* @__PURE__ */ new Date()).toISOString();
+		const result = db.prepare(`
+      INSERT INTO service_definitions (name, is_custom, price_monthly, price_daily, price_hourly, created_at, updated_at, synced)
+      VALUES (?, 1, ?, ?, ?, ?, ?, 0)
+    `).run(name.trim(), price_monthly, price_daily, price_hourly, now, now);
+		return db.prepare("SELECT * FROM service_definitions WHERE id = ?").get(Number(result.lastInsertRowid));
+	} catch (error) {
+		throw new Error(error.message || "Failed to add service definition");
+	}
+});
+ipcMain.handle("serviceDefinitions:update", async (_event, { id, patch }) => {
+	try {
+		requireAdmin();
+		const db = getDb();
+		const svc = db.prepare("SELECT * FROM service_definitions WHERE id = ?").get(id);
+		if (!svc) throw new Error("الخدمة غير موجودة / Service not found");
+		const name = patch.name !== void 0 ? patch.name : svc.name;
+		const price_monthly = patch.price_monthly !== void 0 ? patch.price_monthly : svc.price_monthly;
+		const price_daily = patch.price_daily !== void 0 ? patch.price_daily : svc.price_daily;
+		const price_hourly = patch.price_hourly !== void 0 ? patch.price_hourly : svc.price_hourly;
+		db.prepare(`
+      UPDATE service_definitions SET name = ?, price_monthly = ?, price_daily = ?, price_hourly = ?, updated_at = ?, synced = 0 WHERE id = ?
+    `).run(name, price_monthly, price_daily, price_hourly, (/* @__PURE__ */ new Date()).toISOString(), id);
+		return db.prepare("SELECT * FROM service_definitions WHERE id = ?").get(id);
+	} catch (error) {
+		throw new Error(error.message || "Failed to update service definition");
+	}
+});
+ipcMain.handle("serviceDefinitions:delete", async (_event, { id }) => {
+	try {
+		requireAdmin();
+		const db = getDb();
+		const svc = db.prepare("SELECT * FROM service_definitions WHERE id = ?").get(id);
+		if (!svc) throw new Error("الخدمة غير موجودة / Service not found");
+		if (svc.is_custom === 0) throw new Error("لا يمكن حذف الخدمات الافتراضية / Cannot delete built-in services");
+		const enrolled = db.prepare("SELECT COUNT(*) as cnt FROM child_services WHERE service = ?").get(svc.name);
+		if (enrolled.cnt > 0) throw new Error(`لا يمكن الحذف — ${enrolled.cnt} طفل مسجل في هذه الخدمة / Cannot delete — ${enrolled.cnt} child(ren) enrolled`);
+		db.prepare("DELETE FROM service_definitions WHERE id = ?").run(id);
+		return { ok: true };
+	} catch (error) {
+		throw new Error(error.message || "Failed to delete service definition");
+	}
+});
+//#endregion
+//#region electron/ipc/sessionsIPC.ts
+ipcMain.handle("sessions:list", async (_event, { month, year }) => {
+	try {
+		checkAuth$5();
+		const db = getDb();
+		const sessions = db.prepare(`
+      SELECT ss.*, sd.name as service_name
+      FROM scheduled_sessions ss
+      LEFT JOIN service_definitions sd ON ss.service_id = sd.id
+      WHERE strftime('%m', ss.session_date) = printf('%02d', ?) AND strftime('%Y', ss.session_date) = ?
+      ORDER BY ss.session_date ASC
+    `).all(month, String(year));
+		for (const s of sessions) s.teachers = db.prepare(`
+        SELECT e.id, e.name, er.name as role_name
+        FROM session_teachers st
+        JOIN employees e ON st.employee_id = e.id
+        LEFT JOIN employee_roles er ON e.role_id = er.id
+        WHERE st.session_id = ?
+      `).all(s.id);
+		return sessions;
+	} catch (error) {
+		throw new Error(error.message || "Failed to list sessions");
+	}
+});
+ipcMain.handle("sessions:add", async (_event, input) => {
+	try {
+		requireAdmin();
+		const db = getDb();
+		const { session_date, service_id = null, group_name = null, notes = null, employee_ids = [] } = input;
+		if (!session_date) throw new Error("تاريخ الجلسة مطلوب / Session date is required");
+		const now = (/* @__PURE__ */ new Date()).toISOString();
+		const result = db.prepare(`
+      INSERT INTO scheduled_sessions (session_date, service_id, group_name, notes, created_at, updated_at, synced)
+      VALUES (?, ?, ?, ?, ?, ?, 0)
+    `).run(session_date, service_id, group_name, notes, now, now);
+		const sessionId = Number(result.lastInsertRowid);
+		for (const empId of employee_ids) db.prepare("INSERT OR IGNORE INTO session_teachers (session_id, employee_id, synced) VALUES (?, ?, 0)").run(sessionId, empId);
+		return db.prepare("SELECT * FROM scheduled_sessions WHERE id = ?").get(sessionId);
+	} catch (error) {
+		throw new Error(error.message || "Failed to add session");
+	}
+});
+ipcMain.handle("sessions:update", async (_event, { id, patch }) => {
+	try {
+		requireAdmin();
+		const db = getDb();
+		const s = db.prepare("SELECT * FROM scheduled_sessions WHERE id = ?").get(id);
+		if (!s) throw new Error("الجلسة غير موجودة / Session not found");
+		const session_date = patch.session_date ?? s.session_date;
+		const service_id = patch.service_id !== void 0 ? patch.service_id : s.service_id;
+		const group_name = patch.group_name !== void 0 ? patch.group_name : s.group_name;
+		const notes = patch.notes !== void 0 ? patch.notes : s.notes;
+		db.prepare(`
+      UPDATE scheduled_sessions SET session_date = ?, service_id = ?, group_name = ?, notes = ?, updated_at = ?, synced = 0 WHERE id = ?
+    `).run(session_date, service_id, group_name, notes, (/* @__PURE__ */ new Date()).toISOString(), id);
+		return db.prepare("SELECT * FROM scheduled_sessions WHERE id = ?").get(id);
+	} catch (error) {
+		throw new Error(error.message || "Failed to update session");
+	}
+});
+ipcMain.handle("sessions:delete", async (_event, { id }) => {
+	try {
+		requireAdmin();
+		const db = getDb();
+		if (db.prepare("SELECT COUNT(*) as cnt FROM attendance_records WHERE session_id = ?").get(id).cnt > 0) throw new Error("لا يمكن حذف الجلسة — يوجد سجلات حضور / Cannot delete session — attendance records exist");
+		db.prepare("DELETE FROM session_teachers WHERE session_id = ?").run(id);
+		db.prepare("DELETE FROM scheduled_sessions WHERE id = ?").run(id);
+		return { ok: true };
+	} catch (error) {
+		throw new Error(error.message || "Failed to delete session");
+	}
+});
+ipcMain.handle("sessions:assignTeachers", async (_event, { session_id, employee_ids }) => {
+	try {
+		requireAdmin();
+		const db = getDb();
+		db.prepare("DELETE FROM session_teachers WHERE session_id = ?").run(session_id);
+		for (const empId of employee_ids) db.prepare("INSERT OR IGNORE INTO session_teachers (session_id, employee_id, synced) VALUES (?, ?, 0)").run(session_id, empId);
+		return { ok: true };
+	} catch (error) {
+		throw new Error(error.message || "Failed to assign teachers");
+	}
+});
+ipcMain.handle("sessions:proRateCalc", async (_event, { child_id, billing_month, billing_year }) => {
+	try {
+		requireAdmin();
+		const db = getDb();
+		const child = db.prepare("SELECT reg_date, session_price FROM children WHERE id = ?").get(child_id);
+		if (!child) throw new Error("الطفل غير موجود / Child not found");
+		const monthNum = String(billing_month).padStart(2, "0");
+		const yearStr = String(billing_year);
+		const monthStart = `${yearStr}-${monthNum}-01`;
+		const monthEnd = `${yearStr}-${monthNum}-31`;
+		const sessionCount = db.prepare(`
+      SELECT COUNT(*) as cnt FROM scheduled_sessions
+      WHERE session_date >= ? AND session_date <= ? AND session_date >= ?
+    `).get(monthStart, monthEnd, child.reg_date).cnt;
+		const perSessionPrice = child.session_price ?? 0;
+		return {
+			session_count: sessionCount,
+			calculated_amount: sessionCount * perSessionPrice,
+			per_session_price: perSessionPrice
+		};
+	} catch (error) {
+		throw new Error(error.message || "Failed to calculate pro-rate");
+	}
+});
+//#endregion
+//#region electron/ipc/attendanceIPC.ts
+ipcMain.handle("attendance:getSheet", async (_event, { session_id }) => {
+	try {
+		checkAuth$5();
+		const db = getDb();
+		const user = getCurrentUser();
+		if (user?.role !== "admin") {
+			const emp = db.prepare("SELECT id FROM employees WHERE name = ?").get(user?.name ?? "");
+			if (emp) {
+				if (!db.prepare("SELECT 1 FROM session_teachers WHERE session_id = ? AND employee_id = ?").get(session_id, emp.id)) throw new Error("غير مصرح لك بالوصول / Not authorized for this session");
+			}
+		}
+		return db.prepare(`
+      SELECT c.id as child_id, c.name as child_name,
+        ar.id as attendance_id, ar.status, ar.excuse_notes, ar.recorded_by, ar.recorded_at, ar.updated_at
+      FROM children c
+      LEFT JOIN attendance_records ar ON ar.child_id = c.id AND ar.session_id = ?
+      WHERE c.is_active = 1
+      ORDER BY c.name ASC
+    `).all(session_id);
+	} catch (error) {
+		throw new Error(error.message || "Failed to get attendance sheet");
+	}
+});
+ipcMain.handle("attendance:record", async (_event, records) => {
+	try {
+		checkAuth$5();
+		const db = getDb();
+		const user = getCurrentUser();
+		const now = (/* @__PURE__ */ new Date()).toISOString();
+		const results = [];
+		db.transaction(() => {
+			for (const rec of records) {
+				const { session_id, child_id, status, excuse_notes = null } = rec;
+				if (![
+					"attended",
+					"absent_excused",
+					"absent_unexcused"
+				].includes(status)) throw new Error(`Invalid status: ${status}`);
+				db.prepare(`
+          INSERT INTO attendance_records (session_id, child_id, status, excuse_notes, recorded_by, recorded_at, updated_at, synced)
+          VALUES (?, ?, ?, ?, ?, ?, ?, 0)
+          ON CONFLICT(session_id, child_id) DO UPDATE SET
+            status = excluded.status,
+            excuse_notes = excluded.excuse_notes,
+            recorded_by = excluded.recorded_by,
+            updated_at = excluded.updated_at,
+            synced = 0
+        `).run(session_id, child_id, status, excuse_notes, user?.id ?? null, now, now);
+				results.push(db.prepare("SELECT * FROM attendance_records WHERE session_id = ? AND child_id = ?").get(session_id, child_id));
+			}
+		})();
+		return results;
+	} catch (error) {
+		throw new Error(error.message || "Failed to record attendance");
+	}
+});
+ipcMain.handle("attendance:getConflicts", async () => {
+	try {
+		requireAdmin();
+		return getDb().prepare("SELECT * FROM attendance_conflicts WHERE reviewed = 0 ORDER BY created_at DESC").all();
+	} catch (error) {
+		throw new Error(error.message || "Failed to get conflicts");
+	}
+});
+ipcMain.handle("attendance:resolveConflict", async (_event, { conflict_id, final_status }) => {
+	try {
+		requireAdmin();
+		const db = getDb();
+		const conflict = db.prepare("SELECT * FROM attendance_conflicts WHERE id = ?").get(conflict_id);
+		if (!conflict) throw new Error("التعارض غير موجود / Conflict not found");
+		db.prepare("UPDATE attendance_conflicts SET reviewed = 1 WHERE id = ?").run(conflict_id);
+		db.prepare("UPDATE attendance_records SET status = ?, updated_at = ?, synced = 0 WHERE id = ?").run(final_status, (/* @__PURE__ */ new Date()).toISOString(), conflict.attendance_record_id);
+		return { ok: true };
+	} catch (error) {
+		throw new Error(error.message || "Failed to resolve conflict");
+	}
+});
+ipcMain.handle("attendance:getSummary", async (_event, { employee_id, month, year }) => {
+	try {
+		requireAdmin();
+		const db = getDb();
+		const monthNum = String(month).padStart(2, "0");
+		const yearStr = String(year);
+		const monthStart = `${yearStr}-${monthNum}-01`;
+		const monthEnd = `${yearStr}-${monthNum}-31`;
+		const sessionIds = db.prepare(`
+      SELECT ss.id FROM scheduled_sessions ss
+      JOIN session_teachers st ON st.session_id = ss.id
+      WHERE st.employee_id = ? AND ss.session_date >= ? AND ss.session_date <= ?
+    `).all(employee_id, monthStart, monthEnd).map((s) => s.id);
+		if (sessionIds.length === 0) return {
+			total_sessions: 0,
+			payable_sessions: 0,
+			excused_absences: 0,
+			unexcused_absences: 0,
+			breakdown: []
+		};
+		const placeholders = sessionIds.map(() => "?").join(",");
+		const records = db.prepare(`
+      SELECT status, COUNT(*) as cnt FROM attendance_records WHERE session_id IN (${placeholders}) GROUP BY status
+    `).all(...sessionIds);
+		const attended = records.find((r) => r.status === "attended")?.cnt ?? 0;
+		const excused = records.find((r) => r.status === "absent_excused")?.cnt ?? 0;
+		const unexcused = records.find((r) => r.status === "absent_unexcused")?.cnt ?? 0;
+		return {
+			total_sessions: sessionIds.length,
+			payable_sessions: attended + unexcused,
+			excused_absences: excused,
+			unexcused_absences: unexcused,
+			breakdown: records
+		};
+	} catch (error) {
+		throw new Error(error.message || "Failed to get attendance summary");
 	}
 });
 //#endregion
