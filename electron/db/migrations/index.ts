@@ -493,10 +493,12 @@ const migrations: Migration[] = [
           winning_by TEXT,
           winning_at TEXT NOT NULL,
           reviewed INTEGER DEFAULT 0,
-          created_at TEXT NOT NULL
+          created_at TEXT NOT NULL,
+          synced INTEGER DEFAULT 0
         );
       `)
       addCol('ALTER TABLE attendance_records ADD COLUMN synced INTEGER DEFAULT 0;')
+      addCol('ALTER TABLE attendance_conflicts ADD COLUMN synced INTEGER DEFAULT 0;')
     }
   },
   {
@@ -521,6 +523,12 @@ const migrations: Migration[] = [
       addCol('ALTER TABLE scheduled_sessions ADD COLUMN synced INTEGER DEFAULT 0;')
       addCol('ALTER TABLE session_teachers ADD COLUMN synced INTEGER DEFAULT 0;')
       addCol('ALTER TABLE attendance_records ADD COLUMN synced INTEGER DEFAULT 0;')
+    }
+  },
+  {
+    name: '020_attendance_conflicts_synced',
+    up: (db) => {
+      try { db.exec('ALTER TABLE attendance_conflicts ADD COLUMN synced INTEGER DEFAULT 0;') } catch { /* already exists */ }
     }
   },
   {
