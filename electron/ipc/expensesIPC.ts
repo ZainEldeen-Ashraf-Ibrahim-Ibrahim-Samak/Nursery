@@ -21,12 +21,12 @@ ipcMain.handle('expenses:get', async (_event, { year }) => {
 
     if (!year) throw new Error('Year is required')
 
-    // Get all distinct items that have any entry (for any year)
-    const items = db.prepare(
-      'SELECT DISTINCT item, category FROM expenses ORDER BY item ASC'
-    ).all() as { item: string; category: string | null }[]
+    // Get all distinct item names that have any entry (for any year)
+    const itemNames = (db.prepare(
+      'SELECT DISTINCT item FROM expenses ORDER BY item ASC'
+    ).all() as { item: string }[]).map(r => r.item)
 
-    if (items.length === 0) {
+    if (itemNames.length === 0) {
       return []
     }
 
@@ -37,7 +37,13 @@ ipcMain.handle('expenses:get', async (_event, { year }) => {
 
     // Build a full 12-month grid for each distinct item
     const result: Expense[] = []
-    for (const { item, category } of items) {
+    for (const item of itemNames) {
+      // Resolve category from first real row for this item (any year/month)
+      const categoryRow = db.prepare(
+        'SELECT category FROM expenses WHERE item = ? AND category IS NOT NULL LIMIT 1'
+      ).get(item) as { category: string | null } | undefined
+      const category = categoryRow?.category ?? null
+
       for (const month of arabicMonths) {
         const found = rows.find((r) => r.item === item && r.month === month)
         if (found) {
@@ -50,7 +56,7 @@ ipcMain.handle('expenses:get', async (_event, { year }) => {
             month,
             year: Number(year),
             amount: 0,
-            category: category ?? null,
+            category,
             notes: null,
             created_at: '',
             synced: 0
