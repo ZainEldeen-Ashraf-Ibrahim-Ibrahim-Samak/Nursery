@@ -26,12 +26,8 @@ export async function seedDatabase(db: Db): Promise<void> {
     `).run(username, hashedPassword, 'admin', 'Administrator', 1)
   }
 
-  // Seed default settings if they don't exist
-  const settingsCountRow = db.prepare('SELECT COUNT(*) as count FROM settings').get() as { count: number }
-  
-  if (settingsCountRow.count === 0) {
-    console.log('No settings found. Seeding default configuration...')
-    
+  // Seed default settings (INSERT OR IGNORE — safe to run every time)
+  {
     // Non-sensitive defaults; each is overridable via an optional SEED_* env key
     // (first-run only — see specs/002-excel-import-env-config/contracts/env-vars.md).
     const defaultSettings: { key: string; value: string }[] = [
@@ -84,3 +80,4 @@ export async function seedDatabase(db: Db): Promise<void> {
     transaction()
   }
 }
+

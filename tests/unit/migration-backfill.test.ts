@@ -87,6 +87,19 @@ describe('Migration Backfill 004/005', () => {
         created_at TEXT DEFAULT CURRENT_TIMESTAMP
       );
       
+      CREATE TABLE IF NOT EXISTS employees (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        role TEXT NOT NULL,
+        base_salary REAL NOT NULL,
+        housing REAL DEFAULT 0,
+        transport REAL DEFAULT 0,
+        net_salary REAL NOT NULL,
+        is_active INTEGER DEFAULT 1,
+        created_at TEXT NOT NULL,
+        synced INTEGER DEFAULT 0
+      );
+
       INSERT INTO migrations (name) VALUES ('001_initial_schema'), ('002_expenses_unique_constraint'), ('003_add_updated_at_columns');
     `)
 
