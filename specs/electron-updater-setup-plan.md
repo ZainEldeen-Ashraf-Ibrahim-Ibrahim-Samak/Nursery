@@ -279,6 +279,15 @@ async function getOrCreateRelease() {
   }, JSON.stringify({ tag_name: TAG, name: TAG, draft: false, prerelease: false }))
   if (create.status !== 201) throw new Error(`Failed to create release: ${JSON.stringify(create.body)}`)
   console.log(`✓ Created release ${TAG} (id: ${create.body.id})`)
+
+  // GitHub needs a few seconds to propagate a new release before assets can be uploaded
+  process.stdout.write('  Waiting for release to be ready')
+  for (let i = 0; i < 5; i++) {
+    await new Promise((r) => setTimeout(r, 1000))
+    process.stdout.write('.')
+  }
+  process.stdout.write('\n')
+
   return create.body
 }
 
@@ -335,8 +344,15 @@ function uploadAsset(releaseId, name, filePath) {
       })
     })
     req.on('error', reject)
+    // Stream with backpressure so large files don't overflow the socket
     const stream = fs.createReadStream(filePath)
-    stream.on('data', (chunk) => { uploaded += chunk.length; drawProgress(uploaded, size, name); req.write(chunk) })
+    stream.on('data', (chunk) => {
+      uploaded += chunk.length
+      drawProgress(uploaded, size, name)
+      const ok = req.write(chunk)
+      if (!ok) stream.pause()
+    })
+    req.on('drain', () => stream.resume())
     stream.on('end', () => req.end())
     stream.on('error', reject)
   })
@@ -511,3 +527,4 @@ Get-ChildItem -Recurse -Path src -Include *.tsx,*.ts | ForEach-Object {
 | App doesn't open after install | `JWT_SECRET` missing | Ensure `.env.example` is in `extraFiles` and has a default `JWT_SECRET` |
 | `ERR_IPC_CHANNEL_CLOSED` in dev | `autoUpdater` called in dev mode | Guard with `if (app.isPackaged)` |
 | `Bad credentials` on publish | Token revoked or wrong | Generate new PAT at github.com/settings/tokens |
+| `Upload failed (404)` on first publish | GitHub release not propagated yet | Script waits 5s automatically — if still fails, delete the release/tag and re-run |
