@@ -231,13 +231,21 @@ function initAutoUpdater() {
 
   let _updateRetried = false
   autoUpdater.on('error', (err) => {
-    const isNetworkError = err.message?.includes('ERR_HTTP2') || err.message?.includes('net::')
+    const msg = err.message || ''
+    const isRateLimit = msg.includes('429') || msg.includes('Too Many Requests')
+    const isNetworkError = !isRateLimit && (msg.includes('ERR_HTTP2') || msg.includes('net::') || msg.includes('ECONNRESET') || msg.includes('ETIMEDOUT'))
+
     if (isNetworkError && !_updateRetried) {
       _updateRetried = true
       setTimeout(() => autoUpdater.downloadUpdate().catch(() => {}), 3000)
       return
     }
-    mainWindow?.webContents.send('updater:status', { event: 'error', error: err.message })
+
+    mainWindow?.webContents.send('updater:status', {
+      event: 'error',
+      error: isRateLimit ? '429' : msg,
+      errorCode: isRateLimit ? 'rate_limit' : isNetworkError ? 'network' : 'unknown',
+    })
   })
 
   autoUpdater.on('download-progress', (progressObj) => {

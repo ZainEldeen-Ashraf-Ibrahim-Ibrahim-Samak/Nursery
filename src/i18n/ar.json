@@ -124,6 +124,7 @@
     "update_downloaded": "تم تحميل التحديث بنجاح! جاهز للتثبيت.",
     "update_error": "حدث خطأ أثناء التحديث: {{error}}",
     "update_error_network": "فشل تنزيل التحديث (خطأ في الشبكة).",
+    "update_error_rate_limit": "تجاوزت حد طلبات GitHub. انتظر بضع دقائق ثم نزّل التحديث يدوياً.",
     "download_manually": "تنزيل يدوياً",
     "retry_update": "إعادة المحاولة",
     "restart_install": "إعادة التشغيل والتثبيت",

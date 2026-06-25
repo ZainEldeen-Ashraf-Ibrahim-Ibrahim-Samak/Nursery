@@ -129,6 +129,7 @@ const api = {
         event: 'checking-for-update' | 'update-available' | 'update-not-available' | 'error' | 'download-progress' | 'update-downloaded'
         info?: any
         error?: string
+        errorCode?: 'rate_limit' | 'network' | 'unknown'
         progress?: { percent: number; bytesPerSecond: number; transferred: number; total: number }
       }) => void
     ) => {

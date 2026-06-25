@@ -6,18 +6,15 @@ interface UpdaterStatus {
   event: 'checking-for-update' | 'update-available' | 'update-not-available' | 'error' | 'download-progress' | 'update-downloaded'
   info?: any
   error?: string
+  errorCode?: 'rate_limit' | 'network' | 'unknown'
   progress?: { percent: number; bytesPerSecond: number; transferred: number; total: number }
 }
-
-const isNetworkError = (msg: string) =>
-  msg.includes('ERR_HTTP2') || msg.includes('net::') || msg.includes('ECONNRESET') || msg.includes('ETIMEDOUT')
 
 export const UpdateBanner: React.FC = () => {
   const { t } = useTranslation()
   const [status, setStatus] = useState<UpdaterStatus['event'] | 'idle'>('idle')
   const [percent, setPercent] = useState<number>(0)
-  const [errorMsg, setErrorMsg] = useState<string>('')
-  const [networkError, setNetworkError] = useState<boolean>(false)
+  const [errorCode, setErrorCode] = useState<'rate_limit' | 'network' | 'unknown' | null>(null)
   const [isVisible, setIsVisible] = useState<boolean>(false)
 
   useEffect(() => {
@@ -34,18 +31,17 @@ export const UpdateBanner: React.FC = () => {
       } else if (payload.event === 'update-not-available') {
         setTimeout(() => setIsVisible(false), 5000)
       } else if (payload.event === 'download-progress' && payload.progress) {
-        setNetworkError(false)
+        setErrorCode(null)
         setIsVisible(true)
         setPercent(Math.round(payload.progress.percent))
       } else if (payload.event === 'update-downloaded') {
         setIsVisible(true)
       } else if (payload.event === 'error') {
-        const msg = payload.error || 'Unknown update error'
+        const code = payload.errorCode ?? 'unknown'
         setIsVisible(true)
-        setErrorMsg(msg)
-        setNetworkError(isNetworkError(msg))
-        // Only auto-hide generic errors; keep network errors visible so user can act
-        if (!isNetworkError(msg)) {
+        setErrorCode(code)
+        // Auto-hide only generic errors; rate_limit and network stay visible so user can act
+        if (code === 'unknown') {
           setTimeout(() => setIsVisible(false), 8000)
         }
       }
@@ -63,8 +59,7 @@ export const UpdateBanner: React.FC = () => {
   }
 
   const handleRetry = () => {
-    setNetworkError(false)
-    setErrorMsg('')
+    setErrorCode(null)
     setStatus('idle')
     setIsVisible(false)
     window.api?.updater?.check()
@@ -83,6 +78,12 @@ export const UpdateBanner: React.FC = () => {
   } else if (status === 'checking-for-update' || status === 'download-progress') {
     bgClass = 'bg-sky-50 border-sky-200 text-sky-800'
     iconColor = 'text-sky-500'
+  }
+
+  const errorLabel = () => {
+    if (errorCode === 'rate_limit') return t('update_error_rate_limit')
+    if (errorCode === 'network') return t('update_error_network')
+    return t('update_error', { error: '' }).replace(': ', '')
   }
 
   return (
@@ -108,7 +109,7 @@ export const UpdateBanner: React.FC = () => {
             {status === 'update-not-available' && t('update_not_available')}
             {status === 'download-progress' && t('download_progress', { percent })}
             {status === 'update-downloaded' && t('update_downloaded')}
-            {status === 'error' && (networkError ? t('update_error_network') : t('update_error', { error: errorMsg }))}
+            {status === 'error' && errorLabel()}
           </div>
           {status === 'download-progress' && (
             <div className="w-64 bg-slate-200 h-1.5 rounded-full mt-1.5 overflow-hidden">
@@ -119,7 +120,18 @@ export const UpdateBanner: React.FC = () => {
       </div>
 
       <div className="flex items-center gap-2">
-        {status === 'error' && networkError && (
+        {/* Rate limit: only manual download, no retry (retrying a 429 makes it worse) */}
+        {status === 'error' && errorCode === 'rate_limit' && (
+          <button
+            onClick={handleManualDownload}
+            className="px-4 py-1.5 bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white font-bold text-xs rounded-lg shadow-sm transition-all cursor-pointer focus:outline-none focus:ring-2 focus:ring-rose-500 focus:ring-offset-2"
+          >
+            {t('download_manually')}
+          </button>
+        )}
+
+        {/* Network error: manual download + retry */}
+        {status === 'error' && errorCode === 'network' && (
           <>
             <button
               onClick={handleManualDownload}

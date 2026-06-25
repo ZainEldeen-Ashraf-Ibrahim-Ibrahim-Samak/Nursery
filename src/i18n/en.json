@@ -124,6 +124,7 @@
     "update_downloaded": "Update downloaded and ready to install.",
     "update_error": "Update error: {{error}}",
     "update_error_network": "Update download failed (network error).",
+    "update_error_rate_limit": "GitHub rate limit reached. Please wait a few minutes, then download manually.",
     "download_manually": "Download Manually",
     "retry_update": "Retry",
     "restart_install": "Restart & Install",
