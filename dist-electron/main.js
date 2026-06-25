@@ -15252,6 +15252,8 @@ var migrations = [
 			};
 			addCol("ALTER TABLE employees ADD COLUMN role_id INTEGER REFERENCES employee_roles(id);");
 			addCol("ALTER TABLE employees ADD COLUMN salary_type_override_id INTEGER REFERENCES salary_types(id);");
+			addCol("ALTER TABLE salary_types ADD COLUMN synced INTEGER DEFAULT 0;");
+			addCol("ALTER TABLE employee_roles ADD COLUMN synced INTEGER DEFAULT 0;");
 			const now = (/* @__PURE__ */ new Date()).toISOString();
 			const roles = db.prepare("SELECT DISTINCT role FROM employees WHERE role IS NOT NULL AND role != ''").all();
 			for (const { role } of roles) db.prepare(`
@@ -15280,6 +15282,12 @@ var migrations = [
           synced INTEGER DEFAULT 0
         );
       `);
+			const addCol = (ddl) => {
+				try {
+					db.exec(ddl);
+				} catch {}
+			};
+			addCol("ALTER TABLE service_definitions ADD COLUMN synced INTEGER DEFAULT 0;");
 			const now = (/* @__PURE__ */ new Date()).toISOString();
 			const get = (key) => {
 				const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(key);
@@ -15314,6 +15322,11 @@ var migrations = [
 	{
 		name: "016_scheduled_sessions",
 		up: (db) => {
+			const addCol = (ddl) => {
+				try {
+					db.exec(ddl);
+				} catch {}
+			};
 			db.exec(`
         CREATE TABLE IF NOT EXISTS scheduled_sessions (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -15334,11 +15347,18 @@ var migrations = [
           UNIQUE(session_id, employee_id)
         );
       `);
+			addCol("ALTER TABLE scheduled_sessions ADD COLUMN synced INTEGER DEFAULT 0;");
+			addCol("ALTER TABLE session_teachers ADD COLUMN synced INTEGER DEFAULT 0;");
 		}
 	},
 	{
 		name: "017_attendance",
 		up: (db) => {
+			const addCol = (ddl) => {
+				try {
+					db.exec(ddl);
+				} catch {}
+			};
 			db.exec(`
         CREATE TABLE IF NOT EXISTS attendance_records (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -15363,9 +15383,12 @@ var migrations = [
           winning_by TEXT,
           winning_at TEXT NOT NULL,
           reviewed INTEGER DEFAULT 0,
-          created_at TEXT NOT NULL
+          created_at TEXT NOT NULL,
+          synced INTEGER DEFAULT 0
         );
       `);
+			addCol("ALTER TABLE attendance_records ADD COLUMN synced INTEGER DEFAULT 0;");
+			addCol("ALTER TABLE attendance_conflicts ADD COLUMN synced INTEGER DEFAULT 0;");
 		}
 	},
 	{
@@ -15373,6 +15396,30 @@ var migrations = [
 		up: (db) => {
 			try {
 				db.exec("ALTER TABLE payments ADD COLUMN prorated_calculated REAL;");
+			} catch {}
+		}
+	},
+	{
+		name: "019_backfill_synced_columns",
+		up: (db) => {
+			const addCol = (ddl) => {
+				try {
+					db.exec(ddl);
+				} catch {}
+			};
+			addCol("ALTER TABLE salary_types ADD COLUMN synced INTEGER DEFAULT 0;");
+			addCol("ALTER TABLE employee_roles ADD COLUMN synced INTEGER DEFAULT 0;");
+			addCol("ALTER TABLE service_definitions ADD COLUMN synced INTEGER DEFAULT 0;");
+			addCol("ALTER TABLE scheduled_sessions ADD COLUMN synced INTEGER DEFAULT 0;");
+			addCol("ALTER TABLE session_teachers ADD COLUMN synced INTEGER DEFAULT 0;");
+			addCol("ALTER TABLE attendance_records ADD COLUMN synced INTEGER DEFAULT 0;");
+		}
+	},
+	{
+		name: "020_attendance_conflicts_synced",
+		up: (db) => {
+			try {
+				db.exec("ALTER TABLE attendance_conflicts ADD COLUMN synced INTEGER DEFAULT 0;");
 			} catch {}
 		}
 	},
@@ -17327,8 +17374,7 @@ async function seedDatabase(db) {
       VALUES (?, ?, ?, ?, ?)
     `).run(username, hashedPassword, "admin", "Administrator", 1);
 	}
-	if (db.prepare("SELECT COUNT(*) as count FROM settings").get().count === 0) {
-		console.log("No settings found. Seeding default configuration...");
+	{
 		const defaultSettings = [
 			{
 				key: "nursery_monthly",
@@ -22311,7 +22357,7 @@ ipcMain.handle("employees:add", async (_event, employeeInput) => {
 		const result = db.prepare(`
       INSERT INTO employees (name, role, role_id, salary_type_override_id, base_salary, housing, transport, net_salary, is_active, created_at, updated_at, synced)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, 0)
-    `).run(roleText, roleText, role_id ?? null, salary_type_override_id, Number(base_salary), Number(housing), Number(transport), netSalary, now, now);
+    `).run(name, roleText, role_id ?? null, salary_type_override_id, Number(base_salary), Number(housing), Number(transport), netSalary, now, now);
 		const createdId = Number(result.lastInsertRowid);
 		return db.prepare(`
       SELECT e.*, er.name as role_name FROM employees e LEFT JOIN employee_roles er ON e.role_id = er.id WHERE e.id = ?
@@ -27493,17 +27539,28 @@ ipcMain.handle("serviceDefinitions:delete", async (_event, { id }) => {
 });
 //#endregion
 //#region electron/ipc/sessionsIPC.ts
-ipcMain.handle("sessions:list", async (_event, { month, year }) => {
+ipcMain.handle("sessions:list", async (_event, args) => {
 	try {
 		checkAuth$5();
 		const db = getDb();
-		const sessions = db.prepare(`
+		const { from, to } = args || {};
+		let query = `
       SELECT ss.*, sd.name as service_name
       FROM scheduled_sessions ss
       LEFT JOIN service_definitions sd ON ss.service_id = sd.id
-      WHERE strftime('%m', ss.session_date) = printf('%02d', ?) AND strftime('%Y', ss.session_date) = ?
-      ORDER BY ss.session_date ASC
-    `).all(month, String(year));
+      WHERE 1=1
+    `;
+		const params = [];
+		if (from) {
+			query += " AND ss.session_date >= ?";
+			params.push(from);
+		}
+		if (to) {
+			query += " AND ss.session_date <= ?";
+			params.push(to);
+		}
+		query += " ORDER BY ss.session_date ASC";
+		const sessions = db.prepare(query).all(...params);
 		for (const s of sessions) s.teachers = db.prepare(`
         SELECT e.id, e.name, er.name as role_name
         FROM session_teachers st
@@ -27575,25 +27632,40 @@ ipcMain.handle("sessions:assignTeachers", async (_event, { session_id, employee_
 		throw new Error(error.message || "Failed to assign teachers");
 	}
 });
-ipcMain.handle("sessions:proRateCalc", async (_event, { child_id, billing_month, billing_year }) => {
+ipcMain.handle("sessions:proRateCalc", async (_event, args) => {
 	try {
-		requireAdmin();
+		checkAuth$5();
 		const db = getDb();
-		const child = db.prepare("SELECT reg_date, session_price FROM children WHERE id = ?").get(child_id);
-		if (!child) throw new Error("الطفل غير موجود / Child not found");
-		const monthNum = String(billing_month).padStart(2, "0");
-		const yearStr = String(billing_year);
-		const monthStart = `${yearStr}-${monthNum}-01`;
-		const monthEnd = `${yearStr}-${monthNum}-31`;
-		const sessionCount = db.prepare(`
-      SELECT COUNT(*) as cnt FROM scheduled_sessions
-      WHERE session_date >= ? AND session_date <= ? AND session_date >= ?
-    `).get(monthStart, monthEnd, child.reg_date).cnt;
-		const perSessionPrice = child.session_price ?? 0;
+		let reg_date = args.reg_date;
+		let pricePerSession = args.price_per_session ?? 0;
+		if (!reg_date && args.child_id) {
+			const child = db.prepare("SELECT reg_date, session_price FROM children WHERE id = ?").get(args.child_id);
+			if (!child) throw new Error("الطفل غير موجود / Child not found");
+			reg_date = child.reg_date;
+			pricePerSession = child.session_price ?? 0;
+		}
+		if (!reg_date) throw new Error("reg_date is required");
+		const regDate = new Date(reg_date);
+		const year = regDate.getFullYear();
+		const month = regDate.getMonth();
+		const daysInMonth = new Date(year, month + 1, 0).getDate();
+		const daysRemaining = daysInMonth - regDate.getDate() + 1;
+		const monthStr = String(month + 1).padStart(2, "0");
+		const monthStart = reg_date;
+		const monthEnd = `${year}-${monthStr}-${daysInMonth}`;
 		return {
-			session_count: sessionCount,
-			calculated_amount: sessionCount * perSessionPrice,
-			per_session_price: perSessionPrice
+			remaining_sessions: db.prepare(`
+      SELECT COUNT(*) as cnt FROM scheduled_sessions
+      WHERE session_date >= ? AND session_date <= ?
+    `).get(monthStart, monthEnd).cnt,
+			total_sessions: db.prepare(`
+      SELECT COUNT(*) as cnt FROM scheduled_sessions
+      WHERE strftime('%Y-%m', session_date) = ?
+    `).get(`${year}-${monthStr}`).cnt,
+			days_remaining: daysRemaining,
+			days_in_month: daysInMonth,
+			prorated_amount: Math.round(pricePerSession * daysRemaining / daysInMonth),
+			per_session_price: pricePerSession
 		};
 	} catch (error) {
 		throw new Error(error.message || "Failed to calculate pro-rate");
@@ -27624,16 +27696,19 @@ ipcMain.handle("attendance:getSheet", async (_event, { session_id }) => {
 		throw new Error(error.message || "Failed to get attendance sheet");
 	}
 });
-ipcMain.handle("attendance:record", async (_event, records) => {
+ipcMain.handle("attendance:record", async (_event, args) => {
 	try {
 		checkAuth$5();
 		const db = getDb();
 		const user = getCurrentUser();
 		const now = (/* @__PURE__ */ new Date()).toISOString();
 		const results = [];
+		const sessionId = args?.session_id;
+		const records = Array.isArray(args) ? args : args?.records ?? [];
 		db.transaction(() => {
 			for (const rec of records) {
-				const { session_id, child_id, status, excuse_notes = null } = rec;
+				const session_id = sessionId ?? rec.session_id;
+				const { child_id, status, excuse_notes = null } = rec;
 				if (![
 					"attended",
 					"absent_excused",
@@ -27682,7 +27757,21 @@ ipcMain.handle("attendance:getSummary", async (_event, { employee_id, month, yea
 	try {
 		requireAdmin();
 		const db = getDb();
-		const monthNum = String(month).padStart(2, "0");
+		const monthIdx = [
+			"يناير",
+			"فبراير",
+			"مارس",
+			"أبريل",
+			"مايو",
+			"يونيو",
+			"يوليو",
+			"أغسطس",
+			"سبتمبر",
+			"أكتوبر",
+			"نوفمبر",
+			"ديسمبر"
+		].indexOf(String(month));
+		const monthNum = monthIdx !== -1 ? String(monthIdx + 1).padStart(2, "0") : String(month).padStart(2, "0");
 		const yearStr = String(year);
 		const monthStart = `${yearStr}-${monthNum}-01`;
 		const monthEnd = `${yearStr}-${monthNum}-31`;
