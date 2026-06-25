@@ -2,7 +2,7 @@ import { n as getDb, r as initDb, t as closeDb } from "./connection-DNiMlhbf.js"
 import { createRequire } from "node:module";
 import path from "node:path";
 import nodeCrypto from "crypto";
-import { BrowserWindow, app, dialog, ipcMain, net, protocol } from "electron";
+import { BrowserWindow, app, dialog, ipcMain, net, protocol, shell } from "electron";
 import fs from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import ExcelJS from "exceljs";
@@ -27085,6 +27085,9 @@ function initAutoUpdater() {
 	ipcMain.handle("updater:install", () => {
 		import_main.autoUpdater.quitAndInstall();
 		return { success: true };
+	});
+	ipcMain.handle("updater:open-release-page", () => {
+		shell.openExternal("https://github.com/ZainEldeen-Ashraf-Ibrahim-Ibrahim-Samak/Nursery/releases/latest");
 	});
 }
 process.on("uncaughtException", (err) => {

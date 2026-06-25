@@ -96,6 +96,7 @@ electron.contextBridge.exposeInMainWorld("api", {
 	updater: {
 		check: () => electron.ipcRenderer.invoke("updater:check"),
 		install: () => electron.ipcRenderer.invoke("updater:install"),
+		openReleasePage: () => electron.ipcRenderer.invoke("updater:open-release-page"),
 		onStatusChange: (callback) => {
 			const handler = (_e, payload) => callback(payload);
 			electron.ipcRenderer.on("updater:status", handler);
