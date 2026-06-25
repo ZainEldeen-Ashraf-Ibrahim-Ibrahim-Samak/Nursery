@@ -31,6 +31,10 @@ import { connectMongo } from './services/mongoSync.js'
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
+// Force HTTP/1.1 to avoid net::ERR_HTTP2_PROTOCOL_ERROR when downloading updates
+// from GitHub CDN via electron-updater.
+app.commandLine.appendSwitch('disable-http2')
+
 // Register asset scheme before app ready
 protocol.registerSchemesAsPrivileged([
   { scheme: 'asset', privileges: { secure: true, standard: true, supportFetchAPI: true } }
@@ -225,7 +229,14 @@ function initAutoUpdater() {
     mainWindow?.webContents.send('updater:status', { event: 'update-not-available', info })
   })
 
+  let _updateRetried = false
   autoUpdater.on('error', (err) => {
+    const isNetworkError = err.message?.includes('ERR_HTTP2') || err.message?.includes('net::')
+    if (isNetworkError && !_updateRetried) {
+      _updateRetried = true
+      setTimeout(() => autoUpdater.downloadUpdate().catch(() => {}), 3000)
+      return
+    }
     mainWindow?.webContents.send('updater:status', { event: 'error', error: err.message })
   })
 
