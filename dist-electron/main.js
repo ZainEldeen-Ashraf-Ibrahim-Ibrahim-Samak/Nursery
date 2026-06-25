@@ -15424,6 +15424,35 @@ var migrations = [
 		}
 	},
 	{
+		name: "021_payment_methods",
+		up: (db) => {
+			const addCol = (ddl) => {
+				try {
+					db.exec(ddl);
+				} catch {}
+			};
+			db.exec(`
+        CREATE TABLE IF NOT EXISTS payment_methods (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL UNIQUE,
+          is_active INTEGER DEFAULT 1,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          synced INTEGER DEFAULT 0
+        );
+      `);
+			const now = (/* @__PURE__ */ new Date()).toISOString();
+			for (const name of [
+				"كاش",
+				"تحويل بنكي",
+				"فيزا / ماستركارد",
+				"فودافون كاش"
+			]) db.prepare(`INSERT OR IGNORE INTO payment_methods (name, is_active, created_at, updated_at, synced) VALUES (?, 1, ?, ?, 0)`).run(name, now, now);
+			addCol("ALTER TABLE payments ADD COLUMN payment_method_id INTEGER REFERENCES payment_methods(id);");
+			addCol("ALTER TABLE payments ADD COLUMN payment_method_name TEXT;");
+		}
+	},
+	{
 		name: "013_session_monthly_setting",
 		up: (db) => {
 			db.exec(`
@@ -22271,7 +22300,7 @@ ipcMain.handle("payments:generate", async (_event, { month, year }) => {
 		throw new Error(error.message || "Failed to generate payments");
 	}
 });
-ipcMain.handle("payments:update", async (_event, { id, quantity, paid, notes }) => {
+ipcMain.handle("payments:update", async (_event, { id, quantity, paid, notes, payment_method_id }) => {
 	try {
 		checkAuth$2();
 		const db = getDb();
@@ -22281,17 +22310,23 @@ ipcMain.handle("payments:update", async (_event, { id, quantity, paid, notes }) 
 		const newQuantity = quantity !== void 0 ? Number(quantity) : payment.quantity;
 		const newPaid = paid !== void 0 ? Number(paid) : payment.paid;
 		const newNotes = notes !== void 0 ? notes : payment.notes;
+		const newMethodId = payment_method_id !== void 0 ? payment_method_id : payment.payment_method_id ?? null;
+		let newMethodName = payment.payment_method_name ?? null;
+		if (payment_method_id !== void 0) {
+			newMethodName = null;
+			if (payment_method_id !== null) newMethodName = db.prepare("SELECT name FROM payment_methods WHERE id = ?").get(payment_method_id)?.name ?? null;
+		}
 		const { total, balance, status } = calculatePayment(newQuantity, payment.price, newPaid);
 		const now = (/* @__PURE__ */ new Date()).toISOString();
 		db.prepare(`
-      UPDATE payments 
-      SET quantity = ?, paid = ?, total = ?, balance = ?, status = ?, notes = ?, updated_at = ?, synced = 0
+      UPDATE payments
+      SET quantity = ?, paid = ?, total = ?, balance = ?, status = ?, notes = ?,
+          payment_method_id = ?, payment_method_name = ?, updated_at = ?, synced = 0
       WHERE id = ?
-    `).run(newQuantity, newPaid, total, balance, status, newNotes, now, id);
+    `).run(newQuantity, newPaid, total, balance, status, newNotes, newMethodId, newMethodName, now, id);
 		return db.prepare(`
       SELECT p.*, c.name as child_name
-      FROM payments p
-      JOIN children c ON p.child_id = c.id
+      FROM payments p JOIN children c ON p.child_id = c.id
       WHERE p.id = ?
     `).get(id);
 	} catch (error) {
@@ -22299,22 +22334,26 @@ ipcMain.handle("payments:update", async (_event, { id, quantity, paid, notes }) 
 		throw new Error(error.message || "Failed to update payment");
 	}
 });
-ipcMain.handle("payments:bulkPay", async (_event, { ids }) => {
+ipcMain.handle("payments:bulkPay", async (_event, { ids, payment_method_id }) => {
 	try {
 		checkAuth$2();
 		const db = getDb();
 		if (!ids || !Array.isArray(ids) || ids.length === 0) throw new Error("Payment IDs array is required");
+		let methodName = null;
+		const methodId = payment_method_id ?? null;
+		if (methodId !== null) methodName = db.prepare("SELECT name FROM payment_methods WHERE id = ?").get(methodId)?.name ?? null;
 		const now = (/* @__PURE__ */ new Date()).toISOString();
 		let updatedCount = 0;
 		const loadStmt = db.prepare("SELECT * FROM payments WHERE id = ?");
 		const updateStmt = db.prepare(`
       UPDATE payments
-      SET paid = total, balance = 0, status = 'paid', updated_at = ?, synced = 0
+      SET paid = total, balance = 0, status = 'paid',
+          payment_method_id = ?, payment_method_name = ?, updated_at = ?, synced = 0
       WHERE id = ?
     `);
 		db.transaction(() => {
 			for (const id of ids) if (loadStmt.get(id)) {
-				updateStmt.run(now, id);
+				updateStmt.run(methodId, methodName, now, id);
 				updatedCount++;
 			}
 		})();
@@ -26557,6 +26596,8 @@ var paymentSchema = new Schema({
 	balance: Number,
 	status: String,
 	notes: String,
+	payment_method_id: Number,
+	payment_method_name: String,
 	created_at: String,
 	updated_at: String,
 	synced: Number
@@ -26790,6 +26831,19 @@ var attendanceConflictSchema = new Schema({
 	created_at: String
 }, sharedOptions);
 var AttendanceConflictModel = mongoose.models["sync_attendance_conflicts"] || mongoose.model("sync_attendance_conflicts", attendanceConflictSchema);
+var paymentMethodSchema = new Schema({
+	id: {
+		type: Number,
+		required: true,
+		unique: true
+	},
+	name: String,
+	is_active: Number,
+	created_at: String,
+	updated_at: String,
+	synced: Number
+}, sharedOptions);
+var PaymentMethodModel = mongoose.models["sync_payment_methods"] || mongoose.model("sync_payment_methods", paymentMethodSchema);
 var SYNC_ENTITIES = [
 	{
 		name: "children",
@@ -26875,6 +26929,11 @@ var SYNC_ENTITIES = [
 		name: "attendance_conflicts",
 		model: AttendanceConflictModel,
 		table: "attendance_conflicts"
+	},
+	{
+		name: "payment_methods",
+		model: PaymentMethodModel,
+		table: "payment_methods"
 	}
 ];
 //#endregion
@@ -27803,6 +27862,54 @@ ipcMain.handle("attendance:getSummary", async (_event, { employee_id, month, yea
 		};
 	} catch (error) {
 		throw new Error(error.message || "Failed to get attendance summary");
+	}
+});
+//#endregion
+//#region electron/ipc/paymentMethodsIPC.ts
+ipcMain.handle("paymentMethods:list", async () => {
+	try {
+		checkAuth$5();
+		return getDb().prepare(`SELECT * FROM payment_methods ORDER BY name`).all();
+	} catch (e) {
+		throw new Error(e.message || "Failed to list payment methods");
+	}
+});
+ipcMain.handle("paymentMethods:add", async (_event, { name }) => {
+	try {
+		requireAdmin();
+		const db = getDb();
+		if (!name?.trim()) throw new Error("اسم طريقة الدفع مطلوب / Name is required");
+		const now = (/* @__PURE__ */ new Date()).toISOString();
+		const res = db.prepare(`INSERT INTO payment_methods (name, is_active, created_at, updated_at, synced) VALUES (?, 1, ?, ?, 0)`).run(name.trim(), now, now);
+		return db.prepare(`SELECT * FROM payment_methods WHERE id = ?`).get(Number(res.lastInsertRowid));
+	} catch (e) {
+		throw new Error(e.message || "Failed to add payment method");
+	}
+});
+ipcMain.handle("paymentMethods:update", async (_event, { id, patch }) => {
+	try {
+		requireAdmin();
+		const db = getDb();
+		const row = db.prepare(`SELECT * FROM payment_methods WHERE id = ?`).get(id);
+		if (!row) throw new Error("طريقة الدفع غير موجودة / Not found");
+		const name = patch.name !== void 0 ? patch.name.trim() : row.name;
+		const is_active = patch.is_active !== void 0 ? patch.is_active : row.is_active;
+		const now = (/* @__PURE__ */ new Date()).toISOString();
+		db.prepare(`UPDATE payment_methods SET name = ?, is_active = ?, updated_at = ?, synced = 0 WHERE id = ?`).run(name, is_active, now, id);
+		return db.prepare(`SELECT * FROM payment_methods WHERE id = ?`).get(id);
+	} catch (e) {
+		throw new Error(e.message || "Failed to update payment method");
+	}
+});
+ipcMain.handle("paymentMethods:delete", async (_event, { id }) => {
+	try {
+		requireAdmin();
+		const db = getDb();
+		if (db.prepare(`SELECT COUNT(*) as c FROM payments WHERE payment_method_id = ?`).get(id).c > 0) throw new Error("لا يمكن حذف طريقة دفع مستخدمة في مدفوعات / Cannot delete a method in use");
+		db.prepare(`DELETE FROM payment_methods WHERE id = ?`).run(id);
+		return { ok: true };
+	} catch (e) {
+		throw new Error(e.message || "Failed to delete payment method");
 	}
 });
 //#endregion
