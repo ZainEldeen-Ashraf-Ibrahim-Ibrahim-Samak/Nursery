@@ -168,14 +168,17 @@ app.whenReady().then(async () => {
   })
 
   createWindow()
-  
-  // Set up auto updater and check for updates after a short delay
-  initAutoUpdater()
-  setTimeout(() => {
-    autoUpdater.checkForUpdatesAndNotify().catch((err) => {
-      console.error('Error during automatic update check:', err)
-    })
-  }, 5000)
+
+  // Auto-updater only runs in packaged production builds.
+  // In dev mode electron-updater has no feed URL and would throw.
+  if (app.isPackaged) {
+    initAutoUpdater()
+    setTimeout(() => {
+      autoUpdater.checkForUpdatesAndNotify().catch((err) => {
+        console.error('Error during automatic update check:', err)
+      })
+    }, 5000)
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -233,6 +236,10 @@ function initAutoUpdater() {
     return { success: true }
   })
 }
+
+process.on('uncaughtException', (err) => {
+  console.error('[main] Uncaught exception:', err)
+})
 
 app.on('window-all-closed', () => {
   closeDb()

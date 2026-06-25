@@ -26953,12 +26953,14 @@ app.whenReady().then(async () => {
 		}
 	});
 	createWindow();
-	initAutoUpdater();
-	setTimeout(() => {
-		import_main.autoUpdater.checkForUpdatesAndNotify().catch((err) => {
-			console.error("Error during automatic update check:", err);
-		});
-	}, 5e3);
+	if (app.isPackaged) {
+		initAutoUpdater();
+		setTimeout(() => {
+			import_main.autoUpdater.checkForUpdatesAndNotify().catch((err) => {
+				console.error("Error during automatic update check:", err);
+			});
+		}, 5e3);
+	}
 	app.on("activate", () => {
 		if (BrowserWindow.getAllWindows().length === 0) createWindow();
 	});
@@ -27021,6 +27023,9 @@ function initAutoUpdater() {
 		return { success: true };
 	});
 }
+process.on("uncaughtException", (err) => {
+	console.error("[main] Uncaught exception:", err);
+});
 app.on("window-all-closed", () => {
 	closeDb();
 	if (process.platform !== "darwin") app.quit();
