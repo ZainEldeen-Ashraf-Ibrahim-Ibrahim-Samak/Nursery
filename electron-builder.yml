@@ -4,6 +4,7 @@ publish:
   provider: github
   owner: ZainEldeen-Ashraf-Ibrahim-Ibrahim-Samak
   repo: Nursery
+  releaseType: release
 directories:
   output: release
   buildResources: assets
