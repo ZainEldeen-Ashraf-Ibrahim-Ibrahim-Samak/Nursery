@@ -378,10 +378,12 @@ const migrations: Migration[] = [
         );
       `)
 
-      // Additive columns on employees
+      // Additive columns — guarded so re-runs on existing DBs are safe
       const addCol = (ddl: string) => { try { db.exec(ddl) } catch { /* already exists */ } }
       addCol('ALTER TABLE employees ADD COLUMN role_id INTEGER REFERENCES employee_roles(id);')
       addCol('ALTER TABLE employees ADD COLUMN salary_type_override_id INTEGER REFERENCES salary_types(id);')
+      addCol('ALTER TABLE salary_types ADD COLUMN synced INTEGER DEFAULT 0;')
+      addCol('ALTER TABLE employee_roles ADD COLUMN synced INTEGER DEFAULT 0;')
 
       // Auto-migrate existing role strings into employee_roles
       const now = new Date().toISOString()
@@ -414,6 +416,9 @@ const migrations: Migration[] = [
           synced INTEGER DEFAULT 0
         );
       `)
+      const addCol = (ddl: string) => { try { db.exec(ddl) } catch { /* already exists */ } }
+      addCol('ALTER TABLE service_definitions ADD COLUMN synced INTEGER DEFAULT 0;')
+
       const now = new Date().toISOString()
       const get = (key: string): number | null => {
         const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(key) as { value: string } | undefined
@@ -435,6 +440,7 @@ const migrations: Migration[] = [
   {
     name: '016_scheduled_sessions',
     up: (db) => {
+      const addCol = (ddl: string) => { try { db.exec(ddl) } catch { /* already exists */ } }
       db.exec(`
         CREATE TABLE IF NOT EXISTS scheduled_sessions (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -455,11 +461,14 @@ const migrations: Migration[] = [
           UNIQUE(session_id, employee_id)
         );
       `)
+      addCol('ALTER TABLE scheduled_sessions ADD COLUMN synced INTEGER DEFAULT 0;')
+      addCol('ALTER TABLE session_teachers ADD COLUMN synced INTEGER DEFAULT 0;')
     }
   },
   {
     name: '017_attendance',
     up: (db) => {
+      const addCol = (ddl: string) => { try { db.exec(ddl) } catch { /* already exists */ } }
       db.exec(`
         CREATE TABLE IF NOT EXISTS attendance_records (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -487,6 +496,7 @@ const migrations: Migration[] = [
           created_at TEXT NOT NULL
         );
       `)
+      addCol('ALTER TABLE attendance_records ADD COLUMN synced INTEGER DEFAULT 0;')
     }
   },
   {
