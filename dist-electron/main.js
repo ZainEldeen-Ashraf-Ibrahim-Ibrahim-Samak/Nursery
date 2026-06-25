@@ -27042,14 +27042,18 @@ function initAutoUpdater() {
 	});
 	let _updateRetried = false;
 	import_main.autoUpdater.on("error", (err) => {
-		if ((err.message?.includes("ERR_HTTP2") || err.message?.includes("net::")) && !_updateRetried) {
+		const msg = err.message || "";
+		const isRateLimit = msg.includes("429") || msg.includes("Too Many Requests");
+		const isNetworkError = !isRateLimit && (msg.includes("ERR_HTTP2") || msg.includes("net::") || msg.includes("ECONNRESET") || msg.includes("ETIMEDOUT"));
+		if (isNetworkError && !_updateRetried) {
 			_updateRetried = true;
 			setTimeout(() => import_main.autoUpdater.downloadUpdate().catch(() => {}), 3e3);
 			return;
 		}
 		mainWindow?.webContents.send("updater:status", {
 			event: "error",
-			error: err.message
+			error: isRateLimit ? "429" : msg,
+			errorCode: isRateLimit ? "rate_limit" : isNetworkError ? "network" : "unknown"
 		});
 	});
 	import_main.autoUpdater.on("download-progress", (progressObj) => {
