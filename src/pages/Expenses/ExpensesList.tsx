@@ -49,7 +49,7 @@ export default function ExpensesList() {
   // Add Item Modal
   const [isAddItemModalOpen, setIsAddItemModalOpen] = useState(false)
   const [newItemName, setNewItemName] = useState('')
-  const [newItemCategory, setNewItemCategory] = useState('')
+  const [newItemCategory, setNewItemCategory] = useState<'ثابت' | 'متغير'>('ثابت')
   const [formError, setFormError] = useState<string | null>(null)
 
   // Remove Item Confirm
@@ -206,7 +206,7 @@ export default function ExpensesList() {
 
           <Button variant="primary" onClick={() => {
             setNewItemName('')
-            setNewItemCategory('')
+            setNewItemCategory('ثابت')
             setFormError(null)
             setIsAddItemModalOpen(true)
           }}>
@@ -261,7 +261,7 @@ export default function ExpensesList() {
           </p>
           <Button variant="primary" onClick={() => {
             setNewItemName('')
-            setNewItemCategory('')
+            setNewItemCategory('ثابت')
             setFormError(null)
             setIsAddItemModalOpen(true)
           }}>
@@ -307,7 +307,13 @@ export default function ExpensesList() {
                       <td className="px-4 py-2.5">
                         <div className="font-semibold text-slate-800">{item}</div>
                         {category && (
-                          <div className="text-xs text-slate-400">{category}</div>
+                          <span className={`inline-block text-xs font-medium px-1.5 py-0.5 rounded mt-0.5 ${
+                            category === 'ثابت'
+                              ? 'bg-blue-50 text-blue-700'
+                              : 'bg-amber-50 text-amber-700'
+                          }`}>
+                            {category === 'ثابت' ? (isAr ? 'ثابت' : 'Fixed') : (isAr ? 'متغير' : 'Variable')}
+                          </span>
                         )}
                       </td>
                       {arabicMonths.map((month) => {
@@ -462,11 +468,33 @@ export default function ExpensesList() {
             required
           />
 
-          <Input
-            label={isAr ? 'التصنيف (اختياري، مثل: ثابت / متغير)' : 'Category (optional, e.g., Fixed / Variable)'}
-            value={newItemCategory}
-            onChange={(e) => setNewItemCategory(e.target.value)}
-          />
+          <div className="space-y-1">
+            <label className="block text-sm font-medium text-slate-700">
+              {isAr ? 'نوع المصروف' : 'Expense Type'}
+            </label>
+            <div className="flex gap-3">
+              {(['ثابت', 'متغير'] as const).map((val) => (
+                <label
+                  key={val}
+                  className={`flex items-center gap-2 cursor-pointer px-4 py-2 rounded-lg border-2 transition-colors ${
+                    newItemCategory === val
+                      ? 'border-primary bg-primary/5 text-primary font-semibold'
+                      : 'border-slate-200 text-slate-600 hover:border-slate-300'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="expense_type"
+                    value={val}
+                    checked={newItemCategory === val}
+                    onChange={() => setNewItemCategory(val)}
+                    className="sr-only"
+                  />
+                  <span>{val === 'ثابت' ? (isAr ? 'ثابت' : 'Fixed') : (isAr ? 'متغير' : 'Variable')}</span>
+                </label>
+              ))}
+            </div>
+          </div>
 
           <div className="flex justify-end gap-2 border-t border-slate-100 pt-4 mt-4">
             <Button
