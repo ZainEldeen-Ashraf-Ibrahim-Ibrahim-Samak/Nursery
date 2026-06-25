@@ -1,0 +1,157 @@
+/**
+ * Uploads all release artifacts to GitHub after electron-builder packages them.
+ * Replaces the racy built-in publisher for local dist:publish runs.
+ *
+ * Usage: node scripts/publish-release.mjs
+ * Requires: GH_TOKEN env var with repo scope.
+ */
+
+import fs from 'node:fs'
+import path from 'node:path'
+import https from 'node:https'
+
+const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'))
+const VERSION = pkg.version
+const TOKEN = process.env.GH_TOKEN
+const OWNER = 'ZainEldeen-Ashraf-Ibrahim-Ibrahim-Samak'
+const REPO = 'Nursery'
+const TAG = `v${VERSION}`
+const RELEASE_DIR = 'release'
+
+if (!TOKEN) {
+  console.error('❌  GH_TOKEN is not set. Run: $env:GH_TOKEN = "ghp_..."')
+  process.exit(1)
+}
+
+// Files to upload (name on GitHub → local path)
+const ARTIFACTS = [
+  `nursery-management-system-setup-${VERSION}.exe`,
+  `nursery-management-system-setup-${VERSION}.exe.blockmap`,
+  'latest.yml',
+]
+
+function request(options, body) {
+  return new Promise((resolve, reject) => {
+    const req = https.request(options, (res) => {
+      let data = ''
+      res.on('data', (chunk) => (data += chunk))
+      res.on('end', () => {
+        try { resolve({ status: res.statusCode, body: JSON.parse(data) }) }
+        catch { resolve({ status: res.statusCode, body: data }) }
+      })
+    })
+    req.on('error', reject)
+    if (body) req.write(body)
+    req.end()
+  })
+}
+
+async function getOrCreateRelease() {
+  // Try to find existing release
+  const get = await request({
+    hostname: 'api.github.com',
+    path: `/repos/${OWNER}/${REPO}/releases/tags/${TAG}`,
+    headers: { Authorization: `Bearer ${TOKEN}`, 'User-Agent': 'publish-release', Accept: 'application/vnd.github+json' },
+  })
+
+  if (get.status === 200) {
+    console.log(`✓ Found existing release ${TAG} (id: ${get.body.id})`)
+    return get.body
+  }
+
+  // Create new release
+  console.log(`Creating release ${TAG}...`)
+  const create = await request({
+    hostname: 'api.github.com',
+    path: `/repos/${OWNER}/${REPO}/releases`,
+    method: 'POST',
+    headers: { Authorization: `Bearer ${TOKEN}`, 'User-Agent': 'publish-release', Accept: 'application/vnd.github+json', 'Content-Type': 'application/json' },
+  }, JSON.stringify({ tag_name: TAG, name: TAG, draft: false, prerelease: false }))
+
+  if (create.status !== 201) throw new Error(`Failed to create release: ${JSON.stringify(create.body)}`)
+  console.log(`✓ Created release ${TAG} (id: ${create.body.id})`)
+  return create.body
+}
+
+async function deleteExistingAsset(releaseId, name) {
+  const list = await request({
+    hostname: 'api.github.com',
+    path: `/repos/${OWNER}/${REPO}/releases/${releaseId}/assets`,
+    headers: { Authorization: `Bearer ${TOKEN}`, 'User-Agent': 'publish-release', Accept: 'application/vnd.github+json' },
+  })
+  if (list.status !== 200) return
+  const existing = list.body.find((a) => a.name === name)
+  if (!existing) return
+  await request({
+    hostname: 'api.github.com',
+    path: `/repos/${OWNER}/${REPO}/releases/assets/${existing.id}`,
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${TOKEN}`, 'User-Agent': 'publish-release', Accept: 'application/vnd.github+json' },
+  })
+  console.log(`  Replaced existing ${name}`)
+}
+
+function uploadAsset(releaseId, name, filePath) {
+  return new Promise((resolve, reject) => {
+    const data = fs.readFileSync(filePath)
+    const size = data.length
+    console.log(`  Uploading ${name} (${(size / 1024 / 1024).toFixed(1)} MB)...`)
+
+    const req = https.request({
+      hostname: 'uploads.github.com',
+      path: `/repos/${OWNER}/${REPO}/releases/${releaseId}/assets?name=${encodeURIComponent(name)}`,
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${TOKEN}`,
+        'User-Agent': 'publish-release',
+        Accept: 'application/vnd.github+json',
+        'Content-Type': 'application/octet-stream',
+        'Content-Length': size,
+      },
+    }, (res) => {
+      let body = ''
+      res.on('data', (c) => (body += c))
+      res.on('end', () => {
+        if (res.statusCode === 201) {
+          console.log(`  ✓ ${name} uploaded`)
+          resolve()
+        } else {
+          reject(new Error(`Upload failed (${res.statusCode}): ${body}`))
+        }
+      })
+    })
+    req.on('error', reject)
+    req.write(data)
+    req.end()
+  })
+}
+
+async function main() {
+  console.log(`\nPublishing ${OWNER}/${REPO} ${TAG}\n`)
+
+  const release = await getOrCreateRelease()
+
+  for (const name of ARTIFACTS) {
+    // Find local file — the exe may use the productName on disk
+    let filePath = path.join(RELEASE_DIR, name)
+
+    if (!fs.existsSync(filePath)) {
+      // Try productName variant for the exe
+      const exeVariant = path.join(RELEASE_DIR, `Nursery & Autism Center Management System Setup ${VERSION}.exe`)
+      if (name.endsWith('.exe') && fs.existsSync(exeVariant)) {
+        filePath = exeVariant
+      } else {
+        console.warn(`  ⚠ Skipping ${name} — not found at ${filePath}`)
+        continue
+      }
+    }
+
+    await deleteExistingAsset(release.id, name)
+    await uploadAsset(release.id, name, filePath)
+  }
+
+  console.log(`\n✅  Release ${TAG} published successfully.`)
+  console.log(`   https://github.com/${OWNER}/${REPO}/releases/tag/${TAG}\n`)
+}
+
+main().catch((err) => { console.error('❌', err.message); process.exit(1) })

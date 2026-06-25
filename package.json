@@ -1,7 +1,7 @@
 {
   "name": "nursery-management-system",
   "private": true,
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Nursery & Autism Center Management System",
   "author": "Nursery Management",
   "main": "dist-electron/main.js",
@@ -12,7 +12,7 @@
     "dist": "npm run build && electron-builder",
     "dist:win": "npm run build && electron-builder --win",
     "dist:dir": "npm run build && electron-builder --dir",
-    "dist:publish": "npm run build && electron-builder --publish always",
+    "dist:publish": "npm run build && electron-builder --publish never && node scripts/publish-release.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
