@@ -1,4 +1,4 @@
-import React from 'react'
+import * as React from 'react'
 import { useAuthStore } from '../../store/useAuthStore.js'
 import { Alert } from '../ui/Alert.js'
 

@@ -1,4 +1,4 @@
-import React from 'react'
+import * as React from 'react'
 import { useBranding } from '../../hooks/useBranding.js'
 
 interface AppLogoProps {

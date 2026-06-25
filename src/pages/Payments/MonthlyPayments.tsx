@@ -8,7 +8,7 @@ import { Stat } from '../../components/ui/Stat.js'
 import { Button } from '../../components/ui/Button.js'
 import { Select } from '../../components/ui/Select.js'
 import { Alert } from '../../components/ui/Alert.js'
-import React from 'react'
+import * as React from 'react'
 
 const arabicMonths = [
   'يناير',

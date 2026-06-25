@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import * as React from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useSalariesStore } from '../../store/useSalariesStore.js'
 import { useExport } from '../../hooks/useExport.js'

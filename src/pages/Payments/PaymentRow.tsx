@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react'
+import * as React from 'react'
+import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Badge } from '../../components/ui/Badge.js'
 import { Button } from '../../components/ui/Button.js'
