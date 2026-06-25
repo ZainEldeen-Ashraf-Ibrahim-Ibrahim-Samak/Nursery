@@ -412,6 +412,22 @@ const paymentMethodSchema = new Schema({
 export const PaymentMethodModel: Model<any> = mongoose.models['sync_payment_methods'] ||
   mongoose.model('sync_payment_methods', paymentMethodSchema)
 
+// ── Employee Deductions ───────────────────────────────────────────────────────
+
+const employeeDeductionSchema = new Schema({
+  id: { type: Number, required: true, unique: true },
+  employee_id: Number,
+  month: String,
+  year: Number,
+  reason: String,
+  amount: Number,
+  created_at: String,
+  synced: Number
+}, sharedOptions)
+
+export const EmployeeDeductionModel: Model<any> = mongoose.models['sync_employee_deductions'] ||
+  mongoose.model('sync_employee_deductions', employeeDeductionSchema)
+
 // ── Entity registry ───────────────────────────────────────────────────────────
 
 export const SYNC_ENTITIES: {
@@ -437,4 +453,5 @@ export const SYNC_ENTITIES: {
   { name: 'attendance_records', model: AttendanceRecordModel, table: 'attendance_records' },
   { name: 'attendance_conflicts', model: AttendanceConflictModel, table: 'attendance_conflicts' },
   { name: 'payment_methods', model: PaymentMethodModel, table: 'payment_methods' },
+  { name: 'employee_deductions', model: EmployeeDeductionModel, table: 'employee_deductions' },
 ]

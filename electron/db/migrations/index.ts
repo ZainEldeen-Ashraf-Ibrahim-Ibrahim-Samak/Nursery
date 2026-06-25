@@ -583,6 +583,23 @@ const migrations: Migration[] = [
         UPDATE payments SET synced = 0;
       `)
     }
+  },
+  {
+    name: '022_employee_deductions',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS employee_deductions (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          employee_id INTEGER NOT NULL REFERENCES employees(id),
+          month TEXT NOT NULL,
+          year INTEGER NOT NULL,
+          reason TEXT NOT NULL,
+          amount REAL NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL,
+          synced INTEGER DEFAULT 0
+        );
+      `)
+    }
   }
 ]
 

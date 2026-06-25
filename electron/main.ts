@@ -30,6 +30,7 @@ import './ipc/serviceDefinitionsIPC.js'
 import './ipc/sessionsIPC.js'
 import './ipc/attendanceIPC.js'
 import './ipc/paymentMethodsIPC.js'
+import './ipc/deductionsIPC.js'
 import { startAutoSync, getMongoUri } from './ipc/syncIPC.js'
 import { connectMongo } from './services/mongoSync.js'
 

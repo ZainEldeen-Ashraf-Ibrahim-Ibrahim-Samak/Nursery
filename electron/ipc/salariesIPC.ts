@@ -213,13 +213,17 @@ ipcMain.handle('salary:get', async (_event, { month, year }) => {
       }
 
       const bonus = row.bonus ?? 0
-      const deductions = row.deductions ?? 0
+      // Sum itemised deductions from employee_deductions table
+      const deductionSum = (db.prepare(
+        'SELECT COALESCE(SUM(amount), 0) as total FROM employee_deductions WHERE employee_id = ? AND month = ? AND year = ?'
+      ).get(row.employee_id, month, Number(year)) as any)?.total ?? 0
 
       return {
         ...row,
         salary_type_name: salaryTypeName,
         salary_type_mode: salaryTypeMode,
-        actual_paid: row.stored_actual_paid ?? (computedActualPaid + bonus - deductions),
+        deductions: deductionSum,
+        actual_paid: row.stored_actual_paid ?? (computedActualPaid + bonus - deductionSum),
       } as SalaryPayment
     })
   } catch (error: any) {
@@ -243,7 +247,13 @@ ipcMain.handle('salary:update', async (_event, { employee_id, month, year, bonus
       throw new Error('الموظف غير موجود / Employee not found')
     }
 
-    const actualPaid = override_amount !== null ? Number(override_amount) : (Number(emp.net_salary) + Number(bonus) - Number(deductions))
+    // Use itemised deductions sum; fall back to the passed-in deductions param if no table entries
+    const tableDeductionRow = db.prepare(
+      'SELECT COALESCE(SUM(amount), 0) as total, COUNT(*) as cnt FROM employee_deductions WHERE employee_id = ? AND month = ? AND year = ?'
+    ).get(employee_id, month, Number(year)) as any
+    const deductionSum = tableDeductionRow?.cnt > 0 ? (tableDeductionRow?.total ?? 0) : Number(deductions)
+
+    const actualPaid = override_amount !== null ? Number(override_amount) : (Number(emp.net_salary) + Number(bonus) - deductionSum)
 
     const now = new Date().toISOString()
 
@@ -258,7 +268,7 @@ ipcMain.handle('salary:update', async (_event, { employee_id, month, year, bonus
         notes = excluded.notes,
         updated_at = excluded.updated_at,
         synced = 0
-    `).run(employee_id, month, Number(year), Number(bonus), Number(deductions), actualPaid, paid_date, notes, now)
+    `).run(employee_id, month, Number(year), Number(bonus), deductionSum, actualPaid, paid_date, notes, now)
 
     const updatedPayment = db.prepare(`
       SELECT s.*, s.paid_date as pay_date, e.name as employee_name, e.role as employee_role

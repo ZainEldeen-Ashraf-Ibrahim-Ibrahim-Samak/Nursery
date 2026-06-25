@@ -66,9 +66,15 @@ export default function SalariesList() {
   // Inline Editing for Payroll
   const [editingPayrollId, setEditingPayrollId] = useState<number | null>(null)
   const [bonus, setBonus] = useState('0')
-  const [deductions, setDeductions] = useState('0')
   const [payDate, setPayDate] = useState('')
   const [notes, setNotes] = useState('')
+
+  // Deductions modal
+  const [deductionsRow, setDeductionsRow] = useState<SalaryPayment | null>(null)
+  const [deductionItems, setDeductionItems] = useState<any[]>([])
+  const [newDeductionReason, setNewDeductionReason] = useState('')
+  const [newDeductionAmount, setNewDeductionAmount] = useState('')
+  const [savingDeduction, setSavingDeduction] = useState(false)
 
   // Load initial data
   useEffect(() => {
@@ -204,11 +210,48 @@ export default function SalariesList() {
     }
   }
 
+  // Open deductions modal
+  const openDeductions = async (row: SalaryPayment) => {
+    setDeductionsRow(row)
+    setNewDeductionReason('')
+    setNewDeductionAmount('')
+    const items = await window.api.deductions.list({ employee_id: row.employee_id, month: currentMonth, year: currentYear })
+    setDeductionItems(items)
+  }
+
+  const handleAddDeduction = async () => {
+    if (!deductionsRow) return
+    const amt = Number(newDeductionAmount)
+    if (!newDeductionReason.trim() || isNaN(amt) || amt <= 0) return
+    setSavingDeduction(true)
+    try {
+      const item = await window.api.deductions.add({
+        employee_id: deductionsRow.employee_id,
+        month: currentMonth,
+        year: currentYear,
+        reason: newDeductionReason.trim(),
+        amount: amt
+      })
+      setDeductionItems(prev => [...prev, item])
+      setNewDeductionReason('')
+      setNewDeductionAmount('')
+      // Refresh payroll to update deductions total
+      setPeriod(currentMonth, currentYear)
+    } finally {
+      setSavingDeduction(false)
+    }
+  }
+
+  const handleRemoveDeduction = async (id: number) => {
+    await window.api.deductions.remove({ id })
+    setDeductionItems(prev => prev.filter(d => d.id !== id))
+    setPeriod(currentMonth, currentYear)
+  }
+
   // Start Inline Editing for Payroll
   const startEditPayroll = (row: SalaryPayment) => {
     setEditingPayrollId(row.id)
     setBonus(row.bonus.toString())
-    setDeductions(row.deductions.toString())
     setPayDate(row.paid_date || '')
     setNotes(row.notes || '')
   }
@@ -216,8 +259,7 @@ export default function SalariesList() {
   // Save Inline Payroll
   const savePayroll = async (row: SalaryPayment) => {
     const bNum = Number(bonus)
-    const dNum = Number(deductions)
-    if (isNaN(bNum) || bNum < 0 || isNaN(dNum) || dNum < 0) {
+    if (isNaN(bNum) || bNum < 0) {
       alert(i18n.language === 'ar' ? 'القيم المدخلة غير صحيحة' : 'Invalid values entered')
       return
     }
@@ -227,7 +269,7 @@ export default function SalariesList() {
       month: currentMonth,
       year: currentYear,
       bonus: bNum,
-      deductions: dNum,
+      deductions: 0, // computed from employee_deductions table on server
       paid_date: payDate || null,
       notes: notes || null
     })
@@ -299,20 +341,20 @@ export default function SalariesList() {
     },
     {
       key: 'deductions',
-      header: i18n.language === 'ar' ? 'خصومات' : 'Deductions',
-      render: (row: SalaryPayment) => {
-        if (editingPayrollId === row.id) {
-          return (
-            <input
-              type="number"
-              value={deductions}
-              onChange={(e) => setDeductions(e.target.value)}
-              className="w-20 px-2 py-1 text-sm border rounded text-end font-mono"
-            />
-          )
-        }
-        return <span className="font-mono text-red-600 font-medium">-{formatCurrency(row.deductions)}</span>
-      },
+      header: i18n.language === 'ar' ? 'الاستقطاعات' : 'Deductions',
+      render: (row: SalaryPayment) => (
+        <div className="flex flex-col items-end gap-1">
+          {row.deductions > 0 && (
+            <span className="font-mono text-red-600 font-medium text-xs">-{formatCurrency(row.deductions)}</span>
+          )}
+          <button
+            onClick={() => openDeductions(row)}
+            className="text-xs text-primary hover:underline font-medium"
+          >
+            {i18n.language === 'ar' ? '+ إدارة' : '+ Manage'}
+          </button>
+        </div>
+      ),
       className: 'text-end'
     },
     {
@@ -320,8 +362,7 @@ export default function SalariesList() {
       header: i18n.language === 'ar' ? 'المدفوع الفعلي' : 'Actual Paid',
       render: (row: SalaryPayment) => {
         if (editingPayrollId === row.id) {
-          // Calculate live preview
-          const preview = (row.net_salary ?? 0) + (Number(bonus) || 0) - (Number(deductions) || 0)
+          const preview = (row.net_salary ?? 0) + (Number(bonus) || 0) - (row.deductions ?? 0)
           return <span className="font-bold text-slate-900 font-mono">{formatCurrency(preview)}</span>
         }
         return <span className="font-bold text-slate-900 font-mono">{formatCurrency(row.actual_paid)}</span>
@@ -706,6 +747,87 @@ export default function SalariesList() {
             </Button>
           </div>
         </form>
+      </Modal>
+
+      {/* Deductions Modal */}
+      <Modal
+        isOpen={deductionsRow !== null}
+        onClose={() => setDeductionsRow(null)}
+        title={i18n.language === 'ar'
+          ? `استقطاعات — ${deductionsRow?.employee_name}`
+          : `Deductions — ${deductionsRow?.employee_name}`}
+      >
+        <div className="space-y-4 mt-2">
+          {/* Existing deduction items */}
+          {deductionItems.length === 0 ? (
+            <p className="text-sm text-slate-400 text-center py-4">
+              {i18n.language === 'ar' ? 'لا توجد استقطاعات لهذا الشهر' : 'No deductions this month'}
+            </p>
+          ) : (
+            <div className="divide-y divide-slate-100 border border-slate-200 rounded-lg overflow-hidden">
+              {deductionItems.map((d: any) => (
+                <div key={d.id} className="flex items-center justify-between px-4 py-2.5 bg-white">
+                  <div>
+                    <span className="text-sm font-medium text-slate-800">{d.reason}</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="font-mono text-red-600 font-semibold text-sm">
+                      -{new Intl.NumberFormat(i18n.language === 'ar' ? 'ar-EG' : 'en-US', { style: 'currency', currency: 'EGP' }).format(d.amount)}
+                    </span>
+                    <button
+                      onClick={() => handleRemoveDeduction(d.id)}
+                      className="text-slate-300 hover:text-red-500 transition-colors text-sm"
+                      title={i18n.language === 'ar' ? 'حذف' : 'Remove'}
+                    >🗑️</button>
+                  </div>
+                </div>
+              ))}
+              <div className="px-4 py-2 bg-slate-50 flex justify-between items-center">
+                <span className="text-xs font-semibold text-slate-500">{i18n.language === 'ar' ? 'إجمالي الاستقطاعات' : 'Total Deductions'}</span>
+                <span className="font-mono font-bold text-red-700 text-sm">
+                  -{new Intl.NumberFormat(i18n.language === 'ar' ? 'ar-EG' : 'en-US', { style: 'currency', currency: 'EGP' }).format(
+                    deductionItems.reduce((s, d) => s + d.amount, 0)
+                  )}
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* Add new deduction */}
+          <div className="border-t border-slate-100 pt-4">
+            <p className="text-xs font-semibold text-slate-500 mb-2">
+              {i18n.language === 'ar' ? 'إضافة استقطاع جديد' : 'Add New Deduction'}
+            </p>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={newDeductionReason}
+                onChange={(e) => setNewDeductionReason(e.target.value)}
+                placeholder={i18n.language === 'ar' ? 'السبب (مثل: غياب، سلفة...)' : 'Reason (e.g., absence, loan...)'}
+                className="flex-1 text-sm border border-slate-300 rounded px-3 py-1.5 focus:outline-none focus:border-primary"
+                onKeyDown={(e) => e.key === 'Enter' && handleAddDeduction()}
+              />
+              <input
+                type="number"
+                min="1"
+                value={newDeductionAmount}
+                onChange={(e) => setNewDeductionAmount(e.target.value)}
+                placeholder={i18n.language === 'ar' ? 'المبلغ' : 'Amount'}
+                className="w-28 text-sm border border-slate-300 rounded px-3 py-1.5 focus:outline-none focus:border-primary font-mono"
+                onKeyDown={(e) => e.key === 'Enter' && handleAddDeduction()}
+              />
+              <Button variant="primary" size="sm" onClick={handleAddDeduction} isLoading={savingDeduction} disabled={!newDeductionReason.trim() || !newDeductionAmount}>
+                {i18n.language === 'ar' ? '+ إضافة' : '+ Add'}
+              </Button>
+            </div>
+          </div>
+
+          <div className="flex justify-end pt-2">
+            <Button variant="outline" onClick={() => setDeductionsRow(null)}>
+              {i18n.language === 'ar' ? 'إغلاق' : 'Close'}
+            </Button>
+          </div>
+        </div>
       </Modal>
 
       {/* Deactivate Confirmation Modal */}

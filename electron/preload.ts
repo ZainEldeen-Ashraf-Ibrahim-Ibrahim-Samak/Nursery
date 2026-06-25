@@ -162,6 +162,13 @@ const api = {
     getSummary: (employee_id: number, month: string, year: number) => ipcRenderer.invoke('attendance:getSummary', { employee_id, month, year }),
   },
 
+  // Employee Deductions
+  deductions: {
+    list: (args: { employee_id: number; month: string; year: number }) => ipcRenderer.invoke('deductions:list', args),
+    add: (args: { employee_id: number; month: string; year: number; reason: string; amount: number }) => ipcRenderer.invoke('deductions:add', args),
+    remove: (args: { id: number }) => ipcRenderer.invoke('deductions:remove', args),
+  },
+
   // Payment Methods
   paymentMethods: {
     list: () => ipcRenderer.invoke('paymentMethods:list'),
