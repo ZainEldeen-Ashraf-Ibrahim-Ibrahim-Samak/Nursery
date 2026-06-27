@@ -189,10 +189,32 @@ export default function ChildForm() {
     }
   }, [id, isEdit, fetchChildren])
 
+  // Returns available unit options for a given service name based on which prices are defined
+  const getUnitOptions = (serviceName: string) => {
+    const svcDef = serviceDefs.find(d => d.name === serviceName)
+    if (svcDef) {
+      const opts: { value: UnitType; label: string }[] = []
+      if (svcDef.price_monthly != null) opts.push({ value: 'شهر', label: t('units.month') })
+      if (svcDef.price_daily != null) opts.push({ value: 'يوم', label: t('units.day') })
+      if (svcDef.price_hourly != null) opts.push({ value: 'ساعة', label: t('units.hour') })
+      if (opts.length > 0) return opts
+    }
+    // fallback: all units
+    return [
+      { value: 'شهر' as UnitType, label: t('units.month') },
+      { value: 'يوم' as UnitType, label: t('units.day') },
+      { value: 'ساعة' as UnitType, label: t('units.hour') },
+    ]
+  }
+
   const handleAddService = () => {
+    const firstSvc = serviceDefs.length > 0 ? serviceDefs[0] : null
+    const svcName: ServiceType = (firstSvc?.name as ServiceType) ?? 'حضانة'
+    const unitOpts = getUnitOptions(svcName)
+    const defaultUnit = unitOpts[0]?.value ?? 'شهر'
     setFormData(prev => ({
       ...prev,
-      services: [...prev.services, { service: 'استضافة', unit: 'يوم', price: 0 }]
+      services: [...prev.services, { service: svcName, unit: defaultUnit, price: 0 }]
     }))
   }
 
@@ -208,9 +230,15 @@ export default function ChildForm() {
       const newServices = [...prev.services]
       const row = { ...newServices[index], [field]: value }
 
-      // Auto-update unit if service changes to session
-      if (field === 'service' && value === 'جلسة' && row.unit !== 'جلسة' && row.unit !== 'يوم') {
-        row.unit = 'جلسة'
+      // Auto-reset unit to first valid option when service changes
+      if (field === 'service') {
+        const currentServiceDefs = useServiceDefinitionsStore.getState().services
+        const svcDef = currentServiceDefs.find(d => d.name === value)
+        if (svcDef) {
+          if (svcDef.price_monthly != null) row.unit = 'شهر'
+          else if (svcDef.price_daily != null) row.unit = 'يوم'
+          else if (svcDef.price_hourly != null) row.unit = 'ساعة'
+        }
       }
 
       // Auto-price if service or unit changes
@@ -622,16 +650,7 @@ export default function ChildForm() {
 
             <div className="space-y-3">
               {formData.services.map((row, index) => {
-                const unitOptions = row.service === 'جلسة'
-                  ? [
-                      { value: 'جلسة', label: t('units.session') },
-                      { value: 'يوم', label: t('units.day') },
-                    ]
-                  : [
-                      { value: 'شهر', label: t('units.month') },
-                      { value: 'يوم', label: t('units.day') },
-                      { value: 'ساعة', label: t('units.hour') },
-                    ]
+                const unitOptions = getUnitOptions(row.service)
 
                 return (
                   <div key={index} className="flex flex-col md:flex-row gap-3 items-end p-4 bg-slate-50 border border-slate-200 rounded-lg">
@@ -640,11 +659,15 @@ export default function ChildForm() {
                       <Select
                         value={row.service}
                         onChange={(e) => handleServiceChange(index, 'service', e.target.value)}
-                        options={[
-                          { value: 'حضانة', label: t('services.nursery') },
-                          { value: 'استضافة', label: t('services.hosting') },
-                          { value: 'جلسة', label: t('services.session') },
-                        ]}
+                        options={
+                          serviceDefs.length > 0
+                            ? serviceDefs.map(d => ({ value: d.name, label: d.name }))
+                            : [
+                                { value: 'حضانة', label: t('services.nursery') },
+                                { value: 'استضافة', label: t('services.hosting') },
+                                { value: 'جلسة', label: t('services.session') },
+                              ]
+                        }
                       />
                     </div>
                     <div className="flex-1 space-y-1.5 w-full">
