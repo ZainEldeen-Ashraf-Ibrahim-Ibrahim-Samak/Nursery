@@ -182,4 +182,63 @@ describe('Payments IPC Contract tests', () => {
     expect(p2.balance).toBe(0)
     expect(p2.status).toBe('paid')
   })
+
+  describe('partial payments (installments)', () => {
+    const seedPayment = (paid = 0, methodName: string | null = null) => {
+      db.prepare(`
+        INSERT INTO children (id, name, guardian, guardian_phone, service, unit, price, reg_date, created_at, updated_at, is_active)
+        VALUES (5, 'طفل أقساط', 'ولي', '010', 'حضانة', 'شهر', 3000, '2026-01-01', '2026-06-06', '2026-06-06', 1)
+      `).run()
+      db.prepare(`
+        INSERT INTO payments (id, child_id, month, year, service, unit, quantity, price, total, paid, balance, status, payment_method_name, created_at, updated_at, synced)
+        VALUES (500, 5, 'يونيو', 2026, 'حضانة', 'شهر', 1, 3000, 3000, ?, ?, ?, ?, '2026-06-06', '2026-06-06', 0)
+      `).run(paid, 3000 - paid, paid >= 3000 ? 'paid' : paid > 0 ? 'partial' : 'unpaid', methodName)
+    }
+
+    it('records multiple installments with different methods and derives paid/status', async () => {
+      adminSession()
+      seedPayment()
+      const add = getHandlers()['payments:addTransaction']
+
+      const r1 = await add(null, { payment_id: 500, amount: 1000, paid_date: '2026-06-10', notes: 'دفعة أولى' })
+      expect(r1.payment.paid).toBe(1000)
+      expect(r1.payment.status).toBe('partial')
+
+      const r2 = await add(null, { payment_id: 500, amount: 2000, paid_date: '2026-06-20' })
+      expect(r2.payment.paid).toBe(3000)
+      expect(r2.payment.balance).toBe(0)
+      expect(r2.payment.status).toBe('paid')
+      expect(r2.transactions).toHaveLength(2)
+    })
+
+    it('seeds an existing paid amount as the first installment', async () => {
+      adminSession()
+      seedPayment(500, 'كاش') // pre-existing paid before installments
+      const add = getHandlers()['payments:addTransaction']
+      const res = await add(null, { payment_id: 500, amount: 200, paid_date: '2026-06-15' })
+      // 500 seeded + 200 new = 700, across 2 transactions
+      expect(res.payment.paid).toBe(700)
+      expect(res.transactions).toHaveLength(2)
+    })
+
+    it('recomputes paid when an installment is deleted', async () => {
+      adminSession()
+      seedPayment()
+      const add = getHandlers()['payments:addTransaction']
+      const del = getHandlers()['payments:deleteTransaction']
+      await add(null, { payment_id: 500, amount: 1000 })
+      const r = await add(null, { payment_id: 500, amount: 500 })
+      const firstTxId = r.transactions[0].id
+      const afterDelete = await del(null, { id: firstTxId })
+      expect(afterDelete.payment.paid).toBe(500)
+      expect(afterDelete.transactions).toHaveLength(1)
+    })
+
+    it('rejects non-positive amounts', async () => {
+      adminSession()
+      seedPayment()
+      const add = getHandlers()['payments:addTransaction']
+      await expect(add(null, { payment_id: 500, amount: 0 })).rejects.toThrow()
+    })
+  })
 })

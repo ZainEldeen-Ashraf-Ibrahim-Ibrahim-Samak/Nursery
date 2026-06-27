@@ -4,6 +4,8 @@ import { usePaymentsStore } from '../../store/usePaymentsStore.js'
 import { usePaymentMethodsStore } from '../../store/usePaymentMethodsStore.js'
 import { useExport } from '../../hooks/useExport.js'
 import PaymentRow from './PaymentRow.js'
+import PaymentInstallmentsModal from './PaymentInstallmentsModal.js'
+import type { Payment } from '../../types/index.js'
 import { Card } from '../../components/ui/Card.js'
 import { Stat } from '../../components/ui/Stat.js'
 import { Button } from '../../components/ui/Button.js'
@@ -77,6 +79,7 @@ export default function MonthlyPayments() {
   const [bulkMethodId, setBulkMethodId] = useState<number | ''>('')
   const [isExportingExcel, setIsExportingExcel] = useState(false)
   const [isExportingPdf, setIsExportingPdf] = useState(false)
+  const [installmentsFor, setInstallmentsFor] = useState<Payment | null>(null)
 
   // Fetch payments on mount
   useEffect(() => {
@@ -478,6 +481,7 @@ export default function MonthlyPayments() {
                             onToggleSelect={() => handleToggleSelectRow(payment.id)}
                             onUpdate={handleUpdateRow}
                             paymentMethods={paymentMethods}
+                            onOpenInstallments={() => setInstallmentsFor(payment)}
                           />
                         ))}
                       </React.Fragment>
@@ -495,6 +499,15 @@ export default function MonthlyPayments() {
           </div>
         )}
       </Card>
+
+      {installmentsFor && (
+        <PaymentInstallmentsModal
+          payment={installmentsFor}
+          paymentMethods={paymentMethods}
+          onClose={() => setInstallmentsFor(null)}
+          onChanged={() => fetchPayments()}
+        />
+      )}
     </div>
   )
 }

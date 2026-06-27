@@ -15493,6 +15493,26 @@ var migrations = [
         );
       `);
 		}
+	},
+	{
+		name: "023_payment_transactions",
+		up: (db) => {
+			db.exec(`
+        CREATE TABLE IF NOT EXISTS payment_transactions (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          payment_id INTEGER NOT NULL REFERENCES payments(id) ON DELETE CASCADE,
+          amount REAL NOT NULL,
+          payment_method_id INTEGER REFERENCES payment_methods(id),
+          payment_method_name TEXT,
+          paid_date TEXT,
+          notes TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          synced INTEGER DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_payment_transactions_payment ON payment_transactions(payment_id);
+      `);
+		}
 	}
 ];
 function runMigrations(db) {
@@ -22214,7 +22234,8 @@ ipcMain.handle("payments:get", async (_event, { month, year }) => {
 		const db = getDb();
 		if (!month || !year) throw new Error("Month and year are required");
 		const payments = db.prepare(`
-      SELECT p.*, c.name as child_name 
+      SELECT p.*, c.name as child_name,
+        (SELECT COUNT(*) FROM payment_transactions pt WHERE pt.payment_id = p.id) as transaction_count
       FROM payments p
       JOIN children c ON p.child_id = c.id
       WHERE p.month = ? AND p.year = ?
@@ -22423,6 +22444,84 @@ ipcMain.handle("payments:bulkPay", async (_event, { ids, payment_method_id }) =>
 	} catch (error) {
 		console.error("Failed to bulk pay payments:", error);
 		throw new Error(error.message || "Failed to process bulk payments");
+	}
+});
+function recomputePaymentFromTransactions(db, paymentId) {
+	const payment = db.prepare("SELECT * FROM payments WHERE id = ?").get(paymentId);
+	if (!payment) return null;
+	const paid = Number((db.prepare("SELECT COALESCE(SUM(amount), 0) as s FROM payment_transactions WHERE payment_id = ?").get(paymentId).s ?? 0).toFixed(2));
+	const last = db.prepare("SELECT payment_method_id, payment_method_name FROM payment_transactions WHERE payment_id = ? ORDER BY paid_date DESC, id DESC LIMIT 1").get(paymentId);
+	const { total, balance, status } = calculatePayment(payment.quantity, payment.price, paid);
+	db.prepare(`
+    UPDATE payments SET paid = ?, total = ?, balance = ?, status = ?,
+      payment_method_id = ?, payment_method_name = ?, updated_at = ?, synced = 0
+    WHERE id = ?
+  `).run(paid, total, balance, status, last?.payment_method_id ?? null, last?.payment_method_name ?? null, (/* @__PURE__ */ new Date()).toISOString(), paymentId);
+}
+ipcMain.handle("payments:listTransactions", async (_event, { payment_id }) => {
+	try {
+		checkAuth$3();
+		const db = getDb();
+		if (!payment_id) throw new Error("Payment ID is required");
+		return db.prepare("SELECT * FROM payment_transactions WHERE payment_id = ? ORDER BY paid_date ASC, id ASC").all(payment_id);
+	} catch (error) {
+		console.error("Failed to list payment transactions:", error);
+		throw new Error(error.message || "Failed to list payment transactions");
+	}
+});
+ipcMain.handle("payments:addTransaction", async (_event, { payment_id, amount, payment_method_id = null, paid_date = null, notes = null }) => {
+	try {
+		checkAuth$3();
+		const db = getDb();
+		if (!payment_id) throw new Error("Payment ID is required");
+		const amt = Number(amount);
+		if (!amt || amt <= 0) throw new Error("المبلغ يجب أن يكون أكبر من صفر / Amount must be greater than zero");
+		const payment = db.prepare("SELECT * FROM payments WHERE id = ?").get(payment_id);
+		if (!payment) throw new Error("سجل الدفع غير موجود / Payment record not found");
+		const resolveMethodName = (id) => {
+			if (id == null) return null;
+			return db.prepare("SELECT name FROM payment_methods WHERE id = ?").get(id)?.name ?? null;
+		};
+		const now = (/* @__PURE__ */ new Date()).toISOString();
+		const date = paid_date || now.slice(0, 10);
+		db.transaction(() => {
+			if (db.prepare("SELECT COUNT(*) as c FROM payment_transactions WHERE payment_id = ?").get(payment_id).c === 0 && Number(payment.paid) > 0) db.prepare(`
+          INSERT INTO payment_transactions (payment_id, amount, payment_method_id, payment_method_name, paid_date, notes, created_at, updated_at, synced)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
+        `).run(payment_id, Number(payment.paid), payment.payment_method_id ?? null, payment.payment_method_name ?? null, (payment.updated_at || payment.created_at || now).slice(0, 10), "رصيد سابق / Previous balance", now, now);
+			db.prepare(`
+        INSERT INTO payment_transactions (payment_id, amount, payment_method_id, payment_method_name, paid_date, notes, created_at, updated_at, synced)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
+      `).run(payment_id, amt, payment_method_id, resolveMethodName(payment_method_id), date, notes, now, now);
+			recomputePaymentFromTransactions(db, payment_id);
+		})();
+		return {
+			payment: db.prepare("SELECT p.*, c.name as child_name FROM payments p JOIN children c ON p.child_id = c.id WHERE p.id = ?").get(payment_id),
+			transactions: db.prepare("SELECT * FROM payment_transactions WHERE payment_id = ? ORDER BY paid_date ASC, id ASC").all(payment_id)
+		};
+	} catch (error) {
+		console.error("Failed to add payment transaction:", error);
+		throw new Error(error.message || "Failed to add payment transaction");
+	}
+});
+ipcMain.handle("payments:deleteTransaction", async (_event, { id }) => {
+	try {
+		checkAuth$3();
+		const db = getDb();
+		if (!id) throw new Error("Transaction ID is required");
+		const tx = db.prepare("SELECT payment_id FROM payment_transactions WHERE id = ?").get(id);
+		if (!tx) throw new Error("العملية غير موجودة / Transaction not found");
+		db.transaction(() => {
+			db.prepare("DELETE FROM payment_transactions WHERE id = ?").run(id);
+			recomputePaymentFromTransactions(db, tx.payment_id);
+		})();
+		return {
+			payment: db.prepare("SELECT p.*, c.name as child_name FROM payments p JOIN children c ON p.child_id = c.id WHERE p.id = ?").get(tx.payment_id),
+			transactions: db.prepare("SELECT * FROM payment_transactions WHERE payment_id = ? ORDER BY paid_date ASC, id ASC").all(tx.payment_id)
+		};
+	} catch (error) {
+		console.error("Failed to delete payment transaction:", error);
+		throw new Error(error.message || "Failed to delete payment transaction");
 	}
 });
 //#endregion
@@ -27001,6 +27100,23 @@ var employeeDeductionSchema = new Schema({
 	synced: Number
 }, sharedOptions);
 var EmployeeDeductionModel = mongoose.models["sync_employee_deductions"] || mongoose.model("sync_employee_deductions", employeeDeductionSchema);
+var paymentTransactionSchema = new Schema({
+	id: {
+		type: Number,
+		required: true,
+		unique: true
+	},
+	payment_id: Number,
+	amount: Number,
+	payment_method_id: Number,
+	payment_method_name: String,
+	paid_date: String,
+	notes: String,
+	created_at: String,
+	updated_at: String,
+	synced: Number
+}, sharedOptions);
+var PaymentTransactionModel = mongoose.models["sync_payment_transactions"] || mongoose.model("sync_payment_transactions", paymentTransactionSchema);
 var SYNC_ENTITIES = [
 	{
 		name: "children",
@@ -27096,6 +27212,11 @@ var SYNC_ENTITIES = [
 		name: "employee_deductions",
 		model: EmployeeDeductionModel,
 		table: "employee_deductions"
+	},
+	{
+		name: "payment_transactions",
+		model: PaymentTransactionModel,
+		table: "payment_transactions"
 	}
 ];
 //#endregion
@@ -27530,6 +27651,24 @@ ipcMain.handle("dashboard:get", async (_event, { month, year }) => {
 				collected: Number(collectedSrv.toFixed(2))
 			};
 		});
+		const collectedByMethod = db.prepare(`
+      SELECT method, SUM(amount) as total FROM (
+        SELECT COALESCE(NULLIF(pt.payment_method_name, ''), 'غير محدد') as method, pt.amount as amount
+        FROM payment_transactions pt
+        JOIN payments p ON pt.payment_id = p.id
+        WHERE p.month = ? AND p.year = ?
+        UNION ALL
+        SELECT COALESCE(NULLIF(p.payment_method_name, ''), 'غير محدد') as method, p.paid as amount
+        FROM payments p
+        WHERE p.month = ? AND p.year = ? AND p.paid > 0
+          AND NOT EXISTS (SELECT 1 FROM payment_transactions pt WHERE pt.payment_id = p.id)
+      )
+      GROUP BY method
+      ORDER BY total DESC
+    `).all(month, year, month, year).map((r) => ({
+			method: r.method,
+			total: Number((r.total ?? 0).toFixed(2))
+		}));
 		const summary12Month = [];
 		for (const m of arabicMonths) {
 			const mKpi = calculateDashboard(db.prepare("SELECT total, paid, balance FROM payments WHERE month = ? AND year = ?").all(m, year), db.prepare("SELECT amount FROM expenses WHERE month = ? AND year = ?").all(m, year), db.prepare("SELECT actual_paid FROM salary_payments WHERE month = ? AND year = ?").all(m, year), targetProfitPct);
@@ -27579,6 +27718,7 @@ ipcMain.handle("dashboard:get", async (_event, { month, year }) => {
 			},
 			summary12Month,
 			revenueByService,
+			collectedByMethod,
 			alerts
 		};
 	} catch (error) {

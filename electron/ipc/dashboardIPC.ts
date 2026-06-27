@@ -109,6 +109,28 @@ ipcMain.handle('dashboard:get', async (_event, { month, year }) => {
       }
     })
 
+    // 3b. Collected broken down by payment method (for the Collected card drill-down).
+    // Prefer per-installment transactions; fall back to the payment's own method for
+    // legacy payments that have a paid amount but no transactions recorded.
+    const collectedByMethod = (db.prepare(`
+      SELECT method, SUM(amount) as total FROM (
+        SELECT COALESCE(NULLIF(pt.payment_method_name, ''), 'غير محدد') as method, pt.amount as amount
+        FROM payment_transactions pt
+        JOIN payments p ON pt.payment_id = p.id
+        WHERE p.month = ? AND p.year = ?
+        UNION ALL
+        SELECT COALESCE(NULLIF(p.payment_method_name, ''), 'غير محدد') as method, p.paid as amount
+        FROM payments p
+        WHERE p.month = ? AND p.year = ? AND p.paid > 0
+          AND NOT EXISTS (SELECT 1 FROM payment_transactions pt WHERE pt.payment_id = p.id)
+      )
+      GROUP BY method
+      ORDER BY total DESC
+    `).all(month, year, month, year) as { method: string; total: number }[]).map((r) => ({
+      method: r.method,
+      total: Number((r.total ?? 0).toFixed(2)),
+    }))
+
     // 4. 12-Month Summary for the selected year
     const summary12Month = []
     for (const m of arabicMonths) {
@@ -174,6 +196,7 @@ ipcMain.handle('dashboard:get', async (_event, { month, year }) => {
       },
       summary12Month,
       revenueByService,
+      collectedByMethod,
       alerts,
     }
   } catch (error: any) {

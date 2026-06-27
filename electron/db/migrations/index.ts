@@ -600,6 +600,26 @@ const migrations: Migration[] = [
         );
       `)
     }
+  },
+  {
+    name: '023_payment_transactions',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS payment_transactions (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          payment_id INTEGER NOT NULL REFERENCES payments(id) ON DELETE CASCADE,
+          amount REAL NOT NULL,
+          payment_method_id INTEGER REFERENCES payment_methods(id),
+          payment_method_name TEXT,
+          paid_date TEXT,
+          notes TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          synced INTEGER DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_payment_transactions_payment ON payment_transactions(payment_id);
+      `)
+    }
   }
 ]
 

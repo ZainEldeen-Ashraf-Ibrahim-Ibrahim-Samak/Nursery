@@ -428,6 +428,24 @@ const employeeDeductionSchema = new Schema({
 export const EmployeeDeductionModel: Model<any> = mongoose.models['sync_employee_deductions'] ||
   mongoose.model('sync_employee_deductions', employeeDeductionSchema)
 
+// ── Payment Transactions (partial payments / installments) ─────────────────────
+
+const paymentTransactionSchema = new Schema({
+  id: { type: Number, required: true, unique: true },
+  payment_id: Number,
+  amount: Number,
+  payment_method_id: Number,
+  payment_method_name: String,
+  paid_date: String,
+  notes: String,
+  created_at: String,
+  updated_at: String,
+  synced: Number
+}, sharedOptions)
+
+export const PaymentTransactionModel: Model<any> = mongoose.models['sync_payment_transactions'] ||
+  mongoose.model('sync_payment_transactions', paymentTransactionSchema)
+
 // ── Entity registry ───────────────────────────────────────────────────────────
 
 export const SYNC_ENTITIES: {
@@ -454,4 +472,5 @@ export const SYNC_ENTITIES: {
   { name: 'attendance_conflicts', model: AttendanceConflictModel, table: 'attendance_conflicts' },
   { name: 'payment_methods', model: PaymentMethodModel, table: 'payment_methods' },
   { name: 'employee_deductions', model: EmployeeDeductionModel, table: 'employee_deductions' },
+  { name: 'payment_transactions', model: PaymentTransactionModel, table: 'payment_transactions' },
 ]

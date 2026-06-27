@@ -5,6 +5,7 @@ import { useAuthStore } from '../store/useAuthStore.js'
 import { Card } from '../components/ui/Card.js'
 import { Stat } from '../components/ui/Stat.js'
 import { Select } from '../components/ui/Select.js'
+import { Modal } from '../components/ui/Modal.js'
 import { Alert } from '../components/ui/Alert.js'
 import { LoadingSpinner } from '../components/ui/LoadingSpinner.js'
 import RevenueChart from '../components/charts/RevenueChart.js'
@@ -54,6 +55,7 @@ export default function Dashboard() {
 
   const [selectedMonth, setSelectedMonth] = useState<string>(defaultMonth)
   const [selectedYear, setSelectedYear] = useState<number>(defaultYear)
+  const [showMethods, setShowMethods] = useState(false)
 
   const { data, isLoading, error, refresh, clearError } = useDashboard(
     selectedMonth,
@@ -224,7 +226,15 @@ export default function Dashboard() {
                   value={formatCurrency(data.kpis.invoiced)}
                   icon="💰"
                 />
-                <div className="bg-white rounded-xl shadow-sm p-5 flex items-start sm:items-center justify-between gap-4 border border-slate-200 bg-gradient-to-br from-white to-teal-50/20">
+                <div
+                  role={isAdmin ? 'button' : undefined}
+                  tabIndex={isAdmin ? 0 : undefined}
+                  onClick={isAdmin ? () => setShowMethods(true) : undefined}
+                  onKeyDown={isAdmin ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setShowMethods(true) } } : undefined}
+                  className={`bg-white rounded-xl shadow-sm p-5 flex items-start sm:items-center justify-between gap-4 border border-slate-200 bg-gradient-to-br from-white to-teal-50/20 ${
+                    isAdmin ? 'cursor-pointer hover:shadow-md hover:border-teal-300 transition-all' : ''
+                  }`}
+                >
                   <div className="flex flex-col gap-1 text-start min-w-0">
                     <span className="text-xs font-semibold text-teal-600 uppercase tracking-wider truncate">
                       {t('collected')}
@@ -232,6 +242,11 @@ export default function Dashboard() {
                     <span className="text-xl sm:text-2xl font-extrabold text-teal-700 font-mono tracking-tight mt-1 truncate">
                       {formatCurrency(data.kpis.collected)}
                     </span>
+                    {isAdmin && (
+                      <span className="text-[10px] text-teal-500/80 mt-0.5">
+                        {i18n.language === 'ar' ? 'اضغط لعرض طرق الدفع' : 'Click for payment methods'}
+                      </span>
+                    )}
                   </div>
                   <span className="text-2xl bg-teal-50 text-teal-600 p-2.5 rounded-lg flex-shrink-0">✅</span>
                 </div>
@@ -485,6 +500,31 @@ export default function Dashboard() {
 
               </div>
 
+            {/* Collected-by-method breakdown (admin drill-down on the Collected card) */}
+            <Modal
+              isOpen={showMethods}
+              onClose={() => setShowMethods(false)}
+              title={i18n.language === 'ar' ? 'التحصيل حسب طريقة الدفع' : 'Collected by Payment Method'}
+            >
+              {data.collectedByMethod.length === 0 ? (
+                <p className="text-sm text-slate-400">
+                  {i18n.language === 'ar' ? 'لا توجد مدفوعات محصّلة لهذا الشهر.' : 'No collected payments this month.'}
+                </p>
+              ) : (
+                <div className="divide-y divide-slate-100">
+                  {data.collectedByMethod.map((m) => (
+                    <div key={m.method} className="flex justify-between items-center py-2.5">
+                      <span className="text-sm text-slate-700">{m.method}</span>
+                      <span className="font-mono font-bold text-teal-700">{formatCurrency(m.total)}</span>
+                    </div>
+                  ))}
+                  <div className="flex justify-between items-center py-2.5 border-t-2 border-slate-200">
+                    <span className="text-sm font-semibold text-slate-800">{i18n.language === 'ar' ? 'الإجمالي' : 'Total'}</span>
+                    <span className="font-mono font-extrabold text-teal-800">{formatCurrency(data.kpis.collected)}</span>
+                  </div>
+                </div>
+              )}
+            </Modal>
             </div>
           )}
         </div>

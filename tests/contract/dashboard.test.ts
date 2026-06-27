@@ -150,6 +150,33 @@ describe('dashboard:get IPC contract', () => {
     expect(services).toContain('جلسة')
   })
 
+  it('breaks down collected amounts by payment method', async () => {
+    admin()
+    const addPaid = (paid: number, method: string | null) => {
+      const cid = insertChild(db, { name: `طفل ${method ?? 'بدون'} ${paid}`, price: 3000 })
+      const sid = insertService(db, cid, 3000)
+      db.prepare(`
+        INSERT INTO payments (child_id, service_id, month, year, service, unit, quantity, price, total, paid, balance, status, payment_method_name, created_at, updated_at, synced)
+        VALUES (?, ?, 'يونيو', 2026, 'حضانة', 'شهر', 1, 3000, 3000, ?, ?, 'paid', ?, '2026-06-01', '2026-06-01', 0)
+      `).run(cid, sid, paid, 3000 - paid, method)
+    }
+    addPaid(1000, 'كاش')
+    addPaid(500, 'كاش')
+    addPaid(2000, 'فودافون كاش')
+    addPaid(300, null) // unspecified method
+
+    const result = await h()(null, { month: 'يونيو', year: 2026 })
+    const byMethod: { method: string; total: number }[] = result.collectedByMethod
+    const cash = byMethod.find((m) => m.method === 'كاش')
+    const vodafone = byMethod.find((m) => m.method === 'فودافون كاش')
+    const unspecified = byMethod.find((m) => m.method === 'غير محدد')
+    expect(cash?.total).toBe(1500)
+    expect(vodafone?.total).toBe(2000)
+    expect(unspecified?.total).toBe(300)
+    // sorted descending by total
+    expect(byMethod[0].total).toBeGreaterThanOrEqual(byMethod[byMethod.length - 1].total)
+  })
+
   it('emits an arrears alert when arrears > 0', async () => {
     admin()
     const cid = insertChild(db, { price: 2000 })

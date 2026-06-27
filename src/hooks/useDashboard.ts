@@ -30,6 +30,11 @@ export interface RevenueByServiceEntry {
   collected: number
 }
 
+export interface CollectedByMethodEntry {
+  method: string
+  total: number
+}
+
 export interface DashboardAlert {
   type: 'warning' | 'danger' | 'info'
   messageAr: string
@@ -41,6 +46,7 @@ export interface DashboardData {
   target: DashboardTarget
   summary12Month: Summary12MonthEntry[]
   revenueByService: RevenueByServiceEntry[]
+  collectedByMethod: CollectedByMethodEntry[]
   alerts: DashboardAlert[]
 }
 

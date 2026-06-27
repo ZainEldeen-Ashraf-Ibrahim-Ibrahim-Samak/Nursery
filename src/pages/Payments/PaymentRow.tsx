@@ -12,6 +12,7 @@ interface PaymentRowProps {
   onToggleSelect: () => void
   onUpdate: (id: number, quantity: number, paid: number, notes: string, payment_method_id?: number | null) => Promise<any>
   paymentMethods: PaymentMethod[]
+  onOpenInstallments: () => void
 }
 
 export default function PaymentRow({
@@ -20,9 +21,12 @@ export default function PaymentRow({
   onToggleSelect,
   onUpdate,
   paymentMethods,
+  onOpenInstallments,
 }: PaymentRowProps) {
   const { t, i18n } = useTranslation()
   const isAr = i18n.language === 'ar'
+  // When partial-payment installments exist, paid/method are derived from them — edit via the modal.
+  const hasInstallments = (payment.transaction_count ?? 0) > 0
 
   // Local state for editing fields to prevent slow keystrokes
   const [localQty, setLocalQty] = useState(payment.quantity.toString())
@@ -165,19 +169,26 @@ export default function PaymentRow({
         {formatCurrency(payment.total)}
       </td>
 
-      {/* Paid Amount (Editable input) */}
+      {/* Paid Amount (Editable input — read-only when installments drive the total) */}
       <td className="px-4 py-3 whitespace-nowrap text-start w-28">
-        <input
-          type="number"
-          step="1"
-          value={localPaid}
-          onChange={(e) => setLocalPaid(e.target.value)}
-          onBlur={handleBlur}
-          onKeyDown={handleKeyDown}
-          disabled={isSaving}
-          min={0}
-          className="w-20 px-2 py-1 text-center font-mono border border-slate-300 rounded focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary"
-        />
+        {hasInstallments ? (
+          <span className="inline-flex flex-col items-center">
+            <span className="font-mono font-semibold text-slate-800">{formatCurrency(payment.paid)}</span>
+            <span className="text-[10px] text-slate-400">{isAr ? `${payment.transaction_count} دفعات` : `${payment.transaction_count} installments`}</span>
+          </span>
+        ) : (
+          <input
+            type="number"
+            step="1"
+            value={localPaid}
+            onChange={(e) => setLocalPaid(e.target.value)}
+            onBlur={handleBlur}
+            onKeyDown={handleKeyDown}
+            disabled={isSaving}
+            min={0}
+            className="w-20 px-2 py-1 text-center font-mono border border-slate-300 rounded focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+          />
+        )}
       </td>
 
       {/* Balance */}
@@ -199,18 +210,22 @@ export default function PaymentRow({
       </td>
 
       {/* Payment Method */}
-      <td className="px-4 py-3 whitespace-nowrap text-start w-40">
-        <select
-          value={localMethodId ?? ''}
-          onChange={(e) => handleMethodChange(e.target.value === '' ? null : Number(e.target.value))}
-          disabled={isSaving}
-          className="w-full text-sm border border-slate-200 rounded px-2 py-1 focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary bg-white"
-        >
-          <option value="">{isAr ? '— غير محدد —' : '— None —'}</option>
-          {paymentMethods.filter(m => m.is_active === 1 || m.id === localMethodId).map(m => (
-            <option key={m.id} value={m.id}>{m.name}</option>
-          ))}
-        </select>
+      <td className="px-4 py-3 text-start min-w-[10rem]">
+        {hasInstallments ? (
+          <span className="text-xs text-slate-500">{isAr ? 'طرق متعددة (حسب الدفعات)' : 'Multiple (per installment)'}</span>
+        ) : (
+          <select
+            value={localMethodId ?? ''}
+            onChange={(e) => handleMethodChange(e.target.value === '' ? null : Number(e.target.value))}
+            disabled={isSaving}
+            className="w-full min-w-[9rem] text-sm border border-slate-200 rounded px-2 py-1 focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary bg-white"
+          >
+            <option value="">{isAr ? '— غير محدد —' : '— None —'}</option>
+            {paymentMethods.filter(m => m.is_active === 1 || m.id === localMethodId).map(m => (
+              <option key={m.id} value={m.id}>{m.name}</option>
+            ))}
+          </select>
+        )}
       </td>
 
       {/* Notes (Editable inline input) */}
@@ -228,18 +243,28 @@ export default function PaymentRow({
       </td>
 
       {/* Quick Actions */}
-      <td className="px-4 py-3 text-center whitespace-nowrap w-24">
-        {payment.balance > 0 && (
+      <td className="px-4 py-3 text-center whitespace-nowrap w-32">
+        <div className="flex flex-col gap-1 items-stretch">
+          {payment.balance > 0 && !hasInstallments && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handlePayFull}
+              isLoading={isSaving}
+              className="text-xs"
+            >
+              {i18n.language === 'ar' ? 'دفع كامل' : 'Pay Full'}
+            </Button>
+          )}
           <Button
-            variant="outline"
+            variant="ghost"
             size="sm"
-            onClick={handlePayFull}
-            isLoading={isSaving}
+            onClick={onOpenInstallments}
             className="text-xs"
           >
-            {i18n.language === 'ar' ? 'دفع كامل' : 'Pay Full'}
+            {i18n.language === 'ar' ? '💳 دفعات جزئية' : '💳 Installments'}
           </Button>
-        )}
+        </div>
       </td>
     </tr>
   )

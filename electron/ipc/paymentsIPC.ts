@@ -51,7 +51,8 @@ ipcMain.handle('payments:get', async (_event, { month, year }) => {
     
     // Fetch payments joined with children names
     const payments = db.prepare(`
-      SELECT p.*, c.name as child_name 
+      SELECT p.*, c.name as child_name,
+        (SELECT COUNT(*) FROM payment_transactions pt WHERE pt.payment_id = p.id) as transaction_count
       FROM payments p
       JOIN children c ON p.child_id = c.id
       WHERE p.month = ? AND p.year = ?
@@ -358,5 +359,108 @@ ipcMain.handle('payments:bulkPay', async (_event, { ids, payment_method_id }) =>
   } catch (error: any) {
     console.error('Failed to bulk pay payments:', error)
     throw new Error(error.message || 'Failed to process bulk payments')
+  }
+})
+
+// ── Partial payments / installments ───────────────────────────────────────────
+
+// Recomputes a payment's paid/balance/status from the sum of its transactions and
+// mirrors the most recent transaction's method onto the payment row (legacy single field).
+function recomputePaymentFromTransactions(db: any, paymentId: number) {
+  const payment = db.prepare('SELECT * FROM payments WHERE id = ?').get(paymentId) as any
+  if (!payment) return null
+  const paid = Number(((db.prepare(
+    'SELECT COALESCE(SUM(amount), 0) as s FROM payment_transactions WHERE payment_id = ?'
+  ).get(paymentId) as any).s ?? 0).toFixed(2))
+  const last = db.prepare(
+    'SELECT payment_method_id, payment_method_name FROM payment_transactions WHERE payment_id = ? ORDER BY paid_date DESC, id DESC LIMIT 1'
+  ).get(paymentId) as any
+  const { total, balance, status } = calculatePayment(payment.quantity, payment.price, paid)
+  db.prepare(`
+    UPDATE payments SET paid = ?, total = ?, balance = ?, status = ?,
+      payment_method_id = ?, payment_method_name = ?, updated_at = ?, synced = 0
+    WHERE id = ?
+  `).run(paid, total, balance, status, last?.payment_method_id ?? null, last?.payment_method_name ?? null, new Date().toISOString(), paymentId)
+}
+
+ipcMain.handle('payments:listTransactions', async (_event, { payment_id }) => {
+  try {
+    checkAuth()
+    const db = getDb()
+    if (!payment_id) throw new Error('Payment ID is required')
+    return db.prepare(
+      'SELECT * FROM payment_transactions WHERE payment_id = ? ORDER BY paid_date ASC, id ASC'
+    ).all(payment_id)
+  } catch (error: any) {
+    console.error('Failed to list payment transactions:', error)
+    throw new Error(error.message || 'Failed to list payment transactions')
+  }
+})
+
+ipcMain.handle('payments:addTransaction', async (_event, { payment_id, amount, payment_method_id = null, paid_date = null, notes = null }) => {
+  try {
+    checkAuth()
+    const db = getDb()
+    if (!payment_id) throw new Error('Payment ID is required')
+    const amt = Number(amount)
+    if (!amt || amt <= 0) throw new Error('المبلغ يجب أن يكون أكبر من صفر / Amount must be greater than zero')
+
+    const payment = db.prepare('SELECT * FROM payments WHERE id = ?').get(payment_id) as any
+    if (!payment) throw new Error('سجل الدفع غير موجود / Payment record not found')
+
+    const resolveMethodName = (id: number | null): string | null => {
+      if (id == null) return null
+      const m = db.prepare('SELECT name FROM payment_methods WHERE id = ?').get(id) as any
+      return m?.name ?? null
+    }
+    const now = new Date().toISOString()
+    const date = paid_date || now.slice(0, 10)
+
+    db.transaction(() => {
+      const existing = (db.prepare(
+        'SELECT COUNT(*) as c FROM payment_transactions WHERE payment_id = ?'
+      ).get(payment_id) as any).c
+      // Preserve any pre-existing paid amount (set before installments existed) as a seed row
+      // so paid = SUM(transactions) stays correct.
+      if (existing === 0 && Number(payment.paid) > 0) {
+        db.prepare(`
+          INSERT INTO payment_transactions (payment_id, amount, payment_method_id, payment_method_name, paid_date, notes, created_at, updated_at, synced)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
+        `).run(payment_id, Number(payment.paid), payment.payment_method_id ?? null, payment.payment_method_name ?? null,
+          (payment.updated_at || payment.created_at || now).slice(0, 10), 'رصيد سابق / Previous balance', now, now)
+      }
+      db.prepare(`
+        INSERT INTO payment_transactions (payment_id, amount, payment_method_id, payment_method_name, paid_date, notes, created_at, updated_at, synced)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
+      `).run(payment_id, amt, payment_method_id, resolveMethodName(payment_method_id), date, notes, now, now)
+      recomputePaymentFromTransactions(db, payment_id)
+    })()
+
+    const updated = db.prepare('SELECT p.*, c.name as child_name FROM payments p JOIN children c ON p.child_id = c.id WHERE p.id = ?').get(payment_id) as Payment
+    const transactions = db.prepare('SELECT * FROM payment_transactions WHERE payment_id = ? ORDER BY paid_date ASC, id ASC').all(payment_id)
+    return { payment: updated, transactions }
+  } catch (error: any) {
+    console.error('Failed to add payment transaction:', error)
+    throw new Error(error.message || 'Failed to add payment transaction')
+  }
+})
+
+ipcMain.handle('payments:deleteTransaction', async (_event, { id }) => {
+  try {
+    checkAuth()
+    const db = getDb()
+    if (!id) throw new Error('Transaction ID is required')
+    const tx = db.prepare('SELECT payment_id FROM payment_transactions WHERE id = ?').get(id) as any
+    if (!tx) throw new Error('العملية غير موجودة / Transaction not found')
+    db.transaction(() => {
+      db.prepare('DELETE FROM payment_transactions WHERE id = ?').run(id)
+      recomputePaymentFromTransactions(db, tx.payment_id)
+    })()
+    const updated = db.prepare('SELECT p.*, c.name as child_name FROM payments p JOIN children c ON p.child_id = c.id WHERE p.id = ?').get(tx.payment_id) as Payment
+    const transactions = db.prepare('SELECT * FROM payment_transactions WHERE payment_id = ? ORDER BY paid_date ASC, id ASC').all(tx.payment_id)
+    return { payment: updated, transactions }
+  } catch (error: any) {
+    console.error('Failed to delete payment transaction:', error)
+    throw new Error(error.message || 'Failed to delete payment transaction')
   }
 })

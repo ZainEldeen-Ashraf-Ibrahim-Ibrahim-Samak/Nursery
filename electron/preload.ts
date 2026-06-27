@@ -40,6 +40,9 @@ const api = {
     generate: (args: any) => ipcRenderer.invoke('payments:generate', args),
     update: (args: any) => ipcRenderer.invoke('payments:update', args),
     bulkPay: (args: any) => ipcRenderer.invoke('payments:bulkPay', args),
+    listTransactions: (payment_id: number) => ipcRenderer.invoke('payments:listTransactions', { payment_id }),
+    addTransaction: (args: { payment_id: number; amount: number; payment_method_id?: number | null; paid_date?: string | null; notes?: string | null }) => ipcRenderer.invoke('payments:addTransaction', args),
+    deleteTransaction: (id: number) => ipcRenderer.invoke('payments:deleteTransaction', { id }),
   },
 
   // Salaries
