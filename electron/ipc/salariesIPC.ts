@@ -190,8 +190,10 @@ ipcMain.handle('salary:get', async (_event, { month, year }) => {
 
           if (sessionIds.length > 0) {
             const placeholders = sessionIds.map(() => '?').join(',')
+            // Count distinct sessions that have at least one attendance record recorded.
+            // (One row per child per session — COUNT(*) would inflate the number by child count.)
             const attendedRows = db.prepare(`
-              SELECT COUNT(*) as cnt FROM attendance_records WHERE session_id IN (${placeholders}) AND status != 'absent_excused'
+              SELECT COUNT(DISTINCT session_id) as cnt FROM attendance_records WHERE session_id IN (${placeholders})
             `).get(...sessionIds) as { cnt: number }
             payableSessions = attendedRows.cnt
           }
