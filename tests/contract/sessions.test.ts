@@ -1,5 +1,5 @@
 import { vi, describe, it, expect, beforeAll, beforeEach } from 'vitest'
-import { initDb } from '../../electron/db/connection.js'
+import { initDb, getDb } from '../../electron/db/connection.js'
 import { runMigrations } from '../../electron/db/migrations/index.js'
 
 vi.mock('electron', () => {
@@ -53,6 +53,79 @@ describe('sessions IPC contract', () => {
     const sess = await h()['sessions:add']({}, { session_date: '2026-06-25' })
     const result = await h()['sessions:delete']({}, { id: sess.id })
     expect(result.ok).toBe(true)
+  })
+
+  it('sessions:delete cascades attendance records', async () => {
+    const db = getDb()
+    const now = new Date().toISOString()
+    const child = db.prepare(
+      "INSERT INTO children (name, guardian, guardian_phone, service, unit, price, reg_date, is_active, created_at, updated_at) VALUES ('Cascade Kid', 'G', '0', 'svc', 'u', 0, ?, 1, ?, ?)"
+    ).run(now, now, now)
+    const sess = await h()['sessions:add']({}, { session_date: '2026-06-26' })
+    db.prepare(
+      "INSERT INTO attendance_records (session_id, child_id, status, recorded_at, updated_at) VALUES (?, ?, 'attended', ?, ?)"
+    ).run(sess.id, Number(child.lastInsertRowid), now, now)
+
+    const result = await h()['sessions:delete']({}, { id: sess.id })
+    expect(result.ok).toBe(true)
+    expect(result.deleted_attendance).toBe(1)
+    const remaining = db.prepare('SELECT COUNT(*) as c FROM attendance_records WHERE session_id = ?').get(sess.id) as { c: number }
+    expect(remaining.c).toBe(0)
+  })
+
+  describe('sessions:salaryCredit', () => {
+    let employeeId: number
+    const now = new Date().toISOString()
+
+    beforeAll(() => {
+      const db = getDb()
+      const st = db.prepare(
+        "INSERT INTO salary_types (name, mode, session_rate, created_at, updated_at) VALUES ('PerSession150', 'per_session_fixed', 150, ?, ?)"
+      ).run(now, now)
+      const emp = db.prepare(
+        "INSERT INTO employees (name, role, salary_type_override_id, base_salary, housing, transport, net_salary, is_active, created_at, updated_at) VALUES ('Teacher Ahmed', 'teacher', ?, 0, 0, 0, 0, 1, ?, ?)"
+      ).run(Number(st.lastInsertRowid), now, now)
+      employeeId = Number(emp.lastInsertRowid)
+    })
+
+    const makeSessionWithChild = async (date: string) => {
+      const db = getDb()
+      const sess = await h()['sessions:add']({}, { session_date: date, employee_ids: [employeeId] })
+      const child = db.prepare(
+        "INSERT INTO children (name, guardian, guardian_phone, service, unit, price, reg_date, is_active, created_at, updated_at) VALUES ('Kid', 'G', '0', 'svc', 'u', 0, ?, 1, ?, ?)"
+      ).run(now, now, now)
+      return { sessionId: sess.id, childId: Number(child.lastInsertRowid) }
+    }
+
+    it('credits per-session salary when a child attended', async () => {
+      const { sessionId, childId } = await makeSessionWithChild('2026-08-01')
+      getDb().prepare(
+        "INSERT INTO attendance_records (session_id, child_id, status, recorded_at, updated_at) VALUES (?, ?, 'attended', ?, ?)"
+      ).run(sessionId, childId, now, now)
+      const res = await h()['sessions:salaryCredit']({}, { session_id: sessionId })
+      expect(res.payable).toBe(true)
+      expect(res.credits).toEqual([{ employee_id: employeeId, name: 'Teacher Ahmed', amount: 150 }])
+    })
+
+    it('does not credit when the only attendance is excused', async () => {
+      const { sessionId, childId } = await makeSessionWithChild('2026-08-02')
+      getDb().prepare(
+        "INSERT INTO attendance_records (session_id, child_id, status, recorded_at, updated_at) VALUES (?, ?, 'absent_excused', ?, ?)"
+      ).run(sessionId, childId, now, now)
+      const res = await h()['sessions:salaryCredit']({}, { session_id: sessionId })
+      expect(res.payable).toBe(false)
+      expect(res.credits).toEqual([])
+    })
+
+    it('credits when a child is absent without excuse', async () => {
+      const { sessionId, childId } = await makeSessionWithChild('2026-08-03')
+      getDb().prepare(
+        "INSERT INTO attendance_records (session_id, child_id, status, recorded_at, updated_at) VALUES (?, ?, 'absent_unexcused', ?, ?)"
+      ).run(sessionId, childId, now, now)
+      const res = await h()['sessions:salaryCredit']({}, { session_id: sessionId })
+      expect(res.payable).toBe(true)
+      expect(res.credits[0].amount).toBe(150)
+    })
   })
 
   it('sessions:proRateCalc with mid-month reg_date', async () => {

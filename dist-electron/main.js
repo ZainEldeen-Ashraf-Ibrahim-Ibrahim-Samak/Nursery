@@ -22566,7 +22566,8 @@ ipcMain.handle("salary:get", async (_event, { month, year }) => {
 					if (sessionIds.length > 0) {
 						const placeholders = sessionIds.map(() => "?").join(",");
 						payableSessions = db.prepare(`
-              SELECT COUNT(DISTINCT session_id) as cnt FROM attendance_records WHERE session_id IN (${placeholders})
+              SELECT COUNT(DISTINCT session_id) as cnt FROM attendance_records
+              WHERE session_id IN (${placeholders}) AND status IN ('attended','absent_unexcused')
             `).get(...sessionIds).cnt;
 					}
 					if (st.mode === "fixed_monthly") computedActualPaid = st.monthly_rate ?? row.net_salary;
@@ -27779,6 +27780,45 @@ ipcMain.handle("sessions:delete", async (_event, { id }) => {
 		};
 	} catch (error) {
 		throw new Error(error.message || "Failed to delete session");
+	}
+});
+ipcMain.handle("sessions:salaryCredit", async (_event, { session_id }) => {
+	try {
+		checkAuth$6();
+		const db = getDb();
+		if (!db.prepare(`
+      SELECT 1 FROM attendance_records
+      WHERE session_id = ? AND status IN ('attended','absent_unexcused')
+      LIMIT 1
+    `).get(session_id)) return {
+			payable: false,
+			credits: []
+		};
+		const teachers = db.prepare(`
+      SELECT e.id as employee_id, e.name,
+        COALESCE(e.salary_type_override_id, er.salary_type_id) as effective_salary_type_id
+      FROM session_teachers st
+      JOIN employees e ON st.employee_id = e.id
+      LEFT JOIN employee_roles er ON e.role_id = er.id
+      WHERE st.session_id = ?
+    `).all(session_id);
+		const credits = [];
+		for (const t of teachers) {
+			if (!t.effective_salary_type_id) continue;
+			const st = db.prepare("SELECT mode, session_rate FROM salary_types WHERE id = ?").get(t.effective_salary_type_id);
+			if (!st) continue;
+			if (st.mode === "per_session_fixed" || st.mode === "hybrid") credits.push({
+				employee_id: t.employee_id,
+				name: t.name,
+				amount: st.session_rate ?? 0
+			});
+		}
+		return {
+			payable: true,
+			credits
+		};
+	} catch (error) {
+		throw new Error(error.message || "Failed to compute session salary credit");
 	}
 });
 ipcMain.handle("sessions:assignTeachers", async (_event, { session_id, employee_ids }) => {

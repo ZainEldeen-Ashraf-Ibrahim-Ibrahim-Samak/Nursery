@@ -97,6 +97,50 @@ ipcMain.handle('sessions:delete', async (_event, { id }) => {
   }
 })
 
+// Reports the per-session salary credited to a session's teachers, used to confirm to the
+// user after attendance is saved. A session only credits pay when it is "payable" — i.e. at
+// least one child attended or was absent without excuse. Only teachers on a per-session
+// salary mode (per_session_fixed / hybrid) earn from a single session; fixed-monthly teachers
+// are unaffected and are omitted.
+ipcMain.handle('sessions:salaryCredit', async (_event, { session_id }) => {
+  try {
+    checkAuth()
+    const db = getDb()
+
+    const payable = db.prepare(`
+      SELECT 1 FROM attendance_records
+      WHERE session_id = ? AND status IN ('attended','absent_unexcused')
+      LIMIT 1
+    `).get(session_id)
+    if (!payable) return { payable: false, credits: [] }
+
+    const teachers = db.prepare(`
+      SELECT e.id as employee_id, e.name,
+        COALESCE(e.salary_type_override_id, er.salary_type_id) as effective_salary_type_id
+      FROM session_teachers st
+      JOIN employees e ON st.employee_id = e.id
+      LEFT JOIN employee_roles er ON e.role_id = er.id
+      WHERE st.session_id = ?
+    `).all(session_id) as { employee_id: number; name: string; effective_salary_type_id: number | null }[]
+
+    const credits: { employee_id: number; name: string; amount: number }[] = []
+    for (const t of teachers) {
+      if (!t.effective_salary_type_id) continue
+      const st = db.prepare('SELECT mode, session_rate FROM salary_types WHERE id = ?')
+        .get(t.effective_salary_type_id) as { mode: string; session_rate: number | null } | undefined
+      if (!st) continue
+      // Per-session contribution to pay for this single session.
+      if (st.mode === 'per_session_fixed' || st.mode === 'hybrid') {
+        credits.push({ employee_id: t.employee_id, name: t.name, amount: st.session_rate ?? 0 })
+      }
+    }
+
+    return { payable: true, credits }
+  } catch (error: any) {
+    throw new Error(error.message || 'Failed to compute session salary credit')
+  }
+})
+
 ipcMain.handle('sessions:assignTeachers', async (_event, { session_id, employee_ids }) => {
   try {
     requireAdmin()

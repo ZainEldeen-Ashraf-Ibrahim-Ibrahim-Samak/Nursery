@@ -150,6 +150,7 @@ const api = {
     update: (id: number, patch: any) => ipcRenderer.invoke('sessions:update', { id, patch }),
     delete: (id: number) => ipcRenderer.invoke('sessions:delete', { id }),
     assignTeachers: (session_id: number, employee_ids: number[]) => ipcRenderer.invoke('sessions:assignTeachers', { session_id, employee_ids }),
+    salaryCredit: (session_id: number) => ipcRenderer.invoke('sessions:salaryCredit', { session_id }) as Promise<{ payable: boolean; credits: { employee_id: number; name: string; amount: number }[] }>,
     proRateCalc: (args: { reg_date: string; price_per_session: number }) => ipcRenderer.invoke('sessions:proRateCalc', args),
     childrenForDay: (day_of_week: number) => ipcRenderer.invoke('sessions:childrenForDay', { day_of_week }),
   },

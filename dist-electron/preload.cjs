@@ -123,6 +123,7 @@ electron.contextBridge.exposeInMainWorld("api", {
 			session_id,
 			employee_ids
 		}),
+		salaryCredit: (session_id) => electron.ipcRenderer.invoke("sessions:salaryCredit", { session_id }),
 		proRateCalc: (args) => electron.ipcRenderer.invoke("sessions:proRateCalc", args),
 		childrenForDay: (day_of_week) => electron.ipcRenderer.invoke("sessions:childrenForDay", { day_of_week })
 	},
