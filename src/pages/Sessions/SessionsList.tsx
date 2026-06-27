@@ -95,7 +95,7 @@ export default function SessionsList() {
     setAttendanceEdits({})
   }
 
-  const getEdit = (rec: AttendanceRecord) => attendanceEdits[rec.child_id] || { status: rec.status as AttendanceStatus, excuse_notes: rec.excuse_notes || '' }
+  const getEdit = (rec: AttendanceRecord) => attendanceEdits[rec.child_id] || { status: (rec.status ?? 'attended') as AttendanceStatus, excuse_notes: rec.excuse_notes || '' }
 
   const setEdit = (childId: number, field: 'status' | 'excuse_notes', value: string) => {
     setAttendanceEdits((prev) => ({
