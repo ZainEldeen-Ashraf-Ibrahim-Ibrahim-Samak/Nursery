@@ -27694,7 +27694,8 @@ ipcMain.handle("sessions:list", async (_event, args) => {
 		const db = getDb();
 		const { from, to } = args || {};
 		let query = `
-      SELECT ss.*, sd.name as service_name
+      SELECT ss.*, sd.name as service_name,
+        (SELECT COUNT(*) FROM attendance_records ar WHERE ar.session_id = ss.id) as attendance_count
       FROM scheduled_sessions ss
       LEFT JOIN service_definitions sd ON ss.service_id = sd.id
       WHERE 1=1
@@ -27762,10 +27763,20 @@ ipcMain.handle("sessions:delete", async (_event, { id }) => {
 	try {
 		requireAdmin();
 		const db = getDb();
-		if (db.prepare("SELECT COUNT(*) as cnt FROM attendance_records WHERE session_id = ?").get(id).cnt > 0) throw new Error("لا يمكن حذف الجلسة — يوجد سجلات حضور / Cannot delete session — attendance records exist");
-		db.prepare("DELETE FROM session_teachers WHERE session_id = ?").run(id);
-		db.prepare("DELETE FROM scheduled_sessions WHERE id = ?").run(id);
-		return { ok: true };
+		const { cnt: attendanceCount } = db.prepare("SELECT COUNT(*) as cnt FROM attendance_records WHERE session_id = ?").get(id);
+		db.transaction(() => {
+			db.prepare(`
+        DELETE FROM attendance_conflicts
+        WHERE attendance_record_id IN (SELECT id FROM attendance_records WHERE session_id = ?)
+      `).run(id);
+			db.prepare("DELETE FROM attendance_records WHERE session_id = ?").run(id);
+			db.prepare("DELETE FROM session_teachers WHERE session_id = ?").run(id);
+			db.prepare("DELETE FROM scheduled_sessions WHERE id = ?").run(id);
+		})();
+		return {
+			ok: true,
+			deleted_attendance: attendanceCount
+		};
 	} catch (error) {
 		throw new Error(error.message || "Failed to delete session");
 	}

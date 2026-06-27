@@ -251,6 +251,15 @@ export default function SessionsList() {
         footer={<div className="flex gap-2"><Button variant="outline" onClick={() => setToDelete(null)}>{isAr ? 'إلغاء' : 'Cancel'}</Button><Button variant="danger" onClick={handleDelete}>{isAr ? 'حذف' : 'Delete'}</Button></div>}
       >
         <p className="text-sm text-slate-600">{isAr ? `حذف جلسة ${toDelete?.session_date}؟` : `Delete session on ${toDelete?.session_date}?`}</p>
+        {!!toDelete?.attendance_count && toDelete.attendance_count > 0 && (
+          <div className="mt-3 flex items-start gap-2 bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-sm text-red-700">
+            ⚠️ <span>
+              {isAr
+                ? `تحتوي هذه الجلسة على ${toDelete.attendance_count} سجل حضور. سيؤدي الحذف إلى حذف هذه السجلات نهائياً.`
+                : `This session has ${toDelete.attendance_count} attendance record${toDelete.attendance_count !== 1 ? 's' : ''}. Deleting it will permanently delete ${toDelete.attendance_count !== 1 ? 'them' : 'it'}.`}
+            </span>
+          </div>
+        )}
       </Modal>
 
       {/* Attendance Sheet Modal */}

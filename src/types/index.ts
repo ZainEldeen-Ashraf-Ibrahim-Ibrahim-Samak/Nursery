@@ -132,6 +132,7 @@ export interface ScheduledSession {
   group_name: string | null
   notes: string | null
   teachers?: Teacher[]
+  attendance_count?: number
   created_at: string
   updated_at: string
   synced: number
