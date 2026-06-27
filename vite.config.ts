@@ -36,7 +36,14 @@ export default defineConfig({
                 'pdfmake'
               ]
             }
-          }
+          },
+          // Watch all electron source files so any IPC/service change restarts the app
+          plugins: [{
+            name: 'watch-electron',
+            configureServer(server) {
+              server.watcher.add('electron/**/*.ts')
+            }
+          }]
         }
       },
       {

@@ -130,7 +130,9 @@ ipcMain.handle('sync:status', async () => {
 
     const pending: Record<string, number> = {}
     for (const entity of SYNC_ENTITIES) {
-      const row = db.prepare(`SELECT COUNT(*) as c FROM ${entity.table} WHERE synced = 0`).get() as any
+      let cq = `SELECT COUNT(*) as c FROM ${entity.table} WHERE synced = 0`
+      if (entity.name === 'settings') cq += " AND key != 'sync_mongo_uri'"
+      const row = db.prepare(cq).get() as any
       pending[entity.name] = row?.c ?? 0
     }
 

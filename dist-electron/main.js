@@ -22263,36 +22263,58 @@ ipcMain.handle("payments:generate", async (_event, { month, year }) => {
 		db.transaction(() => {
 			for (const enrollment of activeEnrollments) {
 				if (!checkStmt.get(enrollment.child_id, enrollment.id, month, year)) {
-					const quantity = 1;
-					const { total, balance, status } = calculatePayment(quantity, enrollment.price, 0);
+					const monthIndex = [
+						"يناير",
+						"فبراير",
+						"مارس",
+						"أبريل",
+						"مايو",
+						"يونيو",
+						"يوليو",
+						"أغسطس",
+						"سبتمبر",
+						"أكتوبر",
+						"نوفمبر",
+						"ديسمبر"
+					].indexOf(month);
+					const payYear = Number(year);
+					const daysInMonth = monthIndex !== -1 ? new Date(payYear, monthIndex + 1, 0).getDate() : 30;
+					let quantity;
+					if (enrollment.unit === "شهر") quantity = 1;
+					else if (enrollment.unit === "يوم") quantity = daysInMonth;
+					else if (enrollment.unit === "ساعة") quantity = 1;
+					else if (enrollment.unit === "جلسة") {
+						const monthPad = monthIndex !== -1 ? String(monthIndex + 1).padStart(2, "0") : "01";
+						const monthStart = `${payYear}-${monthPad}-01`;
+						const monthEnd = `${payYear}-${monthPad}-${String(daysInMonth).padStart(2, "0")}`;
+						quantity = db.prepare(`SELECT COUNT(*) as cnt FROM scheduled_sessions WHERE session_date >= ? AND session_date <= ?`).get(monthStart, monthEnd)?.cnt || 1;
+					} else quantity = 1;
 					let proratedCalc = null;
-					if (enrollment.reg_date) {
+					if (enrollment.reg_date && monthIndex !== -1) {
 						const regDate = new Date(enrollment.reg_date);
-						const monthIndex = [
-							"يناير",
-							"فبراير",
-							"مارس",
-							"أبريل",
-							"مايو",
-							"يونيو",
-							"يوليو",
-							"أغسطس",
-							"سبتمبر",
-							"أكتوبر",
-							"نوفمبر",
-							"ديسمبر"
-						].indexOf(month);
-						if (monthIndex !== -1) {
-							const payYear = Number(year);
-							const regYear = regDate.getFullYear();
-							const regMonth = regDate.getMonth();
-							if (regYear === payYear && regMonth === monthIndex && regDate.getDate() > 1) {
-								const daysInMonth = new Date(payYear, monthIndex + 1, 0).getDate();
-								const daysRemaining = daysInMonth - regDate.getDate() + 1;
-								proratedCalc = Math.round(enrollment.price * daysRemaining / daysInMonth);
+						const regYear = regDate.getFullYear();
+						const regMonth = regDate.getMonth();
+						if (regYear === payYear && regMonth === monthIndex && regDate.getDate() > 1) {
+							const daysRemaining = daysInMonth - regDate.getDate() + 1;
+							if (enrollment.unit === "شهر") proratedCalc = Math.round(enrollment.price * daysRemaining / daysInMonth);
+							else if (enrollment.unit === "يوم") {
+								quantity = daysRemaining;
+								proratedCalc = Math.round(enrollment.price * daysRemaining);
+							} else if (enrollment.unit === "ساعة") quantity = 1;
+							else if (enrollment.unit === "جلسة") {
+								const regDateStr = enrollment.reg_date;
+								const monthEnd = `${payYear}-${String(monthIndex + 1).padStart(2, "0")}-${String(daysInMonth).padStart(2, "0")}`;
+								quantity = db.prepare(`SELECT COUNT(*) as cnt FROM scheduled_sessions WHERE session_date >= ? AND session_date <= ?`).get(regDateStr, monthEnd)?.cnt || quantity;
+								proratedCalc = Math.round(enrollment.price * quantity);
 							}
 						}
 					}
+					const effectiveTotal = enrollment.unit === "شهر" && proratedCalc != null ? proratedCalc : void 0;
+					const { total, balance, status } = effectiveTotal != null ? {
+						total: effectiveTotal,
+						balance: effectiveTotal,
+						status: "unpaid"
+					} : calculatePayment(quantity, enrollment.price, 0);
 					db.prepare(`
             INSERT INTO payments (
               child_id, service_id, month, year, service, unit, quantity, price, total, paid, balance, status, notes, prorated_calculated, created_at, updated_at, synced
@@ -27066,7 +27088,9 @@ ipcMain.handle("sync:status", async () => {
 		const { connected, error } = getConnectionStatus();
 		const pending = {};
 		for (const entity of SYNC_ENTITIES) {
-			const row = db.prepare(`SELECT COUNT(*) as c FROM ${entity.table} WHERE synced = 0`).get();
+			let cq = `SELECT COUNT(*) as c FROM ${entity.table} WHERE synced = 0`;
+			if (entity.name === "settings") cq += " AND key != 'sync_mongo_uri'";
+			const row = db.prepare(cq).get();
 			pending[entity.name] = row?.c ?? 0;
 		}
 		const mongoUri = getMongoUri();

@@ -145,26 +145,67 @@ ipcMain.handle('payments:generate', async (_event, { month, year }) => {
       for (const enrollment of activeEnrollments) {
         const existing = checkStmt.get(enrollment.child_id, enrollment.id, month, year)
         if (!existing) {
-          const quantity = 1
-          const { total, balance, status } = calculatePayment(quantity, enrollment.price, 0)
+          const arabicMonthNames = ['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر']
+          const monthIndex = arabicMonthNames.indexOf(month)
+          const payYear = Number(year)
+          const daysInMonth = monthIndex !== -1 ? new Date(payYear, monthIndex + 1, 0).getDate() : 30
 
-          // Compute pro-rated amount if child registered mid-month
+          // Determine quantity based on unit type
+          let quantity: number
+          if (enrollment.unit === 'شهر') {
+            quantity = 1
+          } else if (enrollment.unit === 'يوم') {
+            quantity = daysInMonth
+          } else if (enrollment.unit === 'ساعة') {
+            quantity = 1  // hourly rate — user sets actual hours manually
+          } else if (enrollment.unit === 'جلسة') {
+            // count scheduled sessions in this month
+            const monthPad = monthIndex !== -1 ? String(monthIndex + 1).padStart(2, '0') : '01'
+            const monthStart = `${payYear}-${monthPad}-01`
+            const monthEnd = `${payYear}-${monthPad}-${String(daysInMonth).padStart(2, '0')}`
+            const sessRow = db.prepare(`SELECT COUNT(*) as cnt FROM scheduled_sessions WHERE session_date >= ? AND session_date <= ?`).get(monthStart, monthEnd) as any
+            quantity = sessRow?.cnt || 1
+          } else {
+            quantity = 1
+          }
+
+          // Pro-rate: if child registered mid-month, scale quantity to days remaining
           let proratedCalc: number | null = null
-          if (enrollment.reg_date) {
+          if (enrollment.reg_date && monthIndex !== -1) {
             const regDate = new Date(enrollment.reg_date)
-            const arabicMonthNames = ['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر']
-            const monthIndex = arabicMonthNames.indexOf(month)
-            if (monthIndex !== -1) {
-              const payYear = Number(year)
-              const regYear = regDate.getFullYear()
-              const regMonth = regDate.getMonth()
-              if (regYear === payYear && regMonth === monthIndex && regDate.getDate() > 1) {
-                const daysInMonth = new Date(payYear, monthIndex + 1, 0).getDate()
-                const daysRemaining = daysInMonth - regDate.getDate() + 1
+            const regYear = regDate.getFullYear()
+            const regMonth = regDate.getMonth()
+            if (regYear === payYear && regMonth === monthIndex && regDate.getDate() > 1) {
+              const daysRemaining = daysInMonth - regDate.getDate() + 1
+              if (enrollment.unit === 'شهر') {
+                // pro-rate price for monthly service
                 proratedCalc = Math.round((enrollment.price * daysRemaining) / daysInMonth)
+              } else if (enrollment.unit === 'يوم') {
+                // reduce quantity to remaining days
+                quantity = daysRemaining
+                proratedCalc = Math.round(enrollment.price * daysRemaining)
+              } else if (enrollment.unit === 'ساعة') {
+                // hourly — user sets hours manually, no auto pro-rate
+                quantity = 1
+              } else if (enrollment.unit === 'جلسة') {
+                // count sessions from reg_date to end of month
+                const regDateStr = enrollment.reg_date
+                const monthPad = String(monthIndex + 1).padStart(2, '0')
+                const monthEnd = `${payYear}-${monthPad}-${String(daysInMonth).padStart(2, '0')}`
+                const sessRow = db.prepare(`SELECT COUNT(*) as cnt FROM scheduled_sessions WHERE session_date >= ? AND session_date <= ?`).get(regDateStr, monthEnd) as any
+                quantity = sessRow?.cnt || quantity
+                proratedCalc = Math.round(enrollment.price * quantity)
               }
             }
           }
+
+          // For monthly services with pro-rate, use the pro-rated amount as total
+          const effectiveTotal = (enrollment.unit === 'شهر' && proratedCalc != null)
+            ? proratedCalc
+            : undefined
+          const { total, balance, status } = effectiveTotal != null
+            ? { total: effectiveTotal, balance: effectiveTotal, status: 'unpaid' as const }
+            : calculatePayment(quantity, enrollment.price, 0)
 
           db.prepare(`
             INSERT INTO payments (

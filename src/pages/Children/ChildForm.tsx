@@ -48,6 +48,7 @@ export default function ChildForm() {
     lesson_days: [] as number[],
     extra_lessons: 0,
     session_price: 0,
+    sessions_baseline: 8,
   })
 
   // Feature 004 — photo (data URL for new/changed photo; existing URL otherwise)
@@ -61,10 +62,13 @@ export default function ChildForm() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [submitStep, setSubmitStep] = useState<'idle' | 'uploading' | 'saving'>('idle')
   const [photoNotice, setPhotoNotice] = useState<string | null>(null)
-  const [proRateResult, setProRateResult] = useState<{ remaining_sessions: number; total_sessions: number; prorated_amount: number } | null>(null)
+  const [proRateResult, setProRateResult] = useState<{ remaining_sessions: number; total_sessions: number; prorated_amount: number; days_remaining: number; days_in_month: number } | null>(null)
 
-  // Derived: sessions and computed fee (baseline is fixed at 8 per clarification)
-  const sessionsBaseline = 8
+  // Edit mode: use stored baseline from child record.
+  // Add mode: use actual scheduled sessions this month from the system; falls back to 8 if none created yet.
+  const sessionsBaseline = isEdit
+    ? (formData.sessions_baseline || 8)
+    : (proRateResult?.total_sessions && proRateResult.total_sessions > 0 ? proRateResult.total_sessions : 8)
   const totalSessions = sessionsBaseline + (Number(formData.extra_lessons) || 0)
   const monthlyFee = totalSessions * (Number(formData.session_price) || 0)
 
@@ -119,17 +123,17 @@ export default function ChildForm() {
     }))
   }, [settings, serviceDefs])
 
-  // Pro-rate calculation when reg_date or services change (new children only)
+  // Pro-rate calculation — uses session_price (per-lesson fee), re-runs when date/price/extra changes
   useEffect(() => {
     if (isEdit) return
-    const servicePrice = formData.services[0]?.price
-    if (!formData.reg_date || !servicePrice) { setProRateResult(null); return }
+    const pricePerSession = Number(formData.session_price) || 0
+    if (!formData.reg_date || !pricePerSession) { setProRateResult(null); return }
     const regDate = new Date(formData.reg_date)
     if (regDate.getDate() === 1) { setProRateResult(null); return }
-    window.api.sessions.proRateCalc({ reg_date: formData.reg_date, price_per_session: servicePrice })
+    window.api.sessions.proRateCalc({ reg_date: formData.reg_date, price_per_session: pricePerSession })
       .then((r: any) => setProRateResult(r))
       .catch(() => setProRateResult(null))
-  }, [formData.reg_date, formData.services, isEdit])
+  }, [formData.reg_date, formData.session_price, formData.extra_lessons, isEdit])
 
   // Load the teacher options (from the Employees list, feature 004)
   useEffect(() => {
@@ -180,6 +184,7 @@ export default function ChildForm() {
             lesson_days: days,
             extra_lessons: child.extra_lessons ?? 0,
             session_price: child.session_price ?? 0,
+            sessions_baseline: child.sessions_baseline ?? 8,
           })
           setPhoto(child.photo_url || null)
           setPhotoChanged(false)
@@ -635,16 +640,85 @@ export default function ChildForm() {
               </div>
             </div>
 
-            <div className="flex flex-wrap gap-6 bg-slate-50 border border-slate-200 rounded-lg p-4">
-              <div>
-                <p className="text-xs text-slate-500">{t('sessions_per_month')}</p>
-                <p className="text-lg font-bold text-slate-800">{totalSessions}</p>
-              </div>
-              <div>
-                <p className="text-xs text-slate-500">{t('monthly_fee')}</p>
-                <p className="text-lg font-bold text-primary">{formatCurrency(monthlyFee)}</p>
-              </div>
-            </div>
+            {(() => {
+              const ar = i18n.language === 'ar'
+              // Days / sessions context for pro-rating
+              const now = new Date()
+              const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()
+
+              let daysLeft = daysInMonth
+              if (formData.reg_date) {
+                const [ry, rm, rd] = formData.reg_date.split('-').map(Number)
+                const sameMonth = ry === now.getFullYear() && rm - 1 === now.getMonth()
+                if (sameMonth && rd > 1) daysLeft = daysInMonth - rd + 1
+              }
+
+              const sessionsLeft = proRateResult?.remaining_sessions ?? sessionsBaseline
+
+              // Calculate the effective monthly amount for each service row
+              const isProRated = !!proRateResult && daysLeft < daysInMonth
+
+              const calcServiceAmount = (price: number, unit: string) => {
+                if (unit === 'شهر') return isProRated ? Math.round(price * daysLeft / daysInMonth) : price
+                if (unit === 'يوم') return price   // daily rate — paid per day, quantity set in payments
+                if (unit === 'ساعة') return price  // hourly rate — quantity set in payments
+                if (unit === 'جلسة') return price * sessionsLeft
+                return price
+              }
+
+              const serviceLines = formData.services.map(s => {
+                const p = Number(s.price) || 0
+                const amount = calcServiceAmount(p, s.unit)
+                let formula = ''
+                if (s.unit === 'شهر' && isProRated) formula = ar ? `${p} × ${daysLeft}/${daysInMonth} يوم` : `${p} × ${daysLeft}/${daysInMonth}d`
+                else if (s.unit === 'يوم') formula = ar ? 'سعر/يوم' : 'per day'
+                else if (s.unit === 'ساعة') formula = ar ? 'سعر/ساعة' : 'per hour'
+                else if (s.unit === 'جلسة') formula = ar ? `${p} × ${sessionsLeft} جلسة` : `${p} × ${sessionsLeft} sessions`
+                return { ...s, amount, formula }
+              })
+
+              const servicesTotalAmount = serviceLines.reduce((sum, s) => sum + s.amount, 0)
+              const grandTotal = servicesTotalAmount + monthlyFee
+
+              return (
+                <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 space-y-2.5">
+                  {proRateResult && (
+                    <p className="text-xs text-amber-600 font-medium mb-1">
+                      {ar
+                        ? `📅 حساب تناسبي: ${daysLeft} يوم متبقي من ${daysInMonth} يوم`
+                        : `📅 Pro-rated: ${daysLeft} of ${daysInMonth} days remaining`}
+                    </p>
+                  )}
+                  {/* Per-service breakdown */}
+                  {serviceLines.map((s, i) => (
+                    <div key={i} className="flex justify-between items-center text-sm">
+                      <span className="text-slate-600">
+                        {s.service}
+                        {s.formula && <span className="text-slate-400 text-xs ml-1">({s.formula})</span>}
+                      </span>
+                      <span className="font-semibold text-slate-800">{formatCurrency(s.amount)}</span>
+                    </div>
+                  ))}
+                  {/* Lesson fee line */}
+                  {Number(formData.session_price) > 0 && (
+                    <div className="flex justify-between items-center text-sm">
+                      <span className="text-slate-600">
+                        {ar
+                          ? `حصص (${totalSessions} × ${formatCurrency(Number(formData.session_price))})`
+                          : `Lessons (${totalSessions} × ${formatCurrency(Number(formData.session_price))})`}
+                      </span>
+                      <span className="font-semibold text-slate-800">{formatCurrency(monthlyFee)}</span>
+                    </div>
+                  )}
+                  <div className="border-t border-slate-200 pt-2 flex justify-between items-center">
+                    <span className="text-sm font-bold text-slate-700">
+                      {ar ? (proRateResult ? 'إجمالي الفترة المتبقية' : 'الإجمالي الشهري') : (proRateResult ? 'Pro-rated Total' : 'Monthly Total')}
+                    </span>
+                    <span className="text-lg font-bold text-primary">{formatCurrency(grandTotal)}</span>
+                  </div>
+                </div>
+              )
+            })()}
           </div>
 
           <div className="space-y-4">
