@@ -259,11 +259,41 @@ ipcMain.handle('children:update', async (_event, { id, patch }) => {
       }
 
       if (enrollments) {
-        db.prepare('DELETE FROM child_services WHERE child_id = ?').run(id)
-        const insertSvc = db.prepare(`INSERT INTO child_services (child_id, service, unit, price, created_at, updated_at, synced) VALUES (?, ?, ?, ?, ?, ?, 0)`)
-        for (const s of enrollments) {
-          insertSvc.run(id, s.service, s.unit, s.price, now, now)
+        // Collect existing child_services rows so we can remap payments.service_id
+        const existingServices = db.prepare('SELECT id, service FROM child_services WHERE child_id = ?').all(id) as { id: number; service: string }[]
+
+        // Delete services that are no longer present (first null out payments FK to avoid constraint)
+        const newServiceNames = new Set(enrollments.map((s: any) => s.service as string))
+        const removedIds = existingServices.filter(e => !newServiceNames.has(e.service)).map(e => e.id)
+        if (removedIds.length > 0) {
+          const placeholders = removedIds.map(() => '?').join(',')
+          db.prepare(`UPDATE payments SET service_id = NULL WHERE child_id = ? AND service_id IN (${placeholders})`).run(id, ...removedIds)
+          db.prepare(`DELETE FROM child_services WHERE id IN (${placeholders})`).run(...removedIds)
         }
+
+        // Upsert each enrollment — update in-place if the service already exists
+        const upsertSvc = db.prepare(`
+          INSERT INTO child_services (child_id, service, unit, price, created_at, updated_at, synced)
+          VALUES (?, ?, ?, ?, ?, ?, 0)
+          ON CONFLICT(child_id, service) DO UPDATE SET
+            unit = excluded.unit,
+            price = excluded.price,
+            updated_at = excluded.updated_at,
+            synced = 0
+        `)
+        for (const s of enrollments) {
+          upsertSvc.run(id, s.service, s.unit, s.price, now, now)
+        }
+
+        // Re-link any payments whose service_id is NULL (removed services or newly added ones)
+        db.prepare(`
+          UPDATE payments
+          SET service_id = (
+            SELECT cs.id FROM child_services cs
+            WHERE cs.child_id = payments.child_id AND cs.service = payments.service
+          )
+          WHERE child_id = ? AND service_id IS NULL
+        `).run(id)
       }
     })
     
