@@ -22004,9 +22004,32 @@ ipcMain.handle("children:update", async (_event, { id, patch }) => {
 				db.prepare(query).run(...params);
 			}
 			if (enrollments) {
-				db.prepare("DELETE FROM child_services WHERE child_id = ?").run(id);
-				const insertSvc = db.prepare(`INSERT INTO child_services (child_id, service, unit, price, created_at, updated_at, synced) VALUES (?, ?, ?, ?, ?, ?, 0)`);
-				for (const s of enrollments) insertSvc.run(id, s.service, s.unit, s.price, now, now);
+				const existingServices = db.prepare("SELECT id, service FROM child_services WHERE child_id = ?").all(id);
+				const newServiceNames = new Set(enrollments.map((s) => s.service));
+				const removedIds = existingServices.filter((e) => !newServiceNames.has(e.service)).map((e) => e.id);
+				if (removedIds.length > 0) {
+					const placeholders = removedIds.map(() => "?").join(",");
+					db.prepare(`UPDATE payments SET service_id = NULL WHERE child_id = ? AND service_id IN (${placeholders})`).run(id, ...removedIds);
+					db.prepare(`DELETE FROM child_services WHERE id IN (${placeholders})`).run(...removedIds);
+				}
+				const upsertSvc = db.prepare(`
+          INSERT INTO child_services (child_id, service, unit, price, created_at, updated_at, synced)
+          VALUES (?, ?, ?, ?, ?, ?, 0)
+          ON CONFLICT(child_id, service) DO UPDATE SET
+            unit = excluded.unit,
+            price = excluded.price,
+            updated_at = excluded.updated_at,
+            synced = 0
+        `);
+				for (const s of enrollments) upsertSvc.run(id, s.service, s.unit, s.price, now, now);
+				db.prepare(`
+          UPDATE payments
+          SET service_id = (
+            SELECT cs.id FROM child_services cs
+            WHERE cs.child_id = payments.child_id AND cs.service = payments.service
+          )
+          WHERE child_id = ? AND service_id IS NULL
+        `).run(id);
 			}
 		})();
 		const updatedChild = db.prepare("SELECT * FROM children WHERE id = ?").get(id);
