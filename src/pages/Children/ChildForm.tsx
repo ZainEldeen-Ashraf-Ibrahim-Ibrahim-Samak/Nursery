@@ -31,7 +31,7 @@ export default function ChildForm() {
   const isEdit = !!id
 
   const { addChild, updateChild, children, fetchChildren, error, clearError } = useChildrenStore()
-  const { fetchServices } = useServiceDefinitionsStore()
+  const { fetchServices, services: serviceDefs } = useServiceDefinitionsStore()
 
   // Form states
   const [formData, setFormData] = useState({
@@ -80,6 +80,43 @@ export default function ChildForm() {
     loadSettings()
     fetchServices()
   }, [])
+
+  // Auto-apply prices to service rows with price=0 once settings/service defs finish loading
+  useEffect(() => {
+    if (Object.keys(settings).length === 0 && serviceDefs.length === 0) return
+    setFormData(prev => ({
+      ...prev,
+      services: prev.services.map(row => {
+        if (row.price > 0) return row
+        const svcDef = serviceDefs.find(d =>
+          d.name === row.service || d.name.toLowerCase() === (row.service as string).toLowerCase()
+        )
+        let resolved = 0
+        if (svcDef) {
+          if (row.unit === 'شهر' && svcDef.price_monthly != null) resolved = svcDef.price_monthly
+          else if (row.unit === 'يوم' && svcDef.price_daily != null) resolved = svcDef.price_daily
+          else if ((row.unit === 'ساعة' || row.unit === 'جلسة') && svcDef.price_hourly != null) resolved = svcDef.price_hourly
+        } else {
+          let priceKey = ''
+          if (row.service === 'حضانة') {
+            if (row.unit === 'شهر') priceKey = 'nursery_monthly'
+            else if (row.unit === 'يوم') priceKey = 'nursery_daily'
+            else if (row.unit === 'ساعة') priceKey = 'nursery_hourly'
+          } else if (row.service === 'استضافة') {
+            if (row.unit === 'شهر') priceKey = 'hosting_monthly'
+            else if (row.unit === 'يوم') priceKey = 'hosting_daily'
+            else if (row.unit === 'ساعة') priceKey = 'hosting_hourly'
+          } else if (row.service === 'جلسة') {
+            if (row.unit === 'شهر') priceKey = 'session_monthly'
+            else if (row.unit === 'جلسة' || row.unit === 'ساعة') priceKey = 'session_hourly'
+            else if (row.unit === 'يوم') priceKey = 'session_daily'
+          }
+          if (priceKey && settings[priceKey] !== undefined) resolved = Number(settings[priceKey])
+        }
+        return resolved > 0 ? { ...row, price: resolved } : row
+      })
+    }))
+  }, [settings, serviceDefs])
 
   // Pro-rate calculation when reg_date or services change (new children only)
   useEffect(() => {
