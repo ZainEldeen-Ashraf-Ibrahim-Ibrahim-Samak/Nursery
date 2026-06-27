@@ -68,6 +68,10 @@ export default function MonthlyPayments() {
 
   useEffect(() => { fetchPaymentMethods() }, [])
 
+  // Search & filter state
+  const [searchQuery, setSearchQuery] = useState('')
+  const [statusFilter, setStatusFilter] = useState<'all' | 'paid' | 'partial' | 'unpaid'>('all')
+
   // Selection state
   const [selectedIds, setSelectedIds] = useState<number[]>([])
   const [bulkMethodId, setBulkMethodId] = useState<number | ''>('')
@@ -98,6 +102,18 @@ export default function MonthlyPayments() {
       label: y.toString(),
     }))
   }, [])
+
+  const filteredByChild = useMemo(() => {
+    let data = byChild ?? []
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim().toLowerCase()
+      data = data.filter((g: any) => g.child_name?.toLowerCase().includes(q))
+    }
+    if (statusFilter !== 'all') {
+      data = data.filter((g: any) => g.status === statusFilter)
+    }
+    return data
+  }, [byChild, searchQuery, statusFilter])
 
   const handleMonthChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     setPeriod(e.target.value, currentYear)
@@ -266,6 +282,69 @@ export default function MonthlyPayments() {
         </div>
       </div>
 
+      {/* Search & Filter Bar */}
+      {payments.length > 0 && (
+        <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
+          <div className="relative flex-1 max-w-sm">
+            <span className="absolute inset-y-0 start-3 flex items-center pointer-events-none text-slate-400">
+              🔍
+            </span>
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder={isAr ? 'بحث باسم الطفل…' : 'Search by child name…'}
+              className="w-full rounded-lg border border-slate-300 bg-white py-2 ps-9 pe-3 text-sm text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="absolute inset-y-0 end-3 flex items-center text-slate-400 hover:text-slate-600"
+              >
+                ✕
+              </button>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-slate-500 font-semibold uppercase whitespace-nowrap">
+              {isAr ? 'الحالة:' : 'Status:'}
+            </span>
+            {(['all', 'paid', 'partial', 'unpaid'] as const).map((s) => (
+              <button
+                key={s}
+                onClick={() => setStatusFilter(s)}
+                className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
+                  statusFilter === s
+                    ? s === 'all'
+                      ? 'bg-slate-700 text-white border-slate-700'
+                      : s === 'paid'
+                      ? 'bg-emerald-600 text-white border-emerald-600'
+                      : s === 'partial'
+                      ? 'bg-amber-500 text-white border-amber-500'
+                      : 'bg-red-500 text-white border-red-500'
+                    : 'bg-white text-slate-600 border-slate-300 hover:border-slate-400'
+                }`}
+              >
+                {s === 'all'
+                  ? isAr ? 'الكل' : 'All'
+                  : s === 'paid'
+                  ? isAr ? 'مدفوع' : 'Paid'
+                  : s === 'partial'
+                  ? isAr ? 'جزئي' : 'Partial'
+                  : isAr ? 'غير مدفوع' : 'Unpaid'}
+              </button>
+            ))}
+            {(searchQuery || statusFilter !== 'all') && (
+              <span className="text-xs text-slate-400 ms-1">
+                {isAr
+                  ? `${filteredByChild.length} من ${byChild?.length ?? 0}`
+                  : `${filteredByChild.length} of ${byChild?.length ?? 0}`}
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Main content table */}
       <Card className="overflow-hidden">
         {isLoading && payments.length === 0 ? (
@@ -340,7 +419,7 @@ export default function MonthlyPayments() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-slate-700">
-                  {byChild && byChild.length > 0 ? byChild.map((childGroup) => {
+                  {filteredByChild && filteredByChild.length > 0 ? filteredByChild.map((childGroup) => {
                     const childPaymentIds = childGroup.services.map((s: any) => s.id)
                     const isAllSelected = childPaymentIds.every((id: number) => selectedIds.includes(id))
                     
