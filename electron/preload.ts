@@ -151,6 +151,7 @@ const api = {
     delete: (id: number) => ipcRenderer.invoke('sessions:delete', { id }),
     assignTeachers: (session_id: number, employee_ids: number[]) => ipcRenderer.invoke('sessions:assignTeachers', { session_id, employee_ids }),
     proRateCalc: (args: { reg_date: string; price_per_session: number }) => ipcRenderer.invoke('sessions:proRateCalc', args),
+    childrenForDay: (day_of_week: number) => ipcRenderer.invoke('sessions:childrenForDay', { day_of_week }),
   },
 
   // Attendance

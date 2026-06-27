@@ -59,6 +59,7 @@ export default function ChildForm() {
   const [settings, setSettings] = useState<Record<string, string>>({})
   const [isLoadingChild, setIsLoadingChild] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [submitStep, setSubmitStep] = useState<'idle' | 'uploading' | 'saving'>('idle')
   const [photoNotice, setPhotoNotice] = useState<string | null>(null)
   const [proRateResult, setProRateResult] = useState<{ remaining_sessions: number; total_sessions: number; prorated_amount: number } | null>(null)
 
@@ -359,30 +360,32 @@ export default function ChildForm() {
     if (!validateForm()) return
 
     setIsSubmitting(true)
+    let uploadFailed = false
     try {
-      // Resolve the photo: upload a newly captured/selected image first.
+      // Step 1: upload photo if changed
       let photo_url: string | null | undefined = undefined
       let photo_public_id: string | null | undefined = undefined
       if (photoChanged) {
         if (photo) {
+          setSubmitStep('uploading')
           try {
             const uploaded = await window.api.storage.uploadPhoto({ dataUrl: photo })
             photo_url = uploaded.url
             photo_public_id = uploaded.publicId
           } catch (err) {
-            // Offline / not configured — keep photo as data URL so it persists locally
             console.warn('Photo upload failed, storing locally:', err)
-            setPhotoNotice(i18n.language === 'ar' ? 'فشل رفع الصورة — تم الحفظ محلياً' : 'Photo upload failed — saved locally')
-            photo_url = photo // store data URL as fallback
+            uploadFailed = true
+            photo_url = photo
             photo_public_id = null
           }
         } else {
-          // Photo explicitly removed.
           photo_url = null
           photo_public_id = null
         }
       }
 
+      // Step 2: save child record
+      setSubmitStep('saving')
       const payload: any = {
         name: formData.name.trim(),
         guardian: formData.guardian.trim(),
@@ -403,17 +406,28 @@ export default function ChildForm() {
         payload.photo_public_id = photo_public_id
       }
 
+      let saved = false
       if (isEdit) {
         const result = await updateChild(Number(id), payload)
-        if (result) navigate('/children')
+        if (result) saved = true
       } else {
         const result = await addChild(payload)
-        if (result) navigate('/children')
+        if (result) saved = true
+      }
+
+      if (saved) {
+        if (uploadFailed) {
+          // Show notice briefly then navigate
+          setPhotoNotice(i18n.language === 'ar' ? 'فشل رفع الصورة — تم الحفظ محلياً' : 'Photo upload failed — saved locally')
+          await new Promise(resolve => setTimeout(resolve, 2000))
+        }
+        navigate('/children')
       }
     } catch (err) {
       console.error('Submit child failed:', err)
     } finally {
       setIsSubmitting(false)
+      setSubmitStep('idle')
     }
   }
 
@@ -719,7 +733,17 @@ export default function ChildForm() {
           </div>
         </Card>
 
-        <div className="flex justify-end gap-3">
+        <div className="flex justify-end gap-3 items-center">
+          {submitStep === 'uploading' && (
+            <span className="text-sm text-slate-500 animate-pulse">
+              {i18n.language === 'ar' ? 'جارٍ رفع الصورة...' : 'Uploading photo...'}
+            </span>
+          )}
+          {submitStep === 'saving' && (
+            <span className="text-sm text-slate-500 animate-pulse">
+              {i18n.language === 'ar' ? 'جارٍ الحفظ...' : 'Saving...'}
+            </span>
+          )}
           <Button type="button" variant="outline" onClick={() => navigate('/children')} disabled={isSubmitting}>
             {t('cancel')}
           </Button>

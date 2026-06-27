@@ -105,6 +105,23 @@ ipcMain.handle('sessions:assignTeachers', async (_event, { session_id, employee_
   }
 })
 
+// Returns active children who have a given weekday (0=Sun…6=Sat) in their lesson_days
+ipcMain.handle('sessions:childrenForDay', async (_event, { day_of_week }) => {
+  try {
+    checkAuth()
+    const db = getDb()
+    const all = db.prepare(`SELECT id, name, lesson_days FROM children WHERE is_active = 1 AND lesson_days IS NOT NULL AND lesson_days != '[]' AND lesson_days != ''`).all() as any[]
+    return all.filter(c => {
+      try {
+        const days: number[] = JSON.parse(c.lesson_days)
+        return days.includes(Number(day_of_week))
+      } catch { return false }
+    }).map(c => ({ id: c.id, name: c.name }))
+  } catch (error: any) {
+    throw new Error(error.message || 'Failed to get children for day')
+  }
+})
+
 ipcMain.handle('sessions:proRateCalc', async (_event, args) => {
   try {
     checkAuth()

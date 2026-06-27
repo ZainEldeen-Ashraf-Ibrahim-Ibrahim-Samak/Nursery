@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useNavigate } from 'react-router-dom'
 import { useSessionsStore } from '../../store/useSessionsStore.js'
 import { useAttendanceStore } from '../../store/useAttendanceStore.js'
 import { Button } from '../../components/ui/Button.js'
@@ -11,6 +12,7 @@ import type { ScheduledSession, AttendanceRecord, AttendanceStatus } from '../..
 export default function SessionsList() {
   const { i18n } = useTranslation()
   const isAr = i18n.language === 'ar'
+  const navigate = useNavigate()
   const { sessions, isLoading, error, fetchSessions, addSession, updateSession, deleteSession, clearError } = useSessionsStore()
   const { sheet, isLoading: sheetLoading, error: sheetError, fetchSheet, recordBulk, clearError: clearSheetError } = useAttendanceStore()
 
@@ -39,7 +41,27 @@ export default function SessionsList() {
   const [attendanceEdits, setAttendanceEdits] = useState<Record<number, { status: AttendanceStatus; excuse_notes: string }>>({})
   const [isSavingAttendance, setIsSavingAttendance] = useState(false)
 
+  // Today's auto-session detection
+  const [todayChildren, setTodayChildren] = useState<{ id: number; name: string }[]>([])
+  const [isCreatingToday, setIsCreatingToday] = useState(false)
+  const todayStr = new Date().toISOString().slice(0, 10)
+  const todayDow = new Date().getDay()
+
   useEffect(() => { fetchSessions(fromDate, toDate) }, [fromDate, toDate])
+
+  useEffect(() => {
+    window.api.sessions.childrenForDay(todayDow).then(setTodayChildren).catch(() => {})
+  }, [todayDow])
+
+  const hasTodaySession = sessions.some(s => s.session_date === todayStr)
+
+  const handleCreateTodaySession = async () => {
+    if (hasTodaySession) { setSuccessMsg(isAr ? 'جلسة اليوم موجودة بالفعل.' : "Today's session already exists."); return }
+    setIsCreatingToday(true)
+    await addSession({ session_date: todayStr })
+    setIsCreatingToday(false)
+    fetchSessions(fromDate, toDate)
+  }
 
   const openCreate = () => {
     setEditing(null); setSessionDate(new Date().toISOString().slice(0, 10)); setGroupName(''); setSessionNotes(''); setFormError('')
@@ -99,15 +121,69 @@ export default function SessionsList() {
     if (s === 'absent_excused') return isAr ? 'غائب بعذر' : 'Excused'
     return isAr ? 'غائب' : 'Absent'
   }
+
+  const today = new Date().toISOString().slice(0, 10)
+
+  // Derives open/closed/upcoming from system date
+  const sessionStatus = (sessionDate: string): 'open' | 'closed' | 'upcoming' => {
+    if (sessionDate === today) return 'open'
+    if (sessionDate < today) return 'closed'
+    return 'upcoming'
+  }
+
+  const sessionStatusBadge = (sessionDate: string) => {
+    const st = sessionStatus(sessionDate)
+    if (st === 'open') return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700 border border-emerald-300">
+        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse inline-block" />
+        {isAr ? 'نشطة' : 'Open'}
+      </span>
+    )
+    if (st === 'closed') return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-slate-100 text-slate-500 border border-slate-200">
+        🔒 {isAr ? 'مغلقة' : 'Closed'}
+      </span>
+    )
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-600 border border-blue-200">
+        🗓 {isAr ? 'مجدولة' : 'Upcoming'}
+      </span>
+    )
+  }
+
   return (
     <div className="p-6 space-y-6">
       <div className="flex justify-between items-center">
         <h1 className="text-2xl font-bold text-slate-900">{isAr ? 'الجلسات' : 'Sessions'}</h1>
-        <Button variant="primary" onClick={openCreate}>{isAr ? '+ إضافة جلسة' : '+ Add Session'}</Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={handleCreateTodaySession} isLoading={isCreatingToday}>
+            {isAr ? '📅 تحقق من اليوم' : '📅 Check Today'}
+          </Button>
+          <Button variant="primary" onClick={openCreate}>{isAr ? '+ إضافة جلسة' : '+ Add Session'}</Button>
+        </div>
       </div>
 
       {successMsg && <Alert variant="success" onClose={() => setSuccessMsg('')}>{successMsg}</Alert>}
       {error && <Alert variant="danger" onClose={clearError}>{error}</Alert>}
+
+      {/* Today's session banner */}
+      {!hasTodaySession && todayChildren.length > 0 && (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-amber-50 border border-amber-300 rounded-lg px-4 py-3">
+          <div>
+            <p className="font-semibold text-amber-800 text-sm">
+              {isAr
+                ? `⚠️ لا توجد جلسة لليوم — ${todayChildren.length} طفل لديهم حصة اليوم`
+                : `⚠️ No session for today — ${todayChildren.length} child${todayChildren.length !== 1 ? 'ren' : ''} scheduled`}
+            </p>
+            <p className="text-xs text-amber-600 mt-0.5">
+              {todayChildren.map(c => c.name).join(' • ')}
+            </p>
+          </div>
+          <Button variant="primary" size="sm" isLoading={isCreatingToday} onClick={handleCreateTodaySession}>
+            {isAr ? 'إنشاء جلسة اليوم' : "Create Today's Session"}
+          </Button>
+        </div>
+      )}
 
       {/* Date filters */}
       <div className="flex gap-3 items-end">
@@ -121,20 +197,37 @@ export default function SessionsList() {
         <p className="text-slate-400 text-sm">{isAr ? 'لا توجد جلسات في هذه الفترة.' : 'No sessions in this period.'}</p>
       ) : (
         <div className="space-y-2">
-          {sessions.map((s) => (
-            <div key={s.id} className="bg-white border border-slate-200 rounded-lg p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div>
-                <p className="font-semibold text-slate-800">{s.session_date}</p>
-                {s.group_name && <p className="text-xs text-slate-500">{s.group_name}</p>}
-                {s.notes && <p className="text-xs text-slate-400">{s.notes}</p>}
+          {sessions.map((s) => {
+            const st = sessionStatus(s.session_date)
+            const isClosed = st === 'closed'
+            return (
+              <div key={s.id} className={`bg-white border rounded-lg p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${st === 'open' ? 'border-emerald-300 bg-emerald-50/30' : 'border-slate-200'}`}>
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <p className="font-semibold text-slate-800">{s.session_date}</p>
+                    {sessionStatusBadge(s.session_date)}
+                  </div>
+                  {s.group_name && <p className="text-xs text-slate-500">{s.group_name}</p>}
+                  {s.service_name && <p className="text-xs text-slate-400">{s.service_name}</p>}
+                  {s.notes && <p className="text-xs text-slate-400">{s.notes}</p>}
+                  {s.teachers && s.teachers.length > 0 && (
+                    <p className="text-xs text-slate-400">{s.teachers.map((t: any) => t.name).join(', ')}</p>
+                  )}
+                </div>
+                <div className="flex gap-2 flex-wrap">
+                  <Button
+                    variant={isClosed ? 'ghost' : 'outline'}
+                    size="sm"
+                    onClick={() => openAttendance(s.id)}
+                  >
+                    {isClosed ? (isAr ? '👁 عرض الحضور' : '👁 View') : (isAr ? 'كشف الحضور' : 'Attendance')}
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => openEdit(s)}>{isAr ? 'تعديل' : 'Edit'}</Button>
+                  <Button variant="danger" size="sm" onClick={() => setToDelete(s)}>{isAr ? 'حذف' : 'Delete'}</Button>
+                </div>
               </div>
-              <div className="flex gap-2">
-                <Button variant="outline" size="sm" onClick={() => openAttendance(s.id)}>{isAr ? 'كشف الحضور' : 'Attendance'}</Button>
-                <Button variant="outline" size="sm" onClick={() => openEdit(s)}>{isAr ? 'تعديل' : 'Edit'}</Button>
-                <Button variant="danger" size="sm" onClick={() => setToDelete(s)}>{isAr ? 'حذف' : 'Delete'}</Button>
-              </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
 
@@ -159,10 +252,26 @@ export default function SessionsList() {
       </Modal>
 
       {/* Attendance Sheet Modal */}
+      {(() => {
+        const viewingSession = sessions.find(s => s.id === viewingSessionId)
+        const viewingClosed = viewingSession ? sessionStatus(viewingSession.session_date) === 'closed' : false
+        return (
       <Modal isOpen={!!viewingSessionId} onClose={() => setViewingSessionId(null)}
         title={isAr ? 'كشف الحضور' : 'Attendance Sheet'}
-        footer={<div className="flex gap-2"><Button variant="outline" onClick={() => setViewingSessionId(null)}>{isAr ? 'إغلاق' : 'Close'}</Button><Button variant="primary" onClick={handleSaveAttendance} isLoading={isSavingAttendance}>{isAr ? 'حفظ الحضور' : 'Save Attendance'}</Button></div>}
+        footer={
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => setViewingSessionId(null)}>{isAr ? 'إغلاق' : 'Close'}</Button>
+            {!viewingClosed && (
+              <Button variant="primary" onClick={handleSaveAttendance} isLoading={isSavingAttendance}>{isAr ? 'حفظ الحضور' : 'Save Attendance'}</Button>
+            )}
+          </div>
+        }
       >
+        {viewingClosed && (
+          <div className="mb-3 flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-500">
+            🔒 {isAr ? 'هذه الجلسة مغلقة — تم إغلاقها تلقائياً بواسطة النظام. يمكن عرض الحضور فقط.' : 'This session is closed — auto-closed by the system. Attendance is view-only.'}
+          </div>
+        )}
         {sheetError && <Alert variant="danger" onClose={clearSheetError}>{sheetError}</Alert>}
         {sheetLoading ? (
           <p className="text-sm text-slate-400">{isAr ? 'جارٍ التحميل...' : 'Loading...'}</p>
@@ -174,15 +283,29 @@ export default function SessionsList() {
               const edit = getEdit(rec)
               return (
                 <div key={rec.child_id} className="flex flex-col sm:flex-row sm:items-center gap-2 p-3 border border-slate-100 rounded-lg">
-                  <span className="flex-1 font-medium text-sm text-slate-800">{rec.child_name}</span>
+                  <button
+                    type="button"
+                    onClick={() => navigate(`/children/${rec.child_id}/statement`)}
+                    className="flex items-center gap-2 flex-1 text-start hover:opacity-75 transition-opacity"
+                  >
+                    <div className="w-8 h-8 rounded-full overflow-hidden bg-slate-100 border border-slate-200 flex items-center justify-center shrink-0">
+                      {rec.child_photo_url
+                        ? <img src={rec.child_photo_url} alt={rec.child_name} className="w-full h-full object-cover" />
+                        : <span className="text-sm text-slate-300">🧒</span>
+                      }
+                    </div>
+                    <span className="font-medium text-sm text-slate-800">{rec.child_name}</span>
+                  </button>
                   <div className="flex gap-1">
                     {(['attended', 'absent_excused', 'absent_unexcused'] as AttendanceStatus[]).map((status) => (
                       <button
                         key={status}
                         type="button"
-                        onClick={() => setEdit(rec.child_id, 'status', status)}
+                        disabled={viewingClosed}
+                        onClick={() => !viewingClosed && setEdit(rec.child_id, 'status', status)}
                         className={[
                           'px-2 py-1 rounded text-xs font-medium border transition-all',
+                          viewingClosed ? 'cursor-default opacity-70' : '',
                           edit.status === status
                             ? status === 'attended' ? 'bg-emerald-100 border-emerald-400 text-emerald-700' : status === 'absent_excused' ? 'bg-amber-100 border-amber-400 text-amber-700' : 'bg-red-100 border-red-400 text-red-700'
                             : 'bg-white border-slate-200 text-slate-400 hover:border-slate-400'
@@ -195,10 +318,11 @@ export default function SessionsList() {
                   {edit.status === 'absent_excused' && (
                     <input
                       type="text"
+                      disabled={viewingClosed}
                       value={edit.excuse_notes}
-                      onChange={(e) => setEdit(rec.child_id, 'excuse_notes', e.target.value)}
+                      onChange={(e) => !viewingClosed && setEdit(rec.child_id, 'excuse_notes', e.target.value)}
                       placeholder={isAr ? 'سبب الغياب بعذر...' : 'Reason...'}
-                      className="flex-1 text-xs border border-slate-200 rounded px-2 py-1"
+                      className="flex-1 text-xs border border-slate-200 rounded px-2 py-1 disabled:bg-slate-50 disabled:cursor-default"
                     />
                   )}
                 </div>
@@ -207,6 +331,8 @@ export default function SessionsList() {
           </div>
         )}
       </Modal>
+        )
+      })()}
     </div>
   )
 }

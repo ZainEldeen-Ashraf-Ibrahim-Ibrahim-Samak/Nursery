@@ -27734,6 +27734,23 @@ ipcMain.handle("sessions:assignTeachers", async (_event, { session_id, employee_
 		throw new Error(error.message || "Failed to assign teachers");
 	}
 });
+ipcMain.handle("sessions:childrenForDay", async (_event, { day_of_week }) => {
+	try {
+		checkAuth$6();
+		return getDb().prepare(`SELECT id, name, lesson_days FROM children WHERE is_active = 1 AND lesson_days IS NOT NULL AND lesson_days != '[]' AND lesson_days != ''`).all().filter((c) => {
+			try {
+				return JSON.parse(c.lesson_days).includes(Number(day_of_week));
+			} catch {
+				return false;
+			}
+		}).map((c) => ({
+			id: c.id,
+			name: c.name
+		}));
+	} catch (error) {
+		throw new Error(error.message || "Failed to get children for day");
+	}
+});
 ipcMain.handle("sessions:proRateCalc", async (_event, args) => {
 	try {
 		checkAuth$6();
@@ -27786,14 +27803,30 @@ ipcMain.handle("attendance:getSheet", async (_event, { session_id }) => {
 				if (!db.prepare("SELECT 1 FROM session_teachers WHERE session_id = ? AND employee_id = ?").get(session_id, emp.id)) throw new Error("غير مصرح لك بالوصول / Not authorized for this session");
 			}
 		}
+		const session = db.prepare("SELECT session_date FROM scheduled_sessions WHERE id = ?").get(session_id);
+		let dayOfWeek = null;
+		if (session?.session_date) {
+			const [y, m, d] = session.session_date.split("-").map(Number);
+			dayOfWeek = new Date(y, m - 1, d).getDay();
+		}
 		return db.prepare(`
-      SELECT c.id as child_id, c.name as child_name,
+      SELECT c.id as child_id, c.name as child_name, c.photo_url as child_photo_url, c.lesson_days,
         ar.id as attendance_id, ar.status, ar.excuse_notes, ar.recorded_by, ar.recorded_at, ar.updated_at
       FROM children c
       LEFT JOIN attendance_records ar ON ar.child_id = c.id AND ar.session_id = ?
       WHERE c.is_active = 1
       ORDER BY c.name ASC
-    `).all(session_id);
+    `).all(session_id).filter((c) => {
+			if (c.attendance_id) return true;
+			if (!c.lesson_days || c.lesson_days === "[]" || c.lesson_days === "") return true;
+			if (dayOfWeek === null) return true;
+			try {
+				const days = JSON.parse(c.lesson_days);
+				return days.length === 0 || days.includes(dayOfWeek);
+			} catch {
+				return true;
+			}
+		}).map(({ lesson_days, ...rest }) => rest);
 	} catch (error) {
 		throw new Error(error.message || "Failed to get attendance sheet");
 	}

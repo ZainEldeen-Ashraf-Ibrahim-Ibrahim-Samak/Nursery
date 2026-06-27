@@ -14,14 +14,39 @@ ipcMain.handle('attendance:getSheet', async (_event, { session_id }) => {
         if (!isTeacher) throw new Error('غير مصرح لك بالوصول / Not authorized for this session')
       }
     }
-    const children = db.prepare(`
-      SELECT c.id as child_id, c.name as child_name,
+    // Get session date to compute weekday
+    const session = db.prepare('SELECT session_date FROM scheduled_sessions WHERE id = ?').get(session_id) as any
+    let dayOfWeek: number | null = null
+    if (session?.session_date) {
+      // Parse date as local date to avoid UTC offset shifting the day
+      const [y, m, d] = session.session_date.split('-').map(Number)
+      dayOfWeek = new Date(y, m - 1, d).getDay()
+    }
+
+    const allChildren = db.prepare(`
+      SELECT c.id as child_id, c.name as child_name, c.photo_url as child_photo_url, c.lesson_days,
         ar.id as attendance_id, ar.status, ar.excuse_notes, ar.recorded_by, ar.recorded_at, ar.updated_at
       FROM children c
       LEFT JOIN attendance_records ar ON ar.child_id = c.id AND ar.session_id = ?
       WHERE c.is_active = 1
       ORDER BY c.name ASC
-    `).all(session_id)
+    `).all(session_id) as any[]
+
+    // Filter to children scheduled for that weekday, or already recorded, or no lesson_days set
+    const children = allChildren.filter(c => {
+      // Always include children already recorded for this session
+      if (c.attendance_id) return true
+      // If no lesson_days configured, include everyone
+      if (!c.lesson_days || c.lesson_days === '[]' || c.lesson_days === '') return true
+      // If we couldn't compute the weekday, include everyone
+      if (dayOfWeek === null) return true
+      try {
+        const days: number[] = JSON.parse(c.lesson_days)
+        return days.length === 0 || days.includes(dayOfWeek)
+      } catch { return true }
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    }).map(({ lesson_days, ...rest }) => rest)
+
     return children
   } catch (error: any) {
     throw new Error(error.message || 'Failed to get attendance sheet')
