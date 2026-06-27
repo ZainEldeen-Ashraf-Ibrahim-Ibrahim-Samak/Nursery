@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useDashboard } from '../hooks/useDashboard.js'
+import { useAuthStore } from '../store/useAuthStore.js'
 import { Card } from '../components/ui/Card.js'
 import { Stat } from '../components/ui/Stat.js'
 import { Select } from '../components/ui/Select.js'
@@ -44,6 +45,7 @@ const yearsList = [2024, 2025, 2026, 2027, 2028, 2029, 2030]
 
 export default function Dashboard() {
   const { t, i18n } = useTranslation()
+  const isAdmin = useAuthStore((s) => s.user?.role === 'admin')
 
   // Get current month index and year
   const today = new Date()
@@ -260,6 +262,7 @@ export default function Dashboard() {
                   }
                   icon="💸"
                 />
+                {isAdmin && (
                 <div className={`bg-white rounded-xl shadow-sm p-5 flex items-start sm:items-center justify-between gap-4 border border-slate-200 ${
                   data.kpis.netProfit >= 0 ? 'bg-gradient-to-br from-white to-emerald-50/20' : 'bg-gradient-to-br from-white to-red-50/20 border-red-200'
                 }`}>
@@ -277,6 +280,7 @@ export default function Dashboard() {
                     data.kpis.netProfit >= 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-500'
                   }`}>📈</span>
                 </div>
+                )}
                 <div className="bg-white rounded-xl shadow-sm p-5 flex items-start sm:items-center justify-between gap-4 border border-slate-200">
                   <div className="flex flex-col gap-1 text-start min-w-0">
                     <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider truncate">
