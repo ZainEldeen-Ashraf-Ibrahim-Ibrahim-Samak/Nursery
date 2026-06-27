@@ -153,6 +153,8 @@ export interface AttendanceRecord {
   child_id: number
   child_name?: string
   child_photo_url?: string | null
+  teacher_id?: number | null
+  teacher_name?: string | null
   status: AttendanceStatus
   excuse_notes: string | null
   recorded_by: number | null

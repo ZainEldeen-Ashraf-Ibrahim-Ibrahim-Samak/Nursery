@@ -35,13 +35,12 @@ export default function SessionsList() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [successMsg, setSuccessMsg] = useState('')
   const [toDelete, setToDelete] = useState<ScheduledSession | null>(null)
-  const [employees, setEmployees] = useState<{ id: number; name: string }[]>([])
-  const [selectedTeachers, setSelectedTeachers] = useState<number[]>([])
 
   // Attendance sheet state
   const [viewingSessionId, setViewingSessionId] = useState<number | null>(null)
   const [attendanceEdits, setAttendanceEdits] = useState<Record<number, { status: AttendanceStatus | null; excuse_notes: string }>>({})
   const [isSavingAttendance, setIsSavingAttendance] = useState(false)
+  const [sessionCredit, setSessionCredit] = useState<{ payable: boolean; hasTeachers: boolean; credits: { employee_id: number; name: string; amount: number }[] } | null>(null)
 
   // Today's auto-session detection
   const [todayChildren, setTodayChildren] = useState<{ id: number; name: string }[]>([])
@@ -55,13 +54,6 @@ export default function SessionsList() {
     window.api.sessions.childrenForDay(todayDow).then(setTodayChildren).catch(() => {})
   }, [todayDow])
 
-  // Load employees (admin) to populate the session teacher picker
-  useEffect(() => {
-    window.api.employees.get()
-      .then((rows: any[]) => setEmployees(rows.map((r) => ({ id: r.id, name: r.name }))))
-      .catch(() => {})
-  }, [])
-
   const hasTodaySession = sessions.some(s => s.session_date === todayStr)
 
   const handleCreateTodaySession = async () => {
@@ -74,33 +66,23 @@ export default function SessionsList() {
 
   const openCreate = () => {
     setEditing(null); setSessionDate(new Date().toISOString().slice(0, 10)); setGroupName(''); setSessionNotes(''); setFormError('')
-    setSelectedTeachers([])
     setIsFormOpen(true)
   }
   const openEdit = (s: ScheduledSession) => {
     setEditing(s); setSessionDate(s.session_date); setGroupName(s.group_name || ''); setSessionNotes(s.notes || ''); setFormError('')
-    setSelectedTeachers((s.teachers ?? []).map((t: any) => t.id))
     setIsFormOpen(true)
   }
-
-  const toggleTeacher = (id: number) =>
-    setSelectedTeachers((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
 
   const handleSubmit = async () => {
     setFormError('')
     if (!sessionDate) { setFormError(isAr ? 'التاريخ مطلوب' : 'Date is required'); return }
     setIsSubmitting(true)
-    const payload = { session_date: sessionDate, group_name: groupName || null, notes: sessionNotes || null, employee_ids: selectedTeachers }
+    const payload = { session_date: sessionDate, group_name: groupName || null, notes: sessionNotes || null }
     const result = editing ? await updateSession(editing.id, payload) : await addSession(payload)
-    // sessions:update ignores teachers, so persist the assignment explicitly on edit.
-    if (result && editing) {
-      try { await window.api.sessions.assignTeachers(editing.id, selectedTeachers) } catch { /* surfaced via store on next fetch */ }
-    }
     setIsSubmitting(false)
     if (result) {
       setSuccessMsg(isAr ? 'تم الحفظ.' : 'Saved.')
       setIsFormOpen(false)
-      fetchSessions(fromDate, toDate) // refresh so assigned teacher names show on the card
     }
   }
 
@@ -113,8 +95,10 @@ export default function SessionsList() {
 
   const openAttendance = async (sessionId: number) => {
     setViewingSessionId(sessionId)
+    setSessionCredit(null)
     await fetchSheet(sessionId)
     setAttendanceEdits({})
+    try { setSessionCredit(await window.api.sessions.salaryCredit(sessionId)) } catch { setSessionCredit(null) }
   }
 
   const getEdit = (rec: AttendanceRecord) => attendanceEdits[rec.child_id] || { status: rec.status as AttendanceStatus | null, excuse_notes: rec.excuse_notes || '' }
@@ -143,13 +127,22 @@ export default function SessionsList() {
         return { child_id: rec.child_id, status: edit.status, excuse_notes: edit.excuse_notes || undefined }
       })
       .filter((r) => r.status != null)
+    // Children whose previously-saved status was cleared in the sheet — remove their records
+    // so they don't reappear as selected after saving.
+    const clearedChildIds = sheet
+      .filter((rec) => rec.child_id in attendanceEdits && attendanceEdits[rec.child_id].status == null && rec.status != null)
+      .map((rec) => rec.child_id)
     const ok = await recordBulk(viewingSessionId, records)
     if (ok) {
+      if (clearedChildIds.length > 0) {
+        try { await window.api.attendance.delete(viewingSessionId, clearedChildIds) } catch { /* best-effort */ }
+      }
       let msg = isAr ? 'تم حفظ الحضور.' : 'Attendance saved.'
       try {
-        const { credits } = await window.api.sessions.salaryCredit(viewingSessionId)
-        if (credits.length > 0) {
-          const lines = credits
+        const credit = await window.api.sessions.salaryCredit(viewingSessionId)
+        setSessionCredit(credit)
+        if (credit.payable && credit.credits.length > 0) {
+          const lines = credit.credits
             .map((c) => `${c.name} ${c.amount >= 0 ? '+' : ''}${c.amount} ${isAr ? 'ج.م' : 'EGP'}`)
             .join('، ')
           msg += isAr ? ` 💰 تم احتساب راتب الجلسة: ${lines}` : ` 💰 Session salary credited: ${lines}`
@@ -286,29 +279,11 @@ export default function SessionsList() {
           <Input label={isAr ? 'تاريخ الجلسة' : 'Session Date'} type="date" value={sessionDate} onChange={(e) => setSessionDate(e.target.value)} required />
           <Input label={isAr ? 'اسم المجموعة (اختياري)' : 'Group Name (optional)'} value={groupName} onChange={(e) => setGroupName(e.target.value)} />
           <Input label={isAr ? 'ملاحظات' : 'Notes'} value={sessionNotes} onChange={(e) => setSessionNotes(e.target.value)} />
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">{isAr ? 'المعلمون' : 'Teachers'}</label>
-            {employees.length === 0 ? (
-              <p className="text-xs text-slate-400">{isAr ? 'لا يوجد موظفون.' : 'No employees available.'}</p>
-            ) : (
-              <div className="max-h-40 overflow-y-auto border border-slate-200 rounded-lg divide-y divide-slate-100">
-                {employees.map((emp) => (
-                  <label key={emp.id} className="flex items-center gap-2 px-3 py-2 text-sm cursor-pointer hover:bg-slate-50">
-                    <input
-                      type="checkbox"
-                      checked={selectedTeachers.includes(emp.id)}
-                      onChange={() => toggleTeacher(emp.id)}
-                      className="rounded border-slate-300"
-                    />
-                    <span className="text-slate-700">{emp.name}</span>
-                  </label>
-                ))}
-              </div>
-            )}
-            <p className="text-xs text-slate-400 mt-1">
-              {isAr ? 'يُحتسب راتب الجلسة للمعلمين المعينين هنا عند تسجيل الحضور.' : 'Assigned teachers earn this session toward their salary when attendance is recorded.'}
-            </p>
-          </div>
+          <p className="text-xs text-slate-400">
+            {isAr
+              ? '👩‍🏫 يتم ربط معلم كل طفل تلقائياً عند تسجيل حضوره — لا حاجة لتعيين المعلمين يدوياً.'
+              : '👩‍🏫 Each attending child\'s teacher is linked automatically when attendance is recorded — no manual assignment needed.'}
+          </p>
         </div>
       </Modal>
 
@@ -349,6 +324,33 @@ export default function SessionsList() {
             🔒 {isAr ? 'هذه الجلسة مغلقة — تم إغلاقها تلقائياً بواسطة النظام. يمكن عرض الحضور فقط.' : 'This session is closed — auto-closed by the system. Attendance is view-only.'}
           </div>
         )}
+        {/* Teacher salary banner — always shows who earns from this session and why, so it's
+            never a mystery whether salary will be credited. */}
+        {sessionCredit && (
+          sessionCredit.credits.length > 0 ? (
+            <div className={`mb-3 rounded-lg px-3 py-2 text-sm border ${sessionCredit.payable ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-amber-50 border-amber-200 text-amber-800'}`}>
+              <div className="font-semibold">💰 {isAr ? 'راتب الجلسة للمعلمين:' : 'Session salary for teachers:'}</div>
+              <ul className="mt-1 space-y-0.5">
+                {sessionCredit.credits.map((c) => (
+                  <li key={c.employee_id}>
+                    {c.name}: <span className="font-semibold">+{c.amount} {isAr ? 'ج.م' : 'EGP'}</span>
+                  </li>
+                ))}
+              </ul>
+              <div className="mt-1 text-xs">
+                {sessionCredit.payable
+                  ? (isAr ? '✅ سيُحتسب لهذه الجلسة (يوجد حضور/غياب بدون عذر).' : '✅ Will be credited for this session (a child attended / was absent without excuse).')
+                  : (isAr ? '⏳ لن يُحتسب حتى تسجّل حضور طفل أو غياب بدون عذر.' : '⏳ Not credited yet — mark a child attended or absent-without-excuse.')}
+              </div>
+            </div>
+          ) : (
+            <div className="mb-3 rounded-lg px-3 py-2 text-sm bg-slate-50 border border-slate-200 text-slate-600">
+              ℹ️ {sessionCredit.hasTeachers
+                ? (isAr ? 'المعلمون المعينون ليسوا على نظام راتب لكل جلسة، فلا يُحتسب راتب جلسة.' : 'Assigned teacher(s) are not on a per-session salary type, so no per-session salary is credited.')
+                : (isAr ? 'لا يوجد معلم معيّن لهذه الجلسة. عيّن معلماً من «تعديل» لاحتساب راتب الجلسة.' : 'No teacher is assigned to this session. Assign one via Edit to credit session salary.')}
+            </div>
+          )
+        )}
         {sheetError && <Alert variant="danger" onClose={clearSheetError}>{sheetError}</Alert>}
         {sheetLoading ? (
           <p className="text-sm text-slate-400">{isAr ? 'جارٍ التحميل...' : 'Loading...'}</p>
@@ -371,7 +373,14 @@ export default function SessionsList() {
                         : <span className="text-sm text-slate-300">🧒</span>
                       }
                     </div>
-                    <span className="font-medium text-sm text-slate-800">{rec.child_name}</span>
+                    <span className="flex flex-col">
+                      <span className="font-medium text-sm text-slate-800">{rec.child_name}</span>
+                      <span className="text-xs text-slate-400">
+                        {rec.teacher_name
+                          ? `👩‍🏫 ${rec.teacher_name}`
+                          : (isAr ? '⚠️ لا يوجد معلم' : '⚠️ No teacher')}
+                      </span>
+                    </span>
                   </button>
                   <div className="flex gap-1">
                     {(['attended', 'absent_excused', 'absent_unexcused'] as AttendanceStatus[]).map((status) => (

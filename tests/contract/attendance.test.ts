@@ -60,6 +60,40 @@ describe('attendance IPC contract', () => {
     expect(results[0].status).toBe('attended')
   })
 
+  it('attendance:record auto-links the attending child\'s teacher to the session', async () => {
+    const db = getDb()
+    const now = new Date().toISOString()
+    // Seed a teacher and assign the child to them
+    const emp = db.prepare(
+      "INSERT INTO employees (name, role, base_salary, housing, transport, net_salary, is_active, created_at, updated_at) VALUES ('AutoLink Teacher', 'teacher', 0, 0, 0, 0, 1, ?, ?)"
+    ).run(now, now)
+    const teacherId = Number(emp.lastInsertRowid)
+    db.prepare('UPDATE children SET teacher_id = ? WHERE id = ?').run(teacherId, childId)
+
+    // Fresh session so we assert on a clean session_teachers set
+    const sres = db.prepare(
+      "INSERT INTO scheduled_sessions (session_date, created_at, updated_at, synced) VALUES ('2026-09-01', ?, ?, 0)"
+    ).run(now, now)
+    const sid = Number(sres.lastInsertRowid)
+
+    await h()['attendance:record']({}, { session_id: sid, records: [{ child_id: childId, status: 'attended' }] })
+
+    const linked = db.prepare('SELECT employee_id FROM session_teachers WHERE session_id = ?').all(sid) as { employee_id: number }[]
+    expect(linked.map((r) => r.employee_id)).toContain(teacherId)
+  })
+
+  it('attendance:record does NOT auto-link teacher for excused absence only', async () => {
+    const db = getDb()
+    const now = new Date().toISOString()
+    const sres = db.prepare(
+      "INSERT INTO scheduled_sessions (session_date, created_at, updated_at, synced) VALUES ('2026-09-02', ?, ?, 0)"
+    ).run(now, now)
+    const sid = Number(sres.lastInsertRowid)
+    await h()['attendance:record']({}, { session_id: sid, records: [{ child_id: childId, status: 'absent_excused' }] })
+    const linked = db.prepare('SELECT COUNT(*) as c FROM session_teachers WHERE session_id = ?').get(sid) as { c: number }
+    expect(linked.c).toBe(0)
+  })
+
   it('attendance:record overwrites with absent_excused', async () => {
     await h()['attendance:record']({}, {
       session_id: sessionId,
@@ -76,6 +110,21 @@ describe('attendance IPC contract', () => {
       session_id: sessionId,
       records: [{ child_id: childId, status: 'invalid_status' }]
     })).rejects.toThrow()
+  })
+
+  it('attendance:delete removes a recorded status', async () => {
+    await h()['attendance:record']({}, { session_id: sessionId, records: [{ child_id: childId, status: 'attended' }] })
+    const res = await h()['attendance:delete']({}, { session_id: sessionId, child_ids: [childId] })
+    expect(res.ok).toBe(true)
+    expect(res.deleted).toBe(1)
+    const sheet = await h()['attendance:getSheet']({}, { session_id: sessionId })
+    const rec = sheet.find((r: any) => r.child_id === childId)
+    expect(rec.status).toBeNull()
+  })
+
+  it('attendance:delete with empty child_ids is a no-op', async () => {
+    const res = await h()['attendance:delete']({}, { session_id: sessionId, child_ids: [] })
+    expect(res).toEqual({ ok: true, deleted: 0 })
   })
 
   it('attendance:getConflicts returns array', async () => {

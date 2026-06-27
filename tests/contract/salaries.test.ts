@@ -35,8 +35,12 @@ describe('Salaries IPC Contract tests', () => {
   })
 
   beforeEach(() => {
-    // Clear employees and salary_payments table before each test
+    // Clear payroll + anything that FK-references employees, in dependency order
     db.prepare('DELETE FROM salary_payments').run()
+    db.prepare('DELETE FROM attendance_records').run()
+    db.prepare('DELETE FROM session_teachers').run()
+    db.prepare('DELETE FROM scheduled_sessions').run()
+    db.prepare('DELETE FROM children').run()
     db.prepare('DELETE FROM employees').run()
     setCurrentUser(null)
   })
@@ -151,6 +155,69 @@ describe('Salaries IPC Contract tests', () => {
       expect(payrollList.length).toBe(1)
       expect(payrollList[0].employee_name).toBe('فاطمة علي')
       expect(payrollList[0].actual_paid).toBe(3500)
+    })
+
+    it('computes per-session salary from session attendance', async () => {
+      adminSession()
+      const now = new Date().toISOString()
+      const st = db.prepare(
+        "INSERT INTO salary_types (name, mode, session_rate, created_at, updated_at) VALUES ('PS150','per_session_fixed',150,?,?)"
+      ).run(now, now)
+      const stId = Number(st.lastInsertRowid)
+
+      const emp = await getHandlers()['employees:add'](null, {
+        name: 'PerSession Teacher', role: 'teacher', base_salary: 0, salary_type_override_id: stId
+      })
+
+      const sres = db.prepare(
+        "INSERT INTO scheduled_sessions (session_date, created_at, updated_at, synced) VALUES ('2026-01-10', ?, ?, 0)"
+      ).run(now, now)
+      const sid = Number(sres.lastInsertRowid)
+      const child = db.prepare(
+        "INSERT INTO children (name, guardian, guardian_phone, service, unit, price, reg_date, teacher_id, is_active, created_at, updated_at) VALUES ('K','G','0','s','u',0,?,?,1,?,?)"
+      ).run(now, emp.id, now, now)
+      const cid = Number(child.lastInsertRowid)
+      db.prepare(
+        "INSERT INTO attendance_records (session_id, child_id, status, recorded_at, updated_at) VALUES (?,?, 'attended', ?, ?)"
+      ).run(sid, cid, now, now)
+      db.prepare('INSERT INTO session_teachers (session_id, employee_id, synced) VALUES (?, ?, 0)').run(sid, emp.id)
+
+      const rows = await getHandlers()['salary:get'](null, { month: 'يناير', year: 2026 })
+      const row = rows.find((r: any) => r.employee_id === emp.id)
+      expect(row).toBeTruthy()
+      expect(row.payable_sessions).toBe(1)
+      expect(row.actual_paid).toBe(150)
+      // Net Salary column also reflects the per-session base for the period
+      expect(row.net_salary).toBe(150)
+    })
+
+    it('salary:update stores per-session pay, not net_salary (no stale 0)', async () => {
+      adminSession()
+      const now = new Date().toISOString()
+      const st = db.prepare(
+        "INSERT INTO salary_types (name, mode, session_rate, created_at, updated_at) VALUES ('PS200','per_session_fixed',200,?,?)"
+      ).run(now, now)
+      const emp = await getHandlers()['employees:add'](null, {
+        name: 'Saved PerSession', role: 'teacher', base_salary: 0, salary_type_override_id: Number(st.lastInsertRowid)
+      })
+      const sres = db.prepare(
+        "INSERT INTO scheduled_sessions (session_date, created_at, updated_at, synced) VALUES ('2026-02-05', ?, ?, 0)"
+      ).run(now, now)
+      const sid = Number(sres.lastInsertRowid)
+      const child = db.prepare(
+        "INSERT INTO children (name, guardian, guardian_phone, service, unit, price, reg_date, teacher_id, is_active, created_at, updated_at) VALUES ('K2','G','0','s','u',0,?,?,1,?,?)"
+      ).run(now, emp.id, now, now)
+      db.prepare("INSERT INTO attendance_records (session_id, child_id, status, recorded_at, updated_at) VALUES (?,?, 'attended', ?, ?)")
+        .run(sid, Number(child.lastInsertRowid), now, now)
+      db.prepare('INSERT INTO session_teachers (session_id, employee_id, synced) VALUES (?, ?, 0)').run(sid, emp.id)
+
+      // Saving payroll must persist the per-session amount (200), not net_salary (0)
+      const pay = await getHandlers()['salary:update'](null, { employee_id: emp.id, month: 'فبراير', year: 2026 })
+      expect(pay.actual_paid).toBe(200)
+
+      // And reading it back still shows 200 (stored value is correct, not a stale 0)
+      const rows = await getHandlers()['salary:get'](null, { month: 'فبراير', year: 2026 })
+      expect(rows.find((r: any) => r.employee_id === emp.id).actual_paid).toBe(200)
     })
   })
 })

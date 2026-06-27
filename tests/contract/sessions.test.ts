@@ -107,13 +107,22 @@ describe('sessions IPC contract', () => {
       expect(res.credits).toEqual([{ employee_id: employeeId, name: 'Teacher Ahmed', amount: 150 }])
     })
 
-    it('does not credit when the only attendance is excused', async () => {
+    it('is not payable when the only attendance is excused, but still lists the teacher', async () => {
       const { sessionId, childId } = await makeSessionWithChild('2026-08-02')
       getDb().prepare(
         "INSERT INTO attendance_records (session_id, child_id, status, recorded_at, updated_at) VALUES (?, ?, 'absent_excused', ?, ?)"
       ).run(sessionId, childId, now, now)
       const res = await h()['sessions:salaryCredit']({}, { session_id: sessionId })
       expect(res.payable).toBe(false)
+      expect(res.hasTeachers).toBe(true)
+      // credits lists per-session teachers regardless of payability (for the live banner)
+      expect(res.credits).toEqual([{ employee_id: employeeId, name: 'Teacher Ahmed', amount: 150 }])
+    })
+
+    it('reports hasTeachers=false when no teacher is assigned', async () => {
+      const sess = await h()['sessions:add']({}, { session_date: '2026-08-04' })
+      const res = await h()['sessions:salaryCredit']({}, { session_id: sess.id })
+      expect(res.hasTeachers).toBe(false)
       expect(res.credits).toEqual([])
     })
 

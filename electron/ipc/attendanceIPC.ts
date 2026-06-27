@@ -25,8 +25,10 @@ ipcMain.handle('attendance:getSheet', async (_event, { session_id }) => {
 
     const allChildren = db.prepare(`
       SELECT c.id as child_id, c.name as child_name, c.photo_url as child_photo_url, c.lesson_days,
+        c.teacher_id, te.name as teacher_name,
         ar.id as attendance_id, ar.status, ar.excuse_notes, ar.recorded_by, ar.recorded_at, ar.updated_at
       FROM children c
+      LEFT JOIN employees te ON te.id = c.teacher_id
       LEFT JOIN attendance_records ar ON ar.child_id = c.id AND ar.session_id = ?
       WHERE c.is_active = 1
       ORDER BY c.name ASC
@@ -65,6 +67,9 @@ ipcMain.handle('attendance:record', async (_event, args) => {
     const sessionId = args?.session_id
     const records: any[] = Array.isArray(args) ? args : (args?.records ?? [])
 
+    // Children whose status makes the session payable; their assigned teacher is auto-linked.
+    const payableChildrenBySession = new Map<number, Set<number>>()
+
     const upsert = db.transaction(() => {
       for (const rec of records) {
         const session_id = sessionId ?? rec.session_id
@@ -83,13 +88,58 @@ ipcMain.handle('attendance:record', async (_event, args) => {
             synced = 0
         `).run(session_id, child_id, status, excuse_notes, user?.id ?? null, now, now)
 
+        if (status === 'attended' || status === 'absent_unexcused') {
+          if (!payableChildrenBySession.has(session_id)) payableChildrenBySession.set(session_id, new Set())
+          payableChildrenBySession.get(session_id)!.add(child_id)
+        }
+
         results.push(db.prepare('SELECT * FROM attendance_records WHERE session_id = ? AND child_id = ?').get(session_id, child_id))
+      }
+
+      // Auto-assign teachers: each attending child contributes their assigned teacher to the
+      // session, so per-session salary is credited without any manual teacher assignment.
+      for (const [session_id, childIds] of payableChildrenBySession) {
+        const ids = [...childIds]
+        const placeholders = ids.map(() => '?').join(',')
+        const teacherRows = db.prepare(
+          `SELECT DISTINCT teacher_id FROM children WHERE id IN (${placeholders}) AND teacher_id IS NOT NULL`
+        ).all(...ids) as { teacher_id: number }[]
+        for (const { teacher_id } of teacherRows) {
+          db.prepare('INSERT OR IGNORE INTO session_teachers (session_id, employee_id, synced) VALUES (?, ?, 0)')
+            .run(session_id, teacher_id)
+        }
       }
     })
     upsert()
     return results
   } catch (error: any) {
     throw new Error(error.message || 'Failed to record attendance')
+  }
+})
+
+// Removes attendance records for the given children in a session. Used when a status is
+// cleared in the sheet so the previously-saved record does not linger and reappear.
+ipcMain.handle('attendance:delete', async (_event, { session_id, child_ids }) => {
+  try {
+    checkAuth()
+    const db = getDb()
+    const ids: number[] = Array.isArray(child_ids) ? child_ids : []
+    if (ids.length === 0) return { ok: true, deleted: 0 }
+    const placeholders = ids.map(() => '?').join(',')
+    let deleted = 0
+    db.transaction(() => {
+      db.prepare(`
+        DELETE FROM attendance_conflicts
+        WHERE attendance_record_id IN (
+          SELECT id FROM attendance_records WHERE session_id = ? AND child_id IN (${placeholders})
+        )
+      `).run(session_id, ...ids)
+      const res = db.prepare(`DELETE FROM attendance_records WHERE session_id = ? AND child_id IN (${placeholders})`).run(session_id, ...ids)
+      deleted = Number(res.changes)
+    })()
+    return { ok: true, deleted }
+  } catch (error: any) {
+    throw new Error(error.message || 'Failed to delete attendance')
   }
 })
 

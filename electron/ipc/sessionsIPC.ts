@@ -97,22 +97,22 @@ ipcMain.handle('sessions:delete', async (_event, { id }) => {
   }
 })
 
-// Reports the per-session salary credited to a session's teachers, used to confirm to the
-// user after attendance is saved. A session only credits pay when it is "payable" — i.e. at
-// least one child attended or was absent without excuse. Only teachers on a per-session
-// salary mode (per_session_fixed / hybrid) earn from a single session; fixed-monthly teachers
-// are unaffected and are omitted.
+// Reports the per-session salary for a session's teachers, used to show a live banner in the
+// attendance sheet and confirm after saving. Always returns the per-session teachers and their
+// per-session amount (so the user can see who earns what); `payable` indicates whether the
+// session currently qualifies — i.e. at least one child attended or was absent without excuse.
+// Only teachers on a per-session salary mode (per_session_fixed / hybrid) earn from a single
+// session; fixed-monthly teachers are unaffected and are omitted from `credits`.
 ipcMain.handle('sessions:salaryCredit', async (_event, { session_id }) => {
   try {
     checkAuth()
     const db = getDb()
 
-    const payable = db.prepare(`
+    const payable = !!db.prepare(`
       SELECT 1 FROM attendance_records
       WHERE session_id = ? AND status IN ('attended','absent_unexcused')
       LIMIT 1
     `).get(session_id)
-    if (!payable) return { payable: false, credits: [] }
 
     const teachers = db.prepare(`
       SELECT e.id as employee_id, e.name,
@@ -135,7 +135,7 @@ ipcMain.handle('sessions:salaryCredit', async (_event, { session_id }) => {
       }
     }
 
-    return { payable: true, credits }
+    return { payable, hasTeachers: teachers.length > 0, credits }
   } catch (error: any) {
     throw new Error(error.message || 'Failed to compute session salary credit')
   }

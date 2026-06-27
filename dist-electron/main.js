@@ -22427,6 +22427,78 @@ ipcMain.handle("payments:bulkPay", async (_event, { ids, payment_method_id }) =>
 });
 //#endregion
 //#region electron/ipc/salariesIPC.ts
+var ARABIC_MONTHS = {
+	"يناير": 1,
+	"فبراير": 2,
+	"مارس": 3,
+	"أبريل": 4,
+	"مايو": 5,
+	"يونيو": 6,
+	"يوليو": 7,
+	"أغسطس": 8,
+	"سبتمبر": 9,
+	"أكتوبر": 10,
+	"نوفمبر": 11,
+	"ديسمبر": 12
+};
+function monthBounds(month, year) {
+	const n = ARABIC_MONTHS[month] ?? Number(month) ?? 1;
+	const mm = String(n).padStart(2, "0");
+	return {
+		start: `${year}-${mm}-01`,
+		end: `${year}-${mm}-31`
+	};
+}
+/**
+* Computes an employee's base monthly pay for a period from their effective salary type.
+* For per-session/hybrid types this reflects how many sessions were actually payable
+* (a session is payable when a child attended or was absent without excuse). Shared by
+* salary:get and salary:update so a saved payroll row never disagrees with the live view.
+*/
+function computeBaseSalary(db, employeeId, month, year) {
+	const row = db.prepare(`
+    SELECT e.net_salary, COALESCE(e.salary_type_override_id, er.salary_type_id) as eff
+    FROM employees e LEFT JOIN employee_roles er ON e.role_id = er.id WHERE e.id = ?
+  `).get(employeeId);
+	const netSalary = row?.net_salary ?? 0;
+	let base = netSalary;
+	let payableSessions = 0;
+	let totalSessions = 0;
+	let salaryTypeName = null;
+	let salaryTypeMode = null;
+	if (row?.eff) {
+		const st = db.prepare("SELECT * FROM salary_types WHERE id = ?").get(row.eff);
+		if (st) {
+			salaryTypeName = st.name;
+			salaryTypeMode = st.mode;
+			const { start, end } = monthBounds(month, year);
+			const sessionIds = db.prepare(`
+        SELECT ss.id FROM scheduled_sessions ss
+        JOIN session_teachers stc ON stc.session_id = ss.id
+        WHERE stc.employee_id = ? AND ss.session_date >= ? AND ss.session_date <= ?
+      `).all(employeeId, start, end).map((s) => s.id);
+			totalSessions = sessionIds.length;
+			if (sessionIds.length > 0) {
+				const ph = sessionIds.map(() => "?").join(",");
+				payableSessions = db.prepare(`
+          SELECT COUNT(DISTINCT session_id) as cnt FROM attendance_records
+          WHERE session_id IN (${ph}) AND status IN ('attended','absent_unexcused')
+        `).get(...sessionIds).cnt;
+			}
+			if (st.mode === "fixed_monthly") base = st.monthly_rate ?? netSalary;
+			else if (st.mode === "per_session_fixed") base = payableSessions * (st.session_rate ?? 0);
+			else if (st.mode === "per_session_pct") base = payableSessions * (st.session_pct ?? 0) * 100;
+			else if (st.mode === "hybrid") base = (st.monthly_rate ?? 0) + payableSessions * (st.session_rate ?? 0);
+		}
+	}
+	return {
+		base,
+		payableSessions,
+		totalSessions,
+		salaryTypeName,
+		salaryTypeMode
+	};
+}
 ipcMain.handle("employees:get", async () => {
 	try {
 		requireAdmin();
@@ -22584,6 +22656,7 @@ ipcMain.handle("salary:get", async (_event, { month, year }) => {
 				...row,
 				salary_type_name: salaryTypeName,
 				salary_type_mode: salaryTypeMode,
+				net_salary: computedActualPaid,
 				deductions: deductionSum,
 				actual_paid: row.stored_actual_paid ?? computedActualPaid + bonus - deductionSum
 			};
@@ -22598,11 +22671,11 @@ ipcMain.handle("salary:update", async (_event, { employee_id, month, year, bonus
 		requireAdmin();
 		const db = getDb();
 		if (!employee_id || !month || !year) throw new Error("Employee ID, month, and year are required");
-		const emp = db.prepare("SELECT net_salary FROM employees WHERE id = ?").get(employee_id);
-		if (!emp) throw new Error("الموظف غير موجود / Employee not found");
+		if (!db.prepare("SELECT net_salary FROM employees WHERE id = ?").get(employee_id)) throw new Error("الموظف غير موجود / Employee not found");
 		const tableDeductionRow = db.prepare("SELECT COALESCE(SUM(amount), 0) as total, COUNT(*) as cnt FROM employee_deductions WHERE employee_id = ? AND month = ? AND year = ?").get(employee_id, month, Number(year));
 		const deductionSum = tableDeductionRow?.cnt > 0 ? tableDeductionRow?.total ?? 0 : Number(deductions);
-		const actualPaid = override_amount !== null ? Number(override_amount) : Number(emp.net_salary) + Number(bonus) - deductionSum;
+		const { base } = computeBaseSalary(db, employee_id, month, year);
+		const actualPaid = override_amount !== null ? Number(override_amount) : base + Number(bonus) - deductionSum;
 		const now = (/* @__PURE__ */ new Date()).toISOString();
 		db.prepare(`
       INSERT INTO salary_payments (employee_id, month, year, bonus, deductions, actual_paid, paid_date, notes, updated_at, synced)
@@ -27786,14 +27859,11 @@ ipcMain.handle("sessions:salaryCredit", async (_event, { session_id }) => {
 	try {
 		checkAuth$6();
 		const db = getDb();
-		if (!db.prepare(`
+		const payable = !!db.prepare(`
       SELECT 1 FROM attendance_records
       WHERE session_id = ? AND status IN ('attended','absent_unexcused')
       LIMIT 1
-    `).get(session_id)) return {
-			payable: false,
-			credits: []
-		};
+    `).get(session_id);
 		const teachers = db.prepare(`
       SELECT e.id as employee_id, e.name,
         COALESCE(e.salary_type_override_id, er.salary_type_id) as effective_salary_type_id
@@ -27814,7 +27884,8 @@ ipcMain.handle("sessions:salaryCredit", async (_event, { session_id }) => {
 			});
 		}
 		return {
-			payable: true,
+			payable,
+			hasTeachers: teachers.length > 0,
 			credits
 		};
 	} catch (error) {
@@ -27909,8 +27980,10 @@ ipcMain.handle("attendance:getSheet", async (_event, { session_id }) => {
 		}
 		return db.prepare(`
       SELECT c.id as child_id, c.name as child_name, c.photo_url as child_photo_url, c.lesson_days,
+        c.teacher_id, te.name as teacher_name,
         ar.id as attendance_id, ar.status, ar.excuse_notes, ar.recorded_by, ar.recorded_at, ar.updated_at
       FROM children c
+      LEFT JOIN employees te ON te.id = c.teacher_id
       LEFT JOIN attendance_records ar ON ar.child_id = c.id AND ar.session_id = ?
       WHERE c.is_active = 1
       ORDER BY c.name ASC
@@ -27938,6 +28011,7 @@ ipcMain.handle("attendance:record", async (_event, args) => {
 		const results = [];
 		const sessionId = args?.session_id;
 		const records = Array.isArray(args) ? args : args?.records ?? [];
+		const payableChildrenBySession = /* @__PURE__ */ new Map();
 		db.transaction(() => {
 			for (const rec of records) {
 				const session_id = sessionId ?? rec.session_id;
@@ -27957,12 +28031,51 @@ ipcMain.handle("attendance:record", async (_event, args) => {
             updated_at = excluded.updated_at,
             synced = 0
         `).run(session_id, child_id, status, excuse_notes, user?.id ?? null, now, now);
+				if (status === "attended" || status === "absent_unexcused") {
+					if (!payableChildrenBySession.has(session_id)) payableChildrenBySession.set(session_id, /* @__PURE__ */ new Set());
+					payableChildrenBySession.get(session_id).add(child_id);
+				}
 				results.push(db.prepare("SELECT * FROM attendance_records WHERE session_id = ? AND child_id = ?").get(session_id, child_id));
+			}
+			for (const [session_id, childIds] of payableChildrenBySession) {
+				const ids = [...childIds];
+				const placeholders = ids.map(() => "?").join(",");
+				const teacherRows = db.prepare(`SELECT DISTINCT teacher_id FROM children WHERE id IN (${placeholders}) AND teacher_id IS NOT NULL`).all(...ids);
+				for (const { teacher_id } of teacherRows) db.prepare("INSERT OR IGNORE INTO session_teachers (session_id, employee_id, synced) VALUES (?, ?, 0)").run(session_id, teacher_id);
 			}
 		})();
 		return results;
 	} catch (error) {
 		throw new Error(error.message || "Failed to record attendance");
+	}
+});
+ipcMain.handle("attendance:delete", async (_event, { session_id, child_ids }) => {
+	try {
+		checkAuth$6();
+		const db = getDb();
+		const ids = Array.isArray(child_ids) ? child_ids : [];
+		if (ids.length === 0) return {
+			ok: true,
+			deleted: 0
+		};
+		const placeholders = ids.map(() => "?").join(",");
+		let deleted = 0;
+		db.transaction(() => {
+			db.prepare(`
+        DELETE FROM attendance_conflicts
+        WHERE attendance_record_id IN (
+          SELECT id FROM attendance_records WHERE session_id = ? AND child_id IN (${placeholders})
+        )
+      `).run(session_id, ...ids);
+			const res = db.prepare(`DELETE FROM attendance_records WHERE session_id = ? AND child_id IN (${placeholders})`).run(session_id, ...ids);
+			deleted = Number(res.changes);
+		})();
+		return {
+			ok: true,
+			deleted
+		};
+	} catch (error) {
+		throw new Error(error.message || "Failed to delete attendance");
 	}
 });
 ipcMain.handle("attendance:getConflicts", async () => {

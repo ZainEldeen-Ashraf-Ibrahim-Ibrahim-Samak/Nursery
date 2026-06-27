@@ -150,7 +150,7 @@ const api = {
     update: (id: number, patch: any) => ipcRenderer.invoke('sessions:update', { id, patch }),
     delete: (id: number) => ipcRenderer.invoke('sessions:delete', { id }),
     assignTeachers: (session_id: number, employee_ids: number[]) => ipcRenderer.invoke('sessions:assignTeachers', { session_id, employee_ids }),
-    salaryCredit: (session_id: number) => ipcRenderer.invoke('sessions:salaryCredit', { session_id }) as Promise<{ payable: boolean; credits: { employee_id: number; name: string; amount: number }[] }>,
+    salaryCredit: (session_id: number) => ipcRenderer.invoke('sessions:salaryCredit', { session_id }) as Promise<{ payable: boolean; hasTeachers: boolean; credits: { employee_id: number; name: string; amount: number }[] }>,
     proRateCalc: (args: { reg_date: string; price_per_session: number }) => ipcRenderer.invoke('sessions:proRateCalc', args),
     childrenForDay: (day_of_week: number) => ipcRenderer.invoke('sessions:childrenForDay', { day_of_week }),
   },
@@ -159,6 +159,7 @@ const api = {
   attendance: {
     getSheet: (sessionId: number) => ipcRenderer.invoke('attendance:getSheet', { session_id: sessionId }),
     record: (sessionId: number, records: any[]) => ipcRenderer.invoke('attendance:record', { session_id: sessionId, records }),
+    delete: (sessionId: number, child_ids: number[]) => ipcRenderer.invoke('attendance:delete', { session_id: sessionId, child_ids }) as Promise<{ ok: boolean; deleted: number }>,
     getConflicts: () => ipcRenderer.invoke('attendance:getConflicts'),
     resolveConflict: (conflict_id: number, final_status: string) => ipcRenderer.invoke('attendance:resolveConflict', { conflict_id, final_status }),
     getSummary: (employee_id: number, month: string, year: number) => ipcRenderer.invoke('attendance:getSummary', { employee_id, month, year }),

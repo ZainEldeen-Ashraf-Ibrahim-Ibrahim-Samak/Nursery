@@ -3,6 +3,64 @@ import { getDb } from '../db/connection.js'
 import { requireAdmin } from './_guard.js'
 import type { Employee, SalaryPayment } from '../../src/types/index.js'
 
+const ARABIC_MONTHS: Record<string, number> = {
+  'يناير': 1, 'فبراير': 2, 'مارس': 3, 'أبريل': 4, 'مايو': 5, 'يونيو': 6,
+  'يوليو': 7, 'أغسطس': 8, 'سبتمبر': 9, 'أكتوبر': 10, 'نوفمبر': 11, 'ديسمبر': 12
+}
+
+function monthBounds(month: string, year: number | string) {
+  const n = ARABIC_MONTHS[month] ?? Number(month) ?? 1
+  const mm = String(n).padStart(2, '0')
+  return { start: `${year}-${mm}-01`, end: `${year}-${mm}-31` }
+}
+
+/**
+ * Computes an employee's base monthly pay for a period from their effective salary type.
+ * For per-session/hybrid types this reflects how many sessions were actually payable
+ * (a session is payable when a child attended or was absent without excuse). Shared by
+ * salary:get and salary:update so a saved payroll row never disagrees with the live view.
+ */
+function computeBaseSalary(db: any, employeeId: number, month: string, year: number | string) {
+  const row = db.prepare(`
+    SELECT e.net_salary, COALESCE(e.salary_type_override_id, er.salary_type_id) as eff
+    FROM employees e LEFT JOIN employee_roles er ON e.role_id = er.id WHERE e.id = ?
+  `).get(employeeId) as any
+  const netSalary = row?.net_salary ?? 0
+  let base = netSalary
+  let payableSessions = 0
+  let totalSessions = 0
+  let salaryTypeName: string | null = null
+  let salaryTypeMode: string | null = null
+
+  if (row?.eff) {
+    const st = db.prepare('SELECT * FROM salary_types WHERE id = ?').get(row.eff) as any
+    if (st) {
+      salaryTypeName = st.name
+      salaryTypeMode = st.mode
+      const { start, end } = monthBounds(month, year)
+      const sessionIds = (db.prepare(`
+        SELECT ss.id FROM scheduled_sessions ss
+        JOIN session_teachers stc ON stc.session_id = ss.id
+        WHERE stc.employee_id = ? AND ss.session_date >= ? AND ss.session_date <= ?
+      `).all(employeeId, start, end) as { id: number }[]).map((s) => s.id)
+      totalSessions = sessionIds.length
+      if (sessionIds.length > 0) {
+        const ph = sessionIds.map(() => '?').join(',')
+        payableSessions = (db.prepare(`
+          SELECT COUNT(DISTINCT session_id) as cnt FROM attendance_records
+          WHERE session_id IN (${ph}) AND status IN ('attended','absent_unexcused')
+        `).get(...sessionIds) as { cnt: number }).cnt
+      }
+      if (st.mode === 'fixed_monthly') base = st.monthly_rate ?? netSalary
+      else if (st.mode === 'per_session_fixed') base = payableSessions * (st.session_rate ?? 0)
+      else if (st.mode === 'per_session_pct') base = payableSessions * (st.session_pct ?? 0) * 100
+      else if (st.mode === 'hybrid') base = (st.monthly_rate ?? 0) + payableSessions * (st.session_rate ?? 0)
+    }
+  }
+
+  return { base, payableSessions, totalSessions, salaryTypeName, salaryTypeMode }
+}
+
 // 1. employees:get (Admin only)
 ipcMain.handle('employees:get', async () => {
   try {
@@ -227,6 +285,9 @@ ipcMain.handle('salary:get', async (_event, { month, year }) => {
         ...row,
         salary_type_name: salaryTypeName,
         salary_type_mode: salaryTypeMode,
+        // Net Salary column reflects the salary-type-derived base for this period (per-session
+        // pay included), so the columns reconcile: Net + Bonus − Deductions = Actual Paid.
+        net_salary: computedActualPaid,
         deductions: deductionSum,
         actual_paid: row.stored_actual_paid ?? (computedActualPaid + bonus - deductionSum),
       } as SalaryPayment
@@ -258,7 +319,10 @@ ipcMain.handle('salary:update', async (_event, { employee_id, month, year, bonus
     ).get(employee_id, month, Number(year)) as any
     const deductionSum = tableDeductionRow?.cnt > 0 ? (tableDeductionRow?.total ?? 0) : Number(deductions)
 
-    const actualPaid = override_amount !== null ? Number(override_amount) : (Number(emp.net_salary) + Number(bonus) - deductionSum)
+    // Base reflects the employee's salary type (per-session pay included) for this period,
+    // not just net_salary — otherwise saving a per-session teacher would store 0.
+    const { base } = computeBaseSalary(db, employee_id, month, year)
+    const actualPaid = override_amount !== null ? Number(override_amount) : (base + Number(bonus) - deductionSum)
 
     const now = new Date().toISOString()
 
