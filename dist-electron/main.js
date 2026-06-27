@@ -22566,7 +22566,7 @@ ipcMain.handle("salary:get", async (_event, { month, year }) => {
 					if (sessionIds.length > 0) {
 						const placeholders = sessionIds.map(() => "?").join(",");
 						payableSessions = db.prepare(`
-              SELECT COUNT(*) as cnt FROM attendance_records WHERE session_id IN (${placeholders}) AND status != 'absent_excused'
+              SELECT COUNT(DISTINCT session_id) as cnt FROM attendance_records WHERE session_id IN (${placeholders})
             `).get(...sessionIds).cnt;
 					}
 					if (st.mode === "fixed_monthly") computedActualPaid = st.monthly_rate ?? row.net_salary;
