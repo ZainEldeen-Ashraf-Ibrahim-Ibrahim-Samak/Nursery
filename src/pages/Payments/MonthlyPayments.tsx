@@ -483,16 +483,11 @@ export default function MonthlyPayments() {
                       </React.Fragment>
                     )
                   }) : (
-                    payments.map((payment) => (
-                      <PaymentRow
-                        key={payment.id}
-                        payment={payment}
-                        isSelected={selectedIds.includes(payment.id)}
-                        onToggleSelect={() => handleToggleSelectRow(payment.id)}
-                        onUpdate={handleUpdateRow}
-                        paymentMethods={paymentMethods}
-                      />
-                    ))
+                    <tr>
+                      <td colSpan={12} className="text-center py-12 text-slate-400 text-sm">
+                        {isAr ? 'لا توجد نتائج مطابقة للبحث أو الفلتر' : 'No results match your search or filter'}
+                      </td>
+                    </tr>
                   )}
                 </tbody>
               </table>
