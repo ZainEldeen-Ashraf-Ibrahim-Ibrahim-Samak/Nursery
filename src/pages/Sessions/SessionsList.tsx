@@ -126,7 +126,7 @@ export default function SessionsList() {
         const edit = getEdit(rec)
         return { child_id: rec.child_id, status: edit.status, excuse_notes: edit.excuse_notes || undefined }
       })
-      .filter((r) => r.status != null)
+      .filter((r): r is { child_id: number; status: AttendanceStatus; excuse_notes: string | undefined } => r.status != null)
     // Children whose previously-saved status was cleared in the sheet — remove their records
     // so they don't reappear as selected after saving.
     const clearedChildIds = sheet
