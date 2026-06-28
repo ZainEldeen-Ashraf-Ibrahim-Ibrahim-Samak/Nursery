@@ -122,6 +122,16 @@ function uploadAsset(releaseId, name, filePath) {
     console.log(`\n  Uploading ${name} (${(size / 1024 / 1024).toFixed(1)} MB)`)
 
     let uploaded = 0
+    let aborted = false
+    let rejected = false
+
+    const safeReject = (err) => {
+      if (rejected) return
+      rejected = true
+      reject(err)
+    }
+
+    const stream = fs.createReadStream(filePath)
 
     const req = https.request({
       hostname: 'uploads.github.com',
@@ -135,32 +145,59 @@ function uploadAsset(releaseId, name, filePath) {
         'Content-Length': size,
       },
     }, (res) => {
+      if (res.statusCode !== 201 && res.statusCode !== 200) {
+        aborted = true
+        stream.destroy()
+        
+        let body = ''
+        res.on('data', (c) => (body += c))
+        res.on('end', () => {
+          req.destroy()
+          safeReject(new Error(`Upload failed (${res.statusCode}): ${body}`))
+        })
+        res.on('error', (err) => {
+          req.destroy()
+          safeReject(new Error(`Upload failed (${res.statusCode}): ${err.message}`))
+        })
+        return
+      }
+
       let body = ''
       res.on('data', (c) => (body += c))
       res.on('end', () => {
         process.stdout.write('\n')
-        if (res.statusCode === 201) {
+        if (res.statusCode === 201 || res.statusCode === 200) {
           console.log(`  ✓ ${name}`)
           resolve()
         } else {
-          reject(new Error(`Upload failed (${res.statusCode}): ${body}`))
+          safeReject(new Error(`Upload failed (${res.statusCode}): ${body}`))
         }
       })
     })
 
-    req.on('error', reject)
+    req.on('error', (err) => {
+      if (aborted) return
+      safeReject(err)
+    })
 
     // Stream file in chunks with backpressure so large files don't overflow the socket
-    const stream = fs.createReadStream(filePath)
     stream.on('data', (chunk) => {
+      if (aborted) return
       uploaded += chunk.length
       drawProgress(uploaded, size, name)
       const ok = req.write(chunk)
       if (!ok) stream.pause()
     })
-    req.on('drain', () => stream.resume())
-    stream.on('end', () => req.end())
-    stream.on('error', reject)
+    req.on('drain', () => {
+      if (!aborted) stream.resume()
+    })
+    stream.on('end', () => {
+      if (!aborted) req.end()
+    })
+    stream.on('error', (err) => {
+      if (aborted) return
+      safeReject(err)
+    })
   })
 }
 
@@ -184,8 +221,25 @@ async function main() {
       }
     }
 
-    await deleteExistingAsset(release.id, name)
-    await uploadAsset(release.id, name, filePath)
+    let attempts = 3
+    let success = false
+    while (attempts > 0 && !success) {
+      try {
+        await deleteExistingAsset(release.id, name)
+        // Wait a brief moment after delete to let GitHub's backend replicate the deletion
+        await new Promise((r) => setTimeout(r, 2000))
+        await uploadAsset(release.id, name, filePath)
+        success = true
+      } catch (err) {
+        attempts--
+        if (attempts > 0) {
+          console.warn(`  ⚠ Upload failed: ${err.message}. Retrying in 5 seconds... (${attempts} attempts left)`)
+          await new Promise((r) => setTimeout(r, 5000))
+        } else {
+          throw err
+        }
+      }
+    }
   }
 
   console.log(`\n✅  Release ${TAG} published successfully.`)
