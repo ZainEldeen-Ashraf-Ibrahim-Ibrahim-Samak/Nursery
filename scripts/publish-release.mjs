@@ -55,7 +55,7 @@ async function getOrCreateRelease() {
   const get = await request({
     hostname: 'api.github.com',
     path: `/repos/${OWNER}/${REPO}/releases/tags/${TAG}`,
-    headers: { Authorization: `Bearer ${TOKEN}`, 'User-Agent': 'publish-release', Accept: 'application/vnd.github+json' },
+    headers: { Authorization: `token ${TOKEN}`, 'User-Agent': 'publish-release', Accept: 'application/vnd.github+json' },
   })
 
   if (get.status === 200) {
@@ -69,7 +69,7 @@ async function getOrCreateRelease() {
     hostname: 'api.github.com',
     path: `/repos/${OWNER}/${REPO}/releases`,
     method: 'POST',
-    headers: { Authorization: `Bearer ${TOKEN}`, 'User-Agent': 'publish-release', Accept: 'application/vnd.github+json', 'Content-Type': 'application/json' },
+    headers: { Authorization: `token ${TOKEN}`, 'User-Agent': 'publish-release', Accept: 'application/vnd.github+json', 'Content-Type': 'application/json' },
   }, JSON.stringify({ tag_name: TAG, name: TAG, draft: false, prerelease: false }))
 
   if (create.status !== 201) throw new Error(`Failed to create release: ${JSON.stringify(create.body)}`)
@@ -90,7 +90,7 @@ async function deleteExistingAsset(releaseId, name) {
   const list = await request({
     hostname: 'api.github.com',
     path: `/repos/${OWNER}/${REPO}/releases/${releaseId}/assets`,
-    headers: { Authorization: `Bearer ${TOKEN}`, 'User-Agent': 'publish-release', Accept: 'application/vnd.github+json' },
+    headers: { Authorization: `token ${TOKEN}`, 'User-Agent': 'publish-release', Accept: 'application/vnd.github+json' },
   })
   if (list.status !== 200) return
   const existing = list.body.find((a) => a.name === name)
@@ -99,7 +99,7 @@ async function deleteExistingAsset(releaseId, name) {
     hostname: 'api.github.com',
     path: `/repos/${OWNER}/${REPO}/releases/assets/${existing.id}`,
     method: 'DELETE',
-    headers: { Authorization: `Bearer ${TOKEN}`, 'User-Agent': 'publish-release', Accept: 'application/vnd.github+json' },
+    headers: { Authorization: `token ${TOKEN}`, 'User-Agent': 'publish-release', Accept: 'application/vnd.github+json' },
   })
   console.log(`  Replaced existing ${name}`)
 }
@@ -138,7 +138,7 @@ function uploadAsset(releaseId, name, filePath) {
       path: `/repos/${OWNER}/${REPO}/releases/${releaseId}/assets?name=${encodeURIComponent(name)}`,
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${TOKEN}`,
+        Authorization: `token ${TOKEN}`,
         'User-Agent': 'publish-release',
         Accept: 'application/vnd.github+json',
         'Content-Type': 'application/octet-stream',
@@ -223,18 +223,21 @@ async function main() {
 
     let attempts = 3
     let success = false
+    let currentRelease = release
     while (attempts > 0 && !success) {
       try {
-        await deleteExistingAsset(release.id, name)
-        // Wait a brief moment after delete to let GitHub's backend replicate the deletion
-        await new Promise((r) => setTimeout(r, 2000))
-        await uploadAsset(release.id, name, filePath)
+        await deleteExistingAsset(currentRelease.id, name)
+        // Wait for GitHub's backend to replicate the deletion before uploading
+        await new Promise((r) => setTimeout(r, 8000))
+        await uploadAsset(currentRelease.id, name, filePath)
         success = true
       } catch (err) {
         attempts--
         if (attempts > 0) {
-          console.warn(`  ⚠ Upload failed: ${err.message}. Retrying in 5 seconds... (${attempts} attempts left)`)
-          await new Promise((r) => setTimeout(r, 5000))
+          console.warn(`  ⚠ Upload failed: ${err.message}. Retrying in 10 seconds... (${attempts} attempts left)`)
+          await new Promise((r) => setTimeout(r, 10000))
+          // Re-fetch release in case the ID changed
+          currentRelease = await getOrCreateRelease()
         } else {
           throw err
         }
