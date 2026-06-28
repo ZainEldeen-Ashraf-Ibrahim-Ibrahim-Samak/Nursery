@@ -217,6 +217,7 @@
     "base_service_label": "Base Service",
     "additional_classes_label": "Additional Classes",
     "total_monthly_fee_label": "Total Monthly Fee",
+    "sessions_baseline_label": "Sessions per Month",
 
     "sessions_remaining_label": "Sessions remaining",
     "calculated_first_payment_label": "Calculated first payment",

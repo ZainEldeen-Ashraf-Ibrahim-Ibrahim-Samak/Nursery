@@ -217,6 +217,7 @@
     "base_service_label": "الخدمة الأساسية",
     "additional_classes_label": "الحصص الإضافية",
     "total_monthly_fee_label": "إجمالي الرسوم الشهرية",
+    "sessions_baseline_label": "جلسات بالشهر",
 
     "sessions_remaining_label": "الجلسات المتبقية",
     "calculated_first_payment_label": "الدفعة الأولى المحسوبة",

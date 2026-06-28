@@ -66,9 +66,7 @@ export default function ChildForm() {
 
   // Edit mode: use stored baseline from child record.
   // Add mode: use actual scheduled sessions this month from the system; falls back to 8 if none created yet.
-  const sessionsBaseline = isEdit
-    ? (formData.sessions_baseline || 8)
-    : (proRateResult?.total_sessions && proRateResult.total_sessions > 0 ? proRateResult.total_sessions : 8)
+  const sessionsBaseline = formData.sessions_baseline || 8
   const totalSessions = sessionsBaseline + (Number(formData.extra_lessons) || 0)
   const monthlyFee = totalSessions * (Number(formData.session_price) || 0)
 
@@ -111,7 +109,7 @@ export default function ChildForm() {
             if (row.unit === 'شهر') priceKey = 'hosting_monthly'
             else if (row.unit === 'يوم') priceKey = 'hosting_daily'
             else if (row.unit === 'ساعة') priceKey = 'hosting_hourly'
-          } else if (row.service === 'جلسة') {
+          } else if (row.service === 'جلسة' || row.service === 'جلسه') {
             if (row.unit === 'شهر') priceKey = 'session_monthly'
             else if (row.unit === 'جلسة' || row.unit === 'ساعة') priceKey = 'session_hourly'
             else if (row.unit === 'يوم') priceKey = 'session_daily'
@@ -134,6 +132,13 @@ export default function ChildForm() {
       .then((r: any) => setProRateResult(r))
       .catch(() => setProRateResult(null))
   }, [formData.reg_date, formData.session_price, formData.extra_lessons, isEdit])
+
+  // Sync baseline sessions when pro-rate calculation completes in Add mode
+  useEffect(() => {
+    if (!isEdit && proRateResult?.total_sessions && proRateResult.total_sessions > 0) {
+      setFormData(prev => ({ ...prev, sessions_baseline: proRateResult.total_sessions }))
+    }
+  }, [proRateResult?.total_sessions, isEdit])
 
   // Load the teacher options (from the Employees list, feature 004)
   useEffect(() => {
@@ -202,15 +207,24 @@ export default function ChildForm() {
       const opts: { value: UnitType; label: string }[] = []
       if (svcDef.price_monthly != null) opts.push({ value: 'شهر', label: t('units.month') })
       if (svcDef.price_daily != null) opts.push({ value: 'يوم', label: t('units.day') })
-      if (svcDef.price_hourly != null) opts.push({ value: 'ساعة', label: t('units.hour') })
+      if (svcDef.price_hourly != null) {
+        opts.push({ value: 'ساعة', label: t('units.hour') })
+        if (serviceName === 'جلسة' || serviceName === 'جلسه') {
+          opts.push({ value: 'جلسة', label: t('units.session') })
+        }
+      }
       if (opts.length > 0) return opts
     }
     // fallback: all units
-    return [
+    const fallbackOpts: { value: UnitType; label: string }[] = [
       { value: 'شهر' as UnitType, label: t('units.month') },
       { value: 'يوم' as UnitType, label: t('units.day') },
       { value: 'ساعة' as UnitType, label: t('units.hour') },
     ]
+    if (serviceName === 'جلسة' || serviceName === 'جلسه') {
+      fallbackOpts.push({ value: 'جلسة' as UnitType, label: t('units.session') })
+    }
+    return fallbackOpts
   }
 
   const handleAddService = () => {
@@ -270,7 +284,7 @@ export default function ChildForm() {
             if (row.unit === 'شهر') priceKey = 'hosting_monthly'
             if (row.unit === 'يوم') priceKey = 'hosting_daily'
             if (row.unit === 'ساعة') priceKey = 'hosting_hourly'
-          } else if (row.service === 'جلسة') {
+          } else if (row.service === 'جلسة' || row.service === 'جلسه') {
             if (row.unit === 'شهر') priceKey = 'session_monthly'
             if (row.unit === 'جلسة' || row.unit === 'ساعة') priceKey = 'session_hourly'
             if (row.unit === 'يوم') priceKey = 'session_daily'
@@ -617,6 +631,16 @@ export default function ChildForm() {
                     )
                   })}
                 </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-sm font-semibold text-slate-700">{t('sessions_baseline_label')}</label>
+                <Input
+                  type="number"
+                  min={0}
+                  value={formData.sessions_baseline}
+                  onChange={(e) => setFormData((prev) => ({ ...prev, sessions_baseline: Math.max(0, Number(e.target.value)) }))}
+                />
               </div>
 
               <div className="space-y-1.5">
