@@ -15513,6 +15513,57 @@ var migrations = [
         CREATE INDEX IF NOT EXISTS idx_payment_transactions_payment ON payment_transactions(payment_id);
       `);
 		}
+	},
+	{
+		name: "024_child_services_teacher_days",
+		up: (db) => {
+			const addCol = (ddl) => {
+				try {
+					db.exec(ddl);
+				} catch {}
+			};
+			addCol("ALTER TABLE child_services ADD COLUMN teacher_id INTEGER;");
+			addCol("ALTER TABLE child_services ADD COLUMN lesson_days TEXT;");
+			addCol("ALTER TABLE child_services ADD COLUMN extra_lessons INTEGER DEFAULT 0;");
+			addCol("ALTER TABLE child_services ADD COLUMN session_price REAL;");
+		}
+	},
+	{
+		name: "025_child_services_drop_unique",
+		noTransaction: true,
+		up: (db) => {
+			db.exec(`
+        CREATE TABLE IF NOT EXISTS child_services_new (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          child_id INTEGER NOT NULL,
+          service TEXT NOT NULL,
+          unit TEXT NOT NULL,
+          price REAL NOT NULL,
+          teacher_id INTEGER,
+          lesson_days TEXT,
+          extra_lessons INTEGER DEFAULT 0,
+          session_price REAL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          synced INTEGER DEFAULT 0,
+          FOREIGN KEY (child_id) REFERENCES children (id) ON DELETE CASCADE
+        );
+
+        INSERT INTO child_services_new
+          (id, child_id, service, unit, price, teacher_id, lesson_days,
+           extra_lessons, session_price, created_at, updated_at, synced)
+        SELECT
+          id, child_id, service, unit, price, teacher_id, lesson_days,
+          COALESCE(extra_lessons, 0), session_price, created_at, updated_at, synced
+        FROM child_services;
+
+        DROP TABLE child_services;
+        ALTER TABLE child_services_new RENAME TO child_services;
+      `);
+			try {
+				db.exec(`CREATE INDEX IF NOT EXISTS idx_child_services_child ON child_services(child_id);`);
+			} catch {}
+		}
 	}
 ];
 function runMigrations(db) {
@@ -15528,7 +15579,15 @@ function runMigrations(db) {
 	const insertMigration = db.prepare("INSERT INTO migrations (name) VALUES (?)");
 	for (const migration of migrations) if (!runMigrationNames.has(migration.name)) {
 		console.log(`Running migration: ${migration.name}`);
-		db.transaction(() => {
+		if (migration.noTransaction) {
+			db.pragma("foreign_keys = OFF");
+			try {
+				migration.up(db);
+				insertMigration.run(migration.name);
+			} finally {
+				db.pragma("foreign_keys = ON");
+			}
+		} else db.transaction(() => {
 			migration.up(db);
 			insertMigration.run(migration.name);
 		})();
@@ -21933,7 +21992,6 @@ ipcMain.handle("children:add", async (_event, childInput) => {
 		if (!name || !guardian || !guardian_phone || enrollments.length === 0 || !reg_date) throw new Error("جميع الحقول الإلزامية مطلوبة / Missing required fields");
 		validateGuardianPhone(guardian_phone);
 		if (child_phone) validateChildPhone(child_phone);
-		if (new Set(enrollments.map((s) => s.service)).size < enrollments.length) throw new Error("لا يمكن إضافة نفس الخدمة أكثر من مرة / Cannot add duplicate services");
 		const lesson = buildLessonFields(childInput);
 		const now = (/* @__PURE__ */ new Date()).toISOString();
 		const createdId = db.transaction(() => {
@@ -21948,8 +22006,14 @@ ipcMain.handle("children:add", async (_event, childInput) => {
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, 0)
       `).run(name, guardian, guardian_phone, child_phone || null, national_id || null, first.service, first.unit, first.price, reg_date, notes || null, childInput.photo_url || null, childInput.photo_public_id || null, lesson.teacher_id, lesson.lesson_days, lesson.sessions_baseline, lesson.extra_lessons, lesson.session_price, lesson.monthly_fee, now, now);
 			const childId = Number(result.lastInsertRowid);
-			const insertSvc = db.prepare(`INSERT INTO child_services (child_id, service, unit, price, created_at, updated_at, synced) VALUES (?, ?, ?, ?, ?, ?, 0)`);
-			for (const s of enrollments) insertSvc.run(childId, s.service, s.unit, s.price, now, now);
+			const insertSvc = db.prepare(`INSERT INTO child_services (child_id, service, unit, price, teacher_id, lesson_days, extra_lessons, session_price, created_at, updated_at, synced) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`);
+			for (const s of enrollments) {
+				const sTeacherId = s.teacher_id != null && s.teacher_id !== "" ? Number(s.teacher_id) : null;
+				const sLessonDays = Array.isArray(s.lesson_days) ? JSON.stringify(s.lesson_days) : s.lesson_days || null;
+				const sExtraLessons = s.extra_lessons != null ? Number(s.extra_lessons) : 0;
+				const sSessionPrice = s.session_price != null && s.session_price !== "" ? Number(s.session_price) : null;
+				insertSvc.run(childId, s.service, s.unit, s.price, sTeacherId, sLessonDays, sExtraLessons, sSessionPrice, now, now);
+			}
 			return childId;
 		})();
 		const createdChild = db.prepare("SELECT * FROM children WHERE id = ?").get(createdId);
@@ -21973,7 +22037,6 @@ ipcMain.handle("children:update", async (_event, { id, patch }) => {
 			const enrollments = patch.services;
 			if (enrollments) {
 				if (enrollments.length === 0) throw new Error("يجب اختيار خدمة واحدة على الأقل / At least one service is required");
-				if (new Set(enrollments.map((s) => s.service)).size < enrollments.length) throw new Error("لا يمكن إضافة نفس الخدمة أكثر من مرة / Cannot add duplicate services");
 				patch.service = enrollments[0].service;
 				patch.unit = enrollments[0].unit;
 				patch.price = enrollments[0].price;
@@ -22025,28 +22088,30 @@ ipcMain.handle("children:update", async (_event, { id, patch }) => {
 			}
 			if (enrollments) {
 				const existingServices = db.prepare("SELECT id, service FROM child_services WHERE child_id = ?").all(id);
-				const newServiceNames = new Set(enrollments.map((s) => s.service));
-				const removedIds = existingServices.filter((e) => !newServiceNames.has(e.service)).map((e) => e.id);
+				const incomingIds = new Set(enrollments.filter((s) => s.id).map((s) => Number(s.id)));
+				const incomingServiceNames = new Set(enrollments.map((s) => s.service));
+				const removedIds = existingServices.filter((e) => !incomingIds.has(e.id) && !incomingServiceNames.has(e.service)).map((e) => e.id);
 				if (removedIds.length > 0) {
 					const placeholders = removedIds.map(() => "?").join(",");
 					db.prepare(`UPDATE payments SET service_id = NULL WHERE child_id = ? AND service_id IN (${placeholders})`).run(id, ...removedIds);
 					db.prepare(`DELETE FROM child_services WHERE id IN (${placeholders})`).run(...removedIds);
 				}
-				const upsertSvc = db.prepare(`
-          INSERT INTO child_services (child_id, service, unit, price, created_at, updated_at, synced)
-          VALUES (?, ?, ?, ?, ?, ?, 0)
-          ON CONFLICT(child_id, service) DO UPDATE SET
-            unit = excluded.unit,
-            price = excluded.price,
-            updated_at = excluded.updated_at,
-            synced = 0
-        `);
-				for (const s of enrollments) upsertSvc.run(id, s.service, s.unit, s.price, now, now);
+				db.prepare(`UPDATE payments SET service_id = NULL WHERE child_id = ?`).run(id);
+				db.prepare(`DELETE FROM child_services WHERE child_id = ?`).run(id);
+				const insertSvc = db.prepare(`INSERT INTO child_services (child_id, service, unit, price, teacher_id, lesson_days, extra_lessons, session_price, created_at, updated_at, synced) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`);
+				for (const s of enrollments) {
+					const sTeacherId = s.teacher_id != null && s.teacher_id !== "" ? Number(s.teacher_id) : null;
+					const sLessonDays = Array.isArray(s.lesson_days) ? JSON.stringify(s.lesson_days) : s.lesson_days || null;
+					const sExtraLessons = s.extra_lessons != null ? Number(s.extra_lessons) : 0;
+					const sSessionPrice = s.session_price != null && s.session_price !== "" ? Number(s.session_price) : null;
+					insertSvc.run(id, s.service, s.unit, s.price, sTeacherId, sLessonDays, sExtraLessons, sSessionPrice, now, now);
+				}
 				db.prepare(`
           UPDATE payments
           SET service_id = (
             SELECT cs.id FROM child_services cs
             WHERE cs.child_id = payments.child_id AND cs.service = payments.service
+            LIMIT 1
           )
           WHERE child_id = ? AND service_id IS NULL
         `).run(id);
@@ -22234,7 +22299,7 @@ ipcMain.handle("payments:get", async (_event, { month, year }) => {
 		const db = getDb();
 		if (!month || !year) throw new Error("Month and year are required");
 		const payments = db.prepare(`
-      SELECT p.*, c.name as child_name,
+      SELECT p.*, c.name as child_name, c.guardian as child_guardian, c.guardian_phone as child_guardian_phone,
         (SELECT COUNT(*) FROM payment_transactions pt WHERE pt.payment_id = p.id) as transaction_count
       FROM payments p
       JOIN children c ON p.child_id = c.id
@@ -22252,6 +22317,8 @@ ipcMain.handle("payments:get", async (_event, { month, year }) => {
 			if (!childMap.has(p.child_id)) childMap.set(p.child_id, {
 				child_id: p.child_id,
 				child_name: p.child_name,
+				child_guardian: p.child_guardian,
+				child_guardian_phone: p.child_guardian_phone,
 				services: [],
 				totalInvoiced: 0,
 				totalCollected: 0,
@@ -22408,7 +22475,7 @@ ipcMain.handle("payments:update", async (_event, { id, quantity, paid, notes, pa
       WHERE id = ?
     `).run(newQuantity, newPaid, total, balance, status, newNotes, newMethodId, newMethodName, now, id);
 		return db.prepare(`
-      SELECT p.*, c.name as child_name
+      SELECT p.*, c.name as child_name, c.guardian as child_guardian, c.guardian_phone as child_guardian_phone
       FROM payments p JOIN children c ON p.child_id = c.id
       WHERE p.id = ?
     `).get(id);
@@ -22496,7 +22563,7 @@ ipcMain.handle("payments:addTransaction", async (_event, { payment_id, amount, p
 			recomputePaymentFromTransactions(db, payment_id);
 		})();
 		return {
-			payment: db.prepare("SELECT p.*, c.name as child_name FROM payments p JOIN children c ON p.child_id = c.id WHERE p.id = ?").get(payment_id),
+			payment: db.prepare("SELECT p.*, c.name as child_name, c.guardian as child_guardian, c.guardian_phone as child_guardian_phone FROM payments p JOIN children c ON p.child_id = c.id WHERE p.id = ?").get(payment_id),
 			transactions: db.prepare("SELECT * FROM payment_transactions WHERE payment_id = ? ORDER BY paid_date ASC, id ASC").all(payment_id)
 		};
 	} catch (error) {
@@ -22516,7 +22583,7 @@ ipcMain.handle("payments:deleteTransaction", async (_event, { id }) => {
 			recomputePaymentFromTransactions(db, tx.payment_id);
 		})();
 		return {
-			payment: db.prepare("SELECT p.*, c.name as child_name FROM payments p JOIN children c ON p.child_id = c.id WHERE p.id = ?").get(tx.payment_id),
+			payment: db.prepare("SELECT p.*, c.name as child_name, c.guardian as child_guardian, c.guardian_phone as child_guardian_phone FROM payments p JOIN children c ON p.child_id = c.id WHERE p.id = ?").get(tx.payment_id),
 			transactions: db.prepare("SELECT * FROM payment_transactions WHERE payment_id = ? ORDER BY paid_date ASC, id ASC").all(tx.payment_id)
 		};
 	} catch (error) {

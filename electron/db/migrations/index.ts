@@ -3,6 +3,9 @@ import type { Db } from '../connection.js'
 interface Migration {
   name: string
   up: (db: Db) => void
+  /** Set to true for schema-rebuild migrations that need PRAGMA foreign_keys = OFF.
+   *  These run outside the normal transaction wrapper so the PRAGMA takes effect. */
+  noTransaction?: boolean
 }
 
 const migrations: Migration[] = [
@@ -620,6 +623,67 @@ const migrations: Migration[] = [
         CREATE INDEX IF NOT EXISTS idx_payment_transactions_payment ON payment_transactions(payment_id);
       `)
     }
+  },
+  {
+    name: '024_child_services_teacher_days',
+    up: (db) => {
+      // Add teacher_id and lesson_days columns to child_services.
+      // Use guarded ALTER TABLE (same pattern as 011/014/019) so re-runs are safe.
+      // NOTE: We cannot DROP the old UNIQUE(child_id, service) constraint without
+      // recreating the table; however the INSERT in childrenIPC now does DELETE+INSERT
+      // (not ON CONFLICT upsert), so the constraint is bypassed at the app level.
+      const addCol = (ddl: string) => {
+        try { db.exec(ddl) } catch { /* column already exists — ignore */ }
+      }
+      addCol('ALTER TABLE child_services ADD COLUMN teacher_id INTEGER;')
+      addCol('ALTER TABLE child_services ADD COLUMN lesson_days TEXT;')
+      addCol('ALTER TABLE child_services ADD COLUMN extra_lessons INTEGER DEFAULT 0;')
+      addCol('ALTER TABLE child_services ADD COLUMN session_price REAL;')
+    }
+  },
+  {
+    // MUST run outside a transaction so PRAGMA foreign_keys = OFF takes effect.
+    // SQLite silently ignores that PRAGMA when issued inside a transaction.
+    name: '025_child_services_drop_unique',
+    noTransaction: true,
+    up: (db) => {
+      // Recreate child_services without the UNIQUE(child_id, service) constraint
+      // so the same service can be enrolled more than once per child.
+      // FK enforcement is disabled by the runner before this function is called.
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS child_services_new (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          child_id INTEGER NOT NULL,
+          service TEXT NOT NULL,
+          unit TEXT NOT NULL,
+          price REAL NOT NULL,
+          teacher_id INTEGER,
+          lesson_days TEXT,
+          extra_lessons INTEGER DEFAULT 0,
+          session_price REAL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          synced INTEGER DEFAULT 0,
+          FOREIGN KEY (child_id) REFERENCES children (id) ON DELETE CASCADE
+        );
+
+        INSERT INTO child_services_new
+          (id, child_id, service, unit, price, teacher_id, lesson_days,
+           extra_lessons, session_price, created_at, updated_at, synced)
+        SELECT
+          id, child_id, service, unit, price, teacher_id, lesson_days,
+          COALESCE(extra_lessons, 0), session_price, created_at, updated_at, synced
+        FROM child_services;
+
+        DROP TABLE child_services;
+        ALTER TABLE child_services_new RENAME TO child_services;
+      `)
+
+      // Restore the payments → child_services FK lookup index
+      try {
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_child_services_child ON child_services(child_id);`)
+      } catch { /* ignore */ }
+    }
   }
 ]
 
@@ -641,14 +705,25 @@ export function runMigrations(db: Db): void {
   for (const migration of migrations) {
     if (!runMigrationNames.has(migration.name)) {
       console.log(`Running migration: ${migration.name}`)
-      
-      // Run each migration in a local transaction
-      const transaction = db.transaction(() => {
-        migration.up(db)
-        insertMigration.run(migration.name)
-      })
-      
-      transaction()
+
+      if (migration.noTransaction) {
+        // Schema-rebuild migrations: disable FK enforcement at connection level
+        // (PRAGMA foreign_keys cannot be changed inside a transaction in SQLite).
+        db.pragma('foreign_keys = OFF')
+        try {
+          migration.up(db)
+          insertMigration.run(migration.name)
+        } finally {
+          db.pragma('foreign_keys = ON')
+        }
+      } else {
+        // Normal migrations: run inside a transaction for atomicity.
+        const transaction = db.transaction(() => {
+          migration.up(db)
+          insertMigration.run(migration.name)
+        })
+        transaction()
+      }
     }
   }
 }

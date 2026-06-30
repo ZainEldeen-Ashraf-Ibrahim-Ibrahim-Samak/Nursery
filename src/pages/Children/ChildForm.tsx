@@ -14,9 +14,14 @@ import type { ServiceType, UnitType, Teacher } from '../../types/index.js'
 
 
 interface ServiceRow {
+  id?: number // child_services.id (present in edit mode)
   service: ServiceType
   unit: UnitType
   price: number
+  teacher_id: string
+  lesson_days: number[]
+  extra_lessons: number
+  session_price: number
 }
 
 // Egyptian mobile: starts with 01, optionally prefixed by 2 or +2 (feature 004, FR-001).
@@ -42,16 +47,10 @@ export default function ChildForm() {
     national_id: '',
     reg_date: new Date().toISOString().split('T')[0],
     notes: '',
-    services: [{ service: 'حضانة' as ServiceType, unit: 'شهر' as UnitType, price: 0 }] as ServiceRow[],
-    // Feature 004 — teacher / lesson schedule / fee
-    teacher_id: '' as string,
-    lesson_days: [] as number[],
-    extra_lessons: 0,
-    session_price: 0,
-    sessions_baseline: 8,
+    services: [{ service: 'حضانة' as ServiceType, unit: 'شهر' as UnitType, price: 0, teacher_id: '', lesson_days: [] as number[], extra_lessons: 0, session_price: 0 }] as ServiceRow[],
   })
 
-  // Feature 004 — photo (data URL for new/changed photo; existing URL otherwise)
+  // Photo (data URL for new/changed photo; existing URL otherwise)
   const [photo, setPhoto] = useState<string | null>(null)
   const [photoChanged, setPhotoChanged] = useState(false)
   const [teachers, setTeachers] = useState<Teacher[]>([])
@@ -64,11 +63,8 @@ export default function ChildForm() {
   const [photoNotice, setPhotoNotice] = useState<string | null>(null)
   const [proRateResult, setProRateResult] = useState<{ remaining_sessions: number; total_sessions: number; prorated_amount: number; days_remaining: number; days_in_month: number } | null>(null)
 
-  // Edit mode: use stored baseline from child record.
-  // Add mode: use actual scheduled sessions this month from the system; falls back to 8 if none created yet.
-  const sessionsBaseline = formData.sessions_baseline || 8
-  const totalSessions = sessionsBaseline + (Number(formData.extra_lessons) || 0)
-  const monthlyFee = totalSessions * (Number(formData.session_price) || 0)
+  // Pro-rate session baseline (kept for pro-rate notice display; per-row session_price drives actual fees)
+  const sessionsBaseline = proRateResult?.total_sessions && proRateResult.total_sessions > 0 ? proRateResult.total_sessions : 8
 
   // Fetch Settings (pricing defaults) and service definitions
   useEffect(() => {
@@ -121,17 +117,17 @@ export default function ChildForm() {
     }))
   }, [settings, serviceDefs])
 
-  // Pro-rate calculation — uses session_price (per-lesson fee), re-runs when date/price/extra changes
+  // Pro-rate calculation — uses first service row's session_price, re-runs when date/services change
   useEffect(() => {
     if (isEdit) return
-    const pricePerSession = Number(formData.session_price) || 0
+    const pricePerSession = formData.services.reduce((acc: number, r) => acc || Number(r.session_price), 0)
     if (!formData.reg_date || !pricePerSession) { setProRateResult(null); return }
     const regDate = new Date(formData.reg_date)
     if (regDate.getDate() === 1) { setProRateResult(null); return }
     window.api.sessions.proRateCalc({ reg_date: formData.reg_date, price_per_session: pricePerSession })
       .then((r: any) => setProRateResult(r))
       .catch(() => setProRateResult(null))
-  }, [formData.reg_date, formData.session_price, formData.extra_lessons, isEdit])
+  }, [formData.reg_date, formData.services, isEdit])
 
   // Sync baseline sessions when pro-rate calculation completes in Add mode
   useEffect(() => {
@@ -166,15 +162,40 @@ export default function ChildForm() {
         }
 
         if (child) {
-          const loadedServices = child.services && child.services.length > 0
-            ? child.services.map(s => ({ service: s.service, unit: s.unit, price: s.price }))
-            : [{ service: child.service, unit: child.unit, price: child.price }]
-
-          let days: number[] = []
-          if (Array.isArray(child.lesson_days)) days = child.lesson_days as number[]
-          else if (typeof child.lesson_days === 'string' && child.lesson_days) {
-            try { days = JSON.parse(child.lesson_days) } catch { days = [] }
-          }
+          const loadedServices: ServiceRow[] = child.services && child.services.length > 0
+            ? child.services.map((s: any) => {
+                let days: number[] = []
+                if (Array.isArray(s.lesson_days)) days = s.lesson_days as number[]
+                else if (typeof s.lesson_days === 'string' && s.lesson_days) {
+                  try { days = JSON.parse(s.lesson_days) } catch { days = [] }
+                }
+                return {
+                  id: s.id,
+                  service: s.service,
+                  unit: s.unit,
+                  price: s.price,
+                  teacher_id: s.teacher_id != null ? String(s.teacher_id) : '',
+                  lesson_days: days,
+                  extra_lessons: s.extra_lessons ?? 0,
+                  session_price: s.session_price ?? 0,
+                }
+              })
+            : [{
+                id: undefined,
+                service: child.service,
+                unit: child.unit,
+                price: child.price,
+                teacher_id: child.teacher_id != null ? String(child.teacher_id) : '',
+                lesson_days: (() => {
+                  if (Array.isArray(child.lesson_days)) return child.lesson_days as number[]
+                  if (typeof child.lesson_days === 'string' && child.lesson_days) {
+                    try { return JSON.parse(child.lesson_days) } catch { return [] }
+                  }
+                  return []
+                })(),
+                extra_lessons: child.extra_lessons ?? 0,
+                session_price: child.session_price ?? 0,
+              }]
 
           setFormData({
             name: child.name,
@@ -185,11 +206,6 @@ export default function ChildForm() {
             reg_date: child.reg_date,
             notes: child.notes || '',
             services: loadedServices,
-            teacher_id: child.teacher_id != null ? String(child.teacher_id) : '',
-            lesson_days: days,
-            extra_lessons: child.extra_lessons ?? 0,
-            session_price: child.session_price ?? 0,
-            sessions_baseline: child.sessions_baseline ?? 8,
           })
           setPhoto(child.photo_url || null)
           setPhotoChanged(false)
@@ -234,7 +250,7 @@ export default function ChildForm() {
     const defaultUnit = unitOpts[0]?.value ?? 'شهر'
     setFormData(prev => ({
       ...prev,
-      services: [...prev.services, { service: svcName, unit: defaultUnit, price: 0 }]
+      services: [...prev.services, { service: svcName, unit: defaultUnit, price: 0, teacher_id: '', lesson_days: [] as number[], extra_lessons: 0, session_price: 0 }]
     }))
   }
 
@@ -299,13 +315,16 @@ export default function ChildForm() {
     })
   }
 
-  const toggleLessonDay = (day: number) => {
-    setFormData(prev => ({
-      ...prev,
-      lesson_days: prev.lesson_days.includes(day)
-        ? prev.lesson_days.filter(d => d !== day)
-        : [...prev.lesson_days, day].sort((a, b) => a - b),
-    }))
+  const toggleServiceLessonDay = (index: number, day: number) => {
+    setFormData(prev => {
+      const newServices = [...prev.services]
+      const row = { ...newServices[index] }
+      row.lesson_days = row.lesson_days.includes(day)
+        ? row.lesson_days.filter(d => d !== day)
+        : [...row.lesson_days, day].sort((a, b) => a - b)
+      newServices[index] = row
+      return { ...prev, services: newServices }
+    })
   }
 
   // Form Validation
@@ -337,15 +356,10 @@ export default function ChildForm() {
     if (formData.services.length === 0) {
       errors.services = i18n.language === 'ar' ? 'يجب اختيار خدمة واحدة على الأقل' : 'At least one service is required'
     } else {
-      const seen = new Set()
-      let hasDupes = false
       let invalidPrice = false
       for (const s of formData.services) {
-        if (seen.has(s.service)) hasDupes = true
-        seen.add(s.service)
         if (s.price < 0) invalidPrice = true
       }
-      if (hasDupes) errors.services = i18n.language === 'ar' ? 'لا يمكن إضافة نفس الخدمة أكثر من مرة' : 'Cannot add duplicate services'
       if (invalidPrice) errors.services = i18n.language === 'ar' ? 'السعر لا يمكن أن يكون سالباً' : 'Price cannot be negative'
     }
 
@@ -413,12 +427,22 @@ export default function ChildForm() {
         national_id: formData.national_id.trim() || null,
         reg_date: formData.reg_date,
         notes: formData.notes.trim() || null,
-        services: formData.services,
-        teacher_id: formData.teacher_id ? Number(formData.teacher_id) : null,
-        lesson_days: formData.lesson_days,
+        services: formData.services.map(s => ({
+          id: s.id,
+          service: s.service,
+          unit: s.unit,
+          price: s.price,
+          teacher_id: s.teacher_id || null,
+          lesson_days: s.lesson_days,
+          extra_lessons: Number(s.extra_lessons) || 0,
+          session_price: Number(s.session_price) || 0,
+        })),
+        // Backward compat: set global fields from first row that has teacher/days
+        teacher_id: formData.services.find(s => s.teacher_id)?.teacher_id || null,
+        lesson_days: formData.services.find(s => s.lesson_days.length > 0)?.lesson_days || [],
         sessions_baseline: sessionsBaseline,
-        extra_lessons: Number(formData.extra_lessons) || 0,
-        session_price: Number(formData.session_price) || 0,
+        extra_lessons: 0,
+        session_price: formData.services.reduce((acc, s) => acc || s.session_price, 0) || 0,
       }
       if (photo_url !== undefined) {
         payload.photo_url = photo_url
@@ -594,158 +618,8 @@ export default function ChildForm() {
             </div>
           )}
 
-          {/* Teacher, lesson days & fee (feature 004) */}
+          {/* Enrolled Services — each row includes service, unit, price, teacher & lesson days */}
           <div className="space-y-4 border-t border-slate-100 pt-6">
-            <label className="text-lg font-bold text-slate-800">{t('lesson_schedule')}</label>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="space-y-1.5">
-                <label className="text-sm font-semibold text-slate-700">{t('teacher')}</label>
-                <Select
-                  value={formData.teacher_id}
-                  onChange={(e) => setFormData((prev) => ({ ...prev, teacher_id: e.target.value }))}
-                  options={[
-                    { value: '', label: t('no_teacher') },
-                    ...teachers.map((tch) => ({ value: String(tch.id), label: tch.name })),
-                  ]}
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="text-sm font-semibold text-slate-700">{t('lesson_days')}</label>
-                <div className="flex flex-wrap gap-1.5">
-                  {DAY_KEYS.map((key, dayIdx) => {
-                    const active = formData.lesson_days.includes(dayIdx)
-                    return (
-                      <button
-                        type="button"
-                        key={key}
-                        onClick={() => toggleLessonDay(dayIdx)}
-                        className={`px-2.5 py-1 rounded-md text-xs font-semibold border transition-colors ${
-                          active
-                            ? 'bg-primary text-white border-primary'
-                            : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
-                        }`}
-                      >
-                        {t(`days.${key}`)}
-                      </button>
-                    )
-                  })}
-                </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="text-sm font-semibold text-slate-700">{t('sessions_baseline_label')}</label>
-                <Input
-                  type="number"
-                  min={0}
-                  value={formData.sessions_baseline}
-                  onChange={(e) => setFormData((prev) => ({ ...prev, sessions_baseline: Math.max(0, Number(e.target.value)) }))}
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="text-sm font-semibold text-slate-700">{t('extra_lessons')}</label>
-                <Input
-                  type="number"
-                  min={0}
-                  value={formData.extra_lessons}
-                  onChange={(e) => setFormData((prev) => ({ ...prev, extra_lessons: Math.max(0, Number(e.target.value)) }))}
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="text-sm font-semibold text-slate-700">{t('session_price')} (EGP)</label>
-                <Input
-                  type="number"
-                  min={0}
-                  value={formData.session_price}
-                  onChange={(e) => setFormData((prev) => ({ ...prev, session_price: Math.max(0, Number(e.target.value)) }))}
-                />
-              </div>
-            </div>
-
-            {(() => {
-              const ar = i18n.language === 'ar'
-              // Days / sessions context for pro-rating
-              const now = new Date()
-              const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()
-
-              let daysLeft = daysInMonth
-              if (formData.reg_date) {
-                const [ry, rm, rd] = formData.reg_date.split('-').map(Number)
-                const sameMonth = ry === now.getFullYear() && rm - 1 === now.getMonth()
-                if (sameMonth && rd > 1) daysLeft = daysInMonth - rd + 1
-              }
-
-              const sessionsLeft = proRateResult?.remaining_sessions ?? sessionsBaseline
-
-              // Calculate the effective monthly amount for each service row
-              const isProRated = !!proRateResult && daysLeft < daysInMonth
-
-              const calcServiceAmount = (price: number, unit: string) => {
-                if (unit === 'شهر') return isProRated ? Math.round(price * daysLeft / daysInMonth) : price
-                if (unit === 'يوم') return price   // daily rate — paid per day, quantity set in payments
-                if (unit === 'ساعة') return price  // hourly rate — quantity set in payments
-                if (unit === 'جلسة') return price * sessionsLeft
-                return price
-              }
-
-              const serviceLines = formData.services.map(s => {
-                const p = Number(s.price) || 0
-                const amount = calcServiceAmount(p, s.unit)
-                let formula = ''
-                if (s.unit === 'شهر' && isProRated) formula = ar ? `${p} × ${daysLeft}/${daysInMonth} يوم` : `${p} × ${daysLeft}/${daysInMonth}d`
-                else if (s.unit === 'يوم') formula = ar ? 'سعر/يوم' : 'per day'
-                else if (s.unit === 'ساعة') formula = ar ? 'سعر/ساعة' : 'per hour'
-                else if (s.unit === 'جلسة') formula = ar ? `${p} × ${sessionsLeft} جلسة` : `${p} × ${sessionsLeft} sessions`
-                return { ...s, amount, formula }
-              })
-
-              const servicesTotalAmount = serviceLines.reduce((sum, s) => sum + s.amount, 0)
-              const grandTotal = servicesTotalAmount + monthlyFee
-
-              return (
-                <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 space-y-2.5">
-                  {proRateResult && (
-                    <p className="text-xs text-amber-600 font-medium mb-1">
-                      {ar
-                        ? `📅 حساب تناسبي: ${daysLeft} يوم متبقي من ${daysInMonth} يوم`
-                        : `📅 Pro-rated: ${daysLeft} of ${daysInMonth} days remaining`}
-                    </p>
-                  )}
-                  {/* Per-service breakdown */}
-                  {serviceLines.map((s, i) => (
-                    <div key={i} className="flex justify-between items-center text-sm">
-                      <span className="text-slate-600">
-                        {s.service}
-                        {s.formula && <span className="text-slate-400 text-xs ml-1">({s.formula})</span>}
-                      </span>
-                      <span className="font-semibold text-slate-800">{formatCurrency(s.amount)}</span>
-                    </div>
-                  ))}
-                  {/* Lesson fee line */}
-                  {Number(formData.session_price) > 0 && (
-                    <div className="flex justify-between items-center text-sm">
-                      <span className="text-slate-600">
-                        {ar
-                          ? `حصص (${totalSessions} × ${formatCurrency(Number(formData.session_price))})`
-                          : `Lessons (${totalSessions} × ${formatCurrency(Number(formData.session_price))})`}
-                      </span>
-                      <span className="font-semibold text-slate-800">{formatCurrency(monthlyFee)}</span>
-                    </div>
-                  )}
-                  <div className="border-t border-slate-200 pt-2 flex justify-between items-center">
-                    <span className="text-sm font-bold text-slate-700">
-                      {ar ? (proRateResult ? 'إجمالي الفترة المتبقية' : 'الإجمالي الشهري') : (proRateResult ? 'Pro-rated Total' : 'Monthly Total')}
-                    </span>
-                    <span className="text-lg font-bold text-primary">{formatCurrency(grandTotal)}</span>
-                  </div>
-                </div>
-              )
-            })()}
-          </div>
-
-          <div className="space-y-4">
             <div className="flex items-center justify-between">
               <label className="text-lg font-bold text-slate-800">
                 {t('enrolled_services')}
@@ -760,62 +634,145 @@ export default function ChildForm() {
               <p className="text-sm text-red-500 font-medium">{formErrors.services}</p>
             )}
 
-            <div className="space-y-3">
+            <div className="space-y-4">
               {formData.services.map((row, index) => {
                 const unitOptions = getUnitOptions(row.service)
+                const ar = i18n.language === 'ar'
 
                 return (
-                  <div key={index} className="flex flex-col md:flex-row gap-3 items-end p-4 bg-slate-50 border border-slate-200 rounded-lg">
-                    <div className="flex-1 space-y-1.5 w-full">
-                      <label className="text-xs font-semibold text-slate-500">{t('service')}</label>
-                      <Select
-                        value={row.service}
-                        onChange={(e) => handleServiceChange(index, 'service', e.target.value)}
-                        options={
-                          serviceDefs.length > 0
-                            ? serviceDefs.map(d => ({ value: d.name, label: d.name }))
-                            : [
-                                { value: 'حضانة', label: t('services.nursery') },
-                                { value: 'استضافة', label: t('services.hosting') },
-                                { value: 'جلسة', label: t('services.session') },
-                              ]
-                        }
-                      />
-                    </div>
-                    <div className="flex-1 space-y-1.5 w-full">
-                      <label className="text-xs font-semibold text-slate-500">{t('unit')}</label>
-                      <Select
-                        value={row.unit}
-                        onChange={(e) => handleServiceChange(index, 'unit', e.target.value)}
-                        options={unitOptions}
-                      />
-                    </div>
-                    <div className="flex-1 space-y-1.5 w-full">
-                      <label className="text-xs font-semibold text-slate-500">{t('price')} (EGP)</label>
-                      <Input
-                        type="number"
-                        min={0}
-                        value={row.price}
-                        onChange={(e) => handleServiceChange(index, 'price', Number(e.target.value))}
-                      />
-                    </div>
-                    {formData.services.length > 1 && (
-                      <div className="pb-1">
+                  <div key={index} className="border border-slate-200 rounded-xl bg-white shadow-sm overflow-hidden">
+                    {/* Header bar */}
+                    <div className="flex items-center justify-between px-4 py-2 bg-slate-50 border-b border-slate-200">
+                      <span className="text-xs font-bold text-slate-500 uppercase tracking-wide">
+                        {ar ? `خدمة ${index + 1}` : `Service ${index + 1}`}
+                      </span>
+                      {formData.services.length > 1 && (
                         <Button
                           type="button"
                           variant="ghost"
-                          className="text-red-500 hover:text-red-700 hover:bg-red-50 p-2"
+                          className="text-red-500 hover:text-red-700 hover:bg-red-50 p-1 h-auto text-xs"
                           onClick={() => handleRemoveService(index)}
                         >
-                          🗑️
+                          🗑️ {ar ? 'حذف' : 'Remove'}
                         </Button>
+                      )}
+                    </div>
+
+                    <div className="p-4 space-y-4">
+                      {/* Row 1: Service / Unit / Price */}
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <div className="space-y-1.5">
+                          <label className="text-xs font-semibold text-slate-500">{t('service')}</label>
+                          <Select
+                            value={row.service}
+                            onChange={(e) => handleServiceChange(index, 'service', e.target.value)}
+                            options={
+                              serviceDefs.length > 0
+                                ? serviceDefs.map(d => ({ value: d.name, label: d.name }))
+                                : [
+                                    { value: 'حضانة', label: t('services.nursery') },
+                                    { value: 'استضافة', label: t('services.hosting') },
+                                    { value: 'جلسة', label: t('services.session') },
+                                  ]
+                            }
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <label className="text-xs font-semibold text-slate-500">{t('unit')}</label>
+                          <Select
+                            value={row.unit}
+                            onChange={(e) => handleServiceChange(index, 'unit', e.target.value)}
+                            options={unitOptions}
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <label className="text-xs font-semibold text-slate-500">{t('price')} (EGP)</label>
+                          <Input
+                            type="number"
+                            min={0}
+                            value={row.price}
+                            onChange={(e) => handleServiceChange(index, 'price', Number(e.target.value))}
+                          />
+                        </div>
                       </div>
-                    )}
+
+                      {/* Row 2: Teacher / Extra lessons / Session price */}
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <div className="space-y-1.5">
+                          <label className="text-xs font-semibold text-slate-500">{t('teacher')}</label>
+                          <Select
+                            value={row.teacher_id}
+                            onChange={(e) => handleServiceChange(index, 'teacher_id', e.target.value)}
+                            options={[
+                              { value: '', label: t('no_teacher') },
+                              ...teachers.map((tch) => ({ value: String(tch.id), label: tch.name })),
+                            ]}
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <label className="text-xs font-semibold text-slate-500">{t('extra_lessons')}</label>
+                          <Input
+                            type="number"
+                            min={0}
+                            value={row.extra_lessons}
+                            onChange={(e) => handleServiceChange(index, 'extra_lessons', Math.max(0, Number(e.target.value)))}
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <label className="text-xs font-semibold text-slate-500">{t('session_price')} (EGP)</label>
+                          <Input
+                            type="number"
+                            min={0}
+                            value={row.session_price}
+                            onChange={(e) => handleServiceChange(index, 'session_price', Math.max(0, Number(e.target.value)))}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Row 3: Lesson days */}
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-semibold text-slate-500">{t('lesson_days')}</label>
+                        <div className="flex flex-wrap gap-1.5">
+                          {DAY_KEYS.map((key, dayIdx) => {
+                            const active = row.lesson_days.includes(dayIdx)
+                            return (
+                              <button
+                                type="button"
+                                key={key}
+                                onClick={() => toggleServiceLessonDay(index, dayIdx)}
+                                className={`px-2.5 py-1 rounded-md text-xs font-semibold border transition-colors ${
+                                  active
+                                    ? 'bg-primary text-white border-primary'
+                                    : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
+                                }`}
+                              >
+                                {t(`days.${key}`)}
+                              </button>
+                            )
+                          })}
+                        </div>
+                      </div>
+
+                      {/* Session fee summary for this row (if session_price > 0) */}
+                      {Number(row.session_price) > 0 && (
+                        <div className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-600 flex items-center justify-between">
+                          <span>
+                            {ar
+                              ? `${sessionsBaseline + Number(row.extra_lessons)} جلسة × ${row.session_price} ج.م`
+                              : `${sessionsBaseline + Number(row.extra_lessons)} sessions × ${row.session_price} EGP`}
+                          </span>
+                          <span className="font-bold text-slate-800">
+                            {formatCurrency((sessionsBaseline + Number(row.extra_lessons)) * Number(row.session_price))}
+                          </span>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )
               })}
             </div>
           </div>
+
 
           <div className="space-y-1.5">
             <label className="text-sm font-semibold text-slate-700">

@@ -18,6 +18,10 @@ export interface ServiceEnrollment {
   service: ServiceType
   unit: UnitType
   price: number
+  teacher_id?: number | null
+  lesson_days?: number[] | string | null
+  extra_lessons?: number
+  session_price?: number | null
   created_at?: string
   updated_at?: string
   synced?: number

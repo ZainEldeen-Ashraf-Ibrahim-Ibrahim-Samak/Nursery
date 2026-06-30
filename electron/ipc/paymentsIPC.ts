@@ -51,7 +51,7 @@ ipcMain.handle('payments:get', async (_event, { month, year }) => {
     
     // Fetch payments joined with children names
     const payments = db.prepare(`
-      SELECT p.*, c.name as child_name,
+      SELECT p.*, c.name as child_name, c.guardian as child_guardian, c.guardian_phone as child_guardian_phone,
         (SELECT COUNT(*) FROM payment_transactions pt WHERE pt.payment_id = p.id) as transaction_count
       FROM payments p
       JOIN children c ON p.child_id = c.id
@@ -77,6 +77,8 @@ ipcMain.handle('payments:get', async (_event, { month, year }) => {
         childMap.set(p.child_id, {
           child_id: p.child_id,
           child_name: p.child_name,
+          child_guardian: (p as any).child_guardian,
+          child_guardian_phone: (p as any).child_guardian_phone,
           services: [],
           totalInvoiced: 0,
           totalCollected: 0,
@@ -304,7 +306,7 @@ ipcMain.handle('payments:update', async (_event, { id, quantity, paid, notes, pa
     `).run(newQuantity, newPaid, total, balance, status, newNotes, newMethodId, newMethodName, now, id)
 
     const updated = db.prepare(`
-      SELECT p.*, c.name as child_name
+      SELECT p.*, c.name as child_name, c.guardian as child_guardian, c.guardian_phone as child_guardian_phone
       FROM payments p JOIN children c ON p.child_id = c.id
       WHERE p.id = ?
     `).get(id) as Payment
@@ -436,7 +438,7 @@ ipcMain.handle('payments:addTransaction', async (_event, { payment_id, amount, p
       recomputePaymentFromTransactions(db, payment_id)
     })()
 
-    const updated = db.prepare('SELECT p.*, c.name as child_name FROM payments p JOIN children c ON p.child_id = c.id WHERE p.id = ?').get(payment_id) as Payment
+    const updated = db.prepare('SELECT p.*, c.name as child_name, c.guardian as child_guardian, c.guardian_phone as child_guardian_phone FROM payments p JOIN children c ON p.child_id = c.id WHERE p.id = ?').get(payment_id) as Payment
     const transactions = db.prepare('SELECT * FROM payment_transactions WHERE payment_id = ? ORDER BY paid_date ASC, id ASC').all(payment_id)
     return { payment: updated, transactions }
   } catch (error: any) {
@@ -456,7 +458,7 @@ ipcMain.handle('payments:deleteTransaction', async (_event, { id }) => {
       db.prepare('DELETE FROM payment_transactions WHERE id = ?').run(id)
       recomputePaymentFromTransactions(db, tx.payment_id)
     })()
-    const updated = db.prepare('SELECT p.*, c.name as child_name FROM payments p JOIN children c ON p.child_id = c.id WHERE p.id = ?').get(tx.payment_id) as Payment
+    const updated = db.prepare('SELECT p.*, c.name as child_name, c.guardian as child_guardian, c.guardian_phone as child_guardian_phone FROM payments p JOIN children c ON p.child_id = c.id WHERE p.id = ?').get(tx.payment_id) as Payment
     const transactions = db.prepare('SELECT * FROM payment_transactions WHERE payment_id = ? ORDER BY paid_date ASC, id ASC').all(tx.payment_id)
     return { payment: updated, transactions }
   } catch (error: any) {

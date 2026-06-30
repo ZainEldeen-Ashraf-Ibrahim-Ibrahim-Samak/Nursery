@@ -72,6 +72,7 @@ export default function MonthlyPayments() {
 
   // Search & filter state
   const [searchQuery, setSearchQuery] = useState('')
+  const [phoneQuery, setPhoneQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<'all' | 'paid' | 'partial' | 'unpaid'>('all')
 
   // Selection state
@@ -108,15 +109,29 @@ export default function MonthlyPayments() {
 
   const filteredByChild = useMemo(() => {
     let data = byChild ?? []
+    // Name filter: match child name or guardian name
     if (searchQuery.trim()) {
       const q = searchQuery.trim().toLowerCase()
-      data = data.filter((g: any) => g.child_name?.toLowerCase().includes(q))
+      data = data.filter((g: any) =>
+        g.child_name?.toLowerCase().includes(q) ||
+        g.child_guardian?.toLowerCase().includes(q)
+      )
+    }
+    // Phone filter: digits-only partial match
+    if (phoneQuery.trim()) {
+      const digits = phoneQuery.trim().replace(/\D/g, '')
+      if (digits.length >= 3) {
+        data = data.filter((g: any) => {
+          const phone = (g.child_guardian_phone ?? '').replace(/\D/g, '')
+          return phone.includes(digits)
+        })
+      }
     }
     if (statusFilter !== 'all') {
       data = data.filter((g: any) => g.status === statusFilter)
     }
     return data
-  }, [byChild, searchQuery, statusFilter])
+  }, [byChild, searchQuery, phoneQuery, statusFilter])
 
   const handleMonthChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     setPeriod(e.target.value, currentYear)
@@ -287,28 +302,50 @@ export default function MonthlyPayments() {
 
       {/* Search & Filter Bar */}
       {payments.length > 0 && (
-        <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
-          <div className="relative flex-1 max-w-sm">
-            <span className="absolute inset-y-0 start-3 flex items-center pointer-events-none text-slate-400">
-              🔍
-            </span>
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder={isAr ? 'بحث باسم الطفل…' : 'Search by child name…'}
-              className="w-full rounded-lg border border-slate-300 bg-white py-2 ps-9 pe-3 text-sm text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary"
-            />
-            {searchQuery && (
-              <button
-                onClick={() => setSearchQuery('')}
-                className="absolute inset-y-0 end-3 flex items-center text-slate-400 hover:text-slate-600"
-              >
-                ✕
-              </button>
-            )}
+        <div className="flex flex-col gap-3">
+          {/* Search inputs row */}
+          <div className="flex flex-col sm:flex-row gap-2">
+            {/* Name / guardian search */}
+            <div className="relative flex-1">
+              <span className="absolute inset-y-0 start-3 flex items-center pointer-events-none text-slate-400 text-sm">🔍</span>
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder={isAr ? 'بحث باسم الطفل أو الأب…' : 'Search by child or father name…'}
+                className="w-full rounded-lg border border-slate-300 bg-white py-2 ps-9 pe-3 text-sm text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary"
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery('')}
+                  className="absolute inset-y-0 end-3 flex items-center text-slate-400 hover:text-slate-600"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+            {/* Phone search */}
+            <div className="relative sm:w-56">
+              <span className="absolute inset-y-0 start-3 flex items-center pointer-events-none text-slate-400 text-sm">📞</span>
+              <input
+                type="tel"
+                value={phoneQuery}
+                onChange={(e) => setPhoneQuery(e.target.value)}
+                placeholder={isAr ? 'بحث برقم الهاتف…' : 'Search by phone…'}
+                className="w-full rounded-lg border border-slate-300 bg-white py-2 ps-9 pe-3 text-sm text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary font-mono"
+              />
+              {phoneQuery && (
+                <button
+                  onClick={() => setPhoneQuery('')}
+                  className="absolute inset-y-0 end-3 flex items-center text-slate-400 hover:text-slate-600"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
           </div>
-          <div className="flex items-center gap-2">
+          {/* Status filters row */}
+          <div className="flex items-center gap-2 flex-wrap">
             <span className="text-xs text-slate-500 font-semibold uppercase whitespace-nowrap">
               {isAr ? 'الحالة:' : 'Status:'}
             </span>
@@ -337,7 +374,7 @@ export default function MonthlyPayments() {
                   : isAr ? 'غير مدفوع' : 'Unpaid'}
               </button>
             ))}
-            {(searchQuery || statusFilter !== 'all') && (
+            {(searchQuery || phoneQuery || statusFilter !== 'all') && (
               <span className="text-xs text-slate-400 ms-1">
                 {isAr
                   ? `${filteredByChild.length} من ${byChild?.length ?? 0}`
@@ -445,8 +482,12 @@ export default function MonthlyPayments() {
                               className="h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary cursor-pointer"
                             />
                           </td>
-                          <td className="px-4 py-3 font-bold text-slate-900 whitespace-nowrap text-start">
-                            {childGroup.child_name}
+                          <td className="px-4 py-3 text-start">
+                            <div className="font-bold text-slate-900 whitespace-nowrap">
+                              {childGroup.child_guardian
+                                ? `${childGroup.child_name} / ${childGroup.child_guardian}`
+                                : childGroup.child_name}
+                            </div>
                           </td>
                           <td className="px-4 py-3 text-xs text-slate-500 font-semibold" colSpan={4}>
                             {i18n.language === 'ar' ? `إجمالي الطفل (${childGroup.services.length} خدمات)` : `Child Total (${childGroup.services.length} services)`}

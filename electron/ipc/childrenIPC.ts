@@ -138,8 +138,7 @@ ipcMain.handle('children:add', async (_event, childInput) => {
       validateChildPhone(child_phone)
     }
 
-    const serviceNames = new Set(enrollments.map((s: any) => s.service))
-    if (serviceNames.size < enrollments.length) throw new Error('لا يمكن إضافة نفس الخدمة أكثر من مرة / Cannot add duplicate services')
+    // Duplicate services are now allowed — each enrollment can have its own teacher/days
 
     const lesson = buildLessonFields(childInput)
     const now = new Date().toISOString()
@@ -164,10 +163,14 @@ ipcMain.handle('children:add', async (_event, childInput) => {
       )
 
       const childId = Number(result.lastInsertRowid)
-      const insertSvc = db.prepare(`INSERT INTO child_services (child_id, service, unit, price, created_at, updated_at, synced) VALUES (?, ?, ?, ?, ?, ?, 0)`)
+      const insertSvc = db.prepare(`INSERT INTO child_services (child_id, service, unit, price, teacher_id, lesson_days, extra_lessons, session_price, created_at, updated_at, synced) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`)
       
       for (const s of enrollments) {
-        insertSvc.run(childId, s.service, s.unit, s.price, now, now)
+        const sTeacherId = s.teacher_id != null && s.teacher_id !== '' ? Number(s.teacher_id) : null
+        const sLessonDays = Array.isArray(s.lesson_days) ? JSON.stringify(s.lesson_days) : (s.lesson_days || null)
+        const sExtraLessons = s.extra_lessons != null ? Number(s.extra_lessons) : 0
+        const sSessionPrice = s.session_price != null && s.session_price !== '' ? Number(s.session_price) : null
+        insertSvc.run(childId, s.service, s.unit, s.price, sTeacherId, sLessonDays, sExtraLessons, sSessionPrice, now, now)
       }
       return childId
     })
@@ -208,9 +211,7 @@ ipcMain.handle('children:update', async (_event, { id, patch }) => {
       const enrollments = patch.services
       if (enrollments) {
         if (enrollments.length === 0) throw new Error('يجب اختيار خدمة واحدة على الأقل / At least one service is required')
-        const serviceNames = new Set(enrollments.map((s: any) => s.service))
-        if (serviceNames.size < enrollments.length) throw new Error('لا يمكن إضافة نفس الخدمة أكثر من مرة / Cannot add duplicate services')
-
+        // Duplicate services are now allowed — each enrollment can have its own teacher/days
         patch.service = enrollments[0].service
         patch.unit = enrollments[0].unit
         patch.price = enrollments[0].price
@@ -259,38 +260,43 @@ ipcMain.handle('children:update', async (_event, { id, patch }) => {
       }
 
       if (enrollments) {
-        // Collect existing child_services rows so we can remap payments.service_id
+        // Collect existing child_services rows to detect removals (for payment FK remapping)
         const existingServices = db.prepare('SELECT id, service FROM child_services WHERE child_id = ?').all(id) as { id: number; service: string }[]
 
-        // Delete services that are no longer present (first null out payments FK to avoid constraint)
-        const newServiceNames = new Set(enrollments.map((s: any) => s.service as string))
-        const removedIds = existingServices.filter(e => !newServiceNames.has(e.service)).map(e => e.id)
+        // Determine which existing rows to keep: match by position/id if provided, else fall back to service name
+        const incomingIds = new Set(enrollments.filter((s: any) => s.id).map((s: any) => Number(s.id)))
+        const incomingServiceNames = new Set(enrollments.map((s: any) => s.service as string))
+
+        // Remove rows that are gone (not referenced by id or service name in new list)
+        const removedIds = existingServices
+          .filter(e => !incomingIds.has(e.id) && !incomingServiceNames.has(e.service))
+          .map(e => e.id)
         if (removedIds.length > 0) {
           const placeholders = removedIds.map(() => '?').join(',')
           db.prepare(`UPDATE payments SET service_id = NULL WHERE child_id = ? AND service_id IN (${placeholders})`).run(id, ...removedIds)
           db.prepare(`DELETE FROM child_services WHERE id IN (${placeholders})`).run(...removedIds)
         }
 
-        // Upsert each enrollment — update in-place if the service already exists
-        const upsertSvc = db.prepare(`
-          INSERT INTO child_services (child_id, service, unit, price, created_at, updated_at, synced)
-          VALUES (?, ?, ?, ?, ?, ?, 0)
-          ON CONFLICT(child_id, service) DO UPDATE SET
-            unit = excluded.unit,
-            price = excluded.price,
-            updated_at = excluded.updated_at,
-            synced = 0
-        `)
+        // Delete ALL existing rows and re-insert so ordering / duplicates are handled cleanly
+        db.prepare(`UPDATE payments SET service_id = NULL WHERE child_id = ?`).run(id)
+        db.prepare(`DELETE FROM child_services WHERE child_id = ?`).run(id)
+
+        const insertSvc = db.prepare(`INSERT INTO child_services (child_id, service, unit, price, teacher_id, lesson_days, extra_lessons, session_price, created_at, updated_at, synced) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`)
         for (const s of enrollments) {
-          upsertSvc.run(id, s.service, s.unit, s.price, now, now)
+          const sTeacherId = s.teacher_id != null && s.teacher_id !== '' ? Number(s.teacher_id) : null
+          const sLessonDays = Array.isArray(s.lesson_days) ? JSON.stringify(s.lesson_days) : (s.lesson_days || null)
+          const sExtraLessons = s.extra_lessons != null ? Number(s.extra_lessons) : 0
+          const sSessionPrice = s.session_price != null && s.session_price !== '' ? Number(s.session_price) : null
+          insertSvc.run(id, s.service, s.unit, s.price, sTeacherId, sLessonDays, sExtraLessons, sSessionPrice, now, now)
         }
 
-        // Re-link any payments whose service_id is NULL (removed services or newly added ones)
+        // Re-link payments to the new service rows by service name
         db.prepare(`
           UPDATE payments
           SET service_id = (
             SELECT cs.id FROM child_services cs
             WHERE cs.child_id = payments.child_id AND cs.service = payments.service
+            LIMIT 1
           )
           WHERE child_id = ? AND service_id IS NULL
         `).run(id)
