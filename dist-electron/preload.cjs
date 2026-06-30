@@ -35,7 +35,8 @@ electron.contextBridge.exposeInMainWorld("api", {
 		bulkPay: (args) => electron.ipcRenderer.invoke("payments:bulkPay", args),
 		listTransactions: (payment_id) => electron.ipcRenderer.invoke("payments:listTransactions", { payment_id }),
 		addTransaction: (args) => electron.ipcRenderer.invoke("payments:addTransaction", args),
-		deleteTransaction: (id) => electron.ipcRenderer.invoke("payments:deleteTransaction", { id })
+		deleteTransaction: (id) => electron.ipcRenderer.invoke("payments:deleteTransaction", { id }),
+		deleteForChild: (args) => electron.ipcRenderer.invoke("payments:deleteForChild", args)
 	},
 	employees: {
 		get: () => electron.ipcRenderer.invoke("employees:get"),

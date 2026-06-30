@@ -2,6 +2,7 @@ import { useEffect, useState, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { usePaymentsStore } from '../../store/usePaymentsStore.js'
 import { usePaymentMethodsStore } from '../../store/usePaymentMethodsStore.js'
+import { useAuthStore } from '../../store/useAuthStore.js'
 import { useExport } from '../../hooks/useExport.js'
 import PaymentRow from './PaymentRow.js'
 import PaymentInstallmentsModal from './PaymentInstallmentsModal.js'
@@ -63,8 +64,12 @@ export default function MonthlyPayments() {
     generatePayments,
     updatePayment,
     bulkPay,
+    deleteChildPayments,
     clearError,
   } = usePaymentsStore()
+
+  const { user } = useAuthStore()
+  const isAdmin = user?.role === 'admin'
 
   const { methods: paymentMethods, fetchMethods: fetchPaymentMethods } = usePaymentMethodsStore()
 
@@ -512,7 +517,22 @@ export default function MonthlyPayments() {
                           <td className="px-4 py-3 whitespace-nowrap text-start">
                             {getStatusBadge(childGroup.status)}
                           </td>
-                          <td colSpan={2}></td>
+                          <td colSpan={2} className="px-4 py-3 text-center">
+                            {isAdmin && childGroup.child_is_active === 0 && (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                className="text-red-500 hover:text-red-700 hover:bg-red-50 text-xs py-1 h-auto font-semibold"
+                                onClick={() => {
+                                  if (window.confirm(isAr ? `هل أنت متأكد من حذف مطالبات ${childGroup.child_name} لهذا الشهر؟` : `Are you sure you want to delete payments for ${childGroup.child_name} for this month?`)) {
+                                    deleteChildPayments(childGroup.child_id)
+                                  }
+                                }}
+                              >
+                                🗑️ {isAr ? 'حذف من القائمة' : 'Delete from list'}
+                              </Button>
+                            )}
+                          </td>
                         </tr>
                         {childGroup.services.map((payment: any) => (
                           <PaymentRow

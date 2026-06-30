@@ -1,6 +1,7 @@
 import { ipcMain } from 'electron'
 import { getDb } from '../db/connection.js'
 import { getCurrentUser } from './authIPC.js'
+import { requireAdmin } from './_guard.js'
 import type { Payment, PaymentStatus } from '../../src/types/index.js'
 
 // Pure function for payment calculations (exported for unit testing)
@@ -49,9 +50,9 @@ ipcMain.handle('payments:get', async (_event, { month, year }) => {
       throw new Error('Month and year are required')
     }
     
-    // Fetch payments joined with children names
+    // Fetch payments joined with children names and status
     const payments = db.prepare(`
-      SELECT p.*, c.name as child_name, c.guardian as child_guardian, c.guardian_phone as child_guardian_phone,
+      SELECT p.*, c.name as child_name, c.guardian as child_guardian, c.guardian_phone as child_guardian_phone, c.is_active as child_is_active,
         (SELECT COUNT(*) FROM payment_transactions pt WHERE pt.payment_id = p.id) as transaction_count
       FROM payments p
       JOIN children c ON p.child_id = c.id
@@ -79,6 +80,7 @@ ipcMain.handle('payments:get', async (_event, { month, year }) => {
           child_name: p.child_name,
           child_guardian: (p as any).child_guardian,
           child_guardian_phone: (p as any).child_guardian_phone,
+          child_is_active: (p as any).child_is_active ?? 1,
           services: [],
           totalInvoiced: 0,
           totalCollected: 0,
@@ -464,5 +466,36 @@ ipcMain.handle('payments:deleteTransaction', async (_event, { id }) => {
   } catch (error: any) {
     console.error('Failed to delete payment transaction:', error)
     throw new Error(error.message || 'Failed to delete payment transaction')
+  }
+})
+
+ipcMain.handle('payments:deleteForChild', async (_event, { child_id, month, year }) => {
+  try {
+    requireAdmin()
+    const db = getDb()
+    if (!child_id || !month || !year) {
+      throw new Error('Child ID, month, and year are required')
+    }
+
+    db.transaction(() => {
+      // Find all payments for this child in this period
+      const payments = db.prepare('SELECT id FROM payments WHERE child_id = ? AND month = ? AND year = ?').all(child_id, month, year) as { id: number }[]
+      
+      if (payments.length > 0) {
+        const ids = payments.map(p => p.id)
+        const placeholders = ids.map(() => '?').join(',')
+        
+        // Delete any transactions/installments linked to these payments
+        db.prepare(`DELETE FROM payment_transactions WHERE payment_id IN (${placeholders})`).run(...ids)
+        
+        // Delete the payments
+        db.prepare(`DELETE FROM payments WHERE child_id = ? AND month = ? AND year = ?`).run(child_id, month, year)
+      }
+    })()
+
+    return { ok: true }
+  } catch (error: any) {
+    console.error('Failed to delete child payments:', error)
+    throw new Error(error.message || 'Failed to delete child payments')
   }
 })

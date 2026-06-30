@@ -26,6 +26,7 @@ interface PaymentsState {
     payment_method_id?: number | null
   }) => Promise<Payment | null>
   bulkPay: (ids: number[], payment_method_id?: number | null) => Promise<number>
+  deleteChildPayments: (child_id: number) => Promise<boolean>
   clearError: () => void
 }
 
@@ -135,6 +136,24 @@ export const usePaymentsStore = create<PaymentsState>((set, get) => ({
       }
       set({ error: errorMsg, isLoading: false })
       return 0
+    }
+  },
+
+  deleteChildPayments: async (child_id) => {
+    set({ isLoading: true, error: null })
+    try {
+      const month = get().currentMonth
+      const year = get().currentYear
+      await window.api.payments.deleteForChild({ child_id, month, year })
+      await get().fetchPayments()
+      return true
+    } catch (err: any) {
+      let errorMsg = err.message || 'Failed to delete child payments'
+      if (errorMsg.includes('Error invoking remote method')) {
+        errorMsg = errorMsg.replace(/^Error: Error invoking remote method '[^']+':\s*/, '')
+      }
+      set({ error: errorMsg, isLoading: false })
+      return false
     }
   },
 

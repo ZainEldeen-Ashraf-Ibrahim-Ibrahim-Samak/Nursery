@@ -43,6 +43,7 @@ const api = {
     listTransactions: (payment_id: number) => ipcRenderer.invoke('payments:listTransactions', { payment_id }),
     addTransaction: (args: { payment_id: number; amount: number; payment_method_id?: number | null; paid_date?: string | null; notes?: string | null }) => ipcRenderer.invoke('payments:addTransaction', args),
     deleteTransaction: (id: number) => ipcRenderer.invoke('payments:deleteTransaction', { id }),
+    deleteForChild: (args: { child_id: number; month: string; year: number }) => ipcRenderer.invoke('payments:deleteForChild', args),
   },
 
   // Salaries
