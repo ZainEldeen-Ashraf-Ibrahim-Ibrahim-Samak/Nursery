@@ -65,7 +65,8 @@ export default function SyncManager() {
       count: mode === 'push' ? stats.pushed ?? 0 : stats.pulled ?? 0,
       failed: stats.failed ?? 0,
       skipped: stats.skipped ?? 0,
-      errors: (stats.errors ?? []) as { recordId: string; message: string }[]
+      errors: (stats.errors ?? []) as { recordId: string; message: string }[],
+      skipReasons: (stats.skipReasons ?? []) as { recordId: string; message: string }[]
     }))
   }
 
@@ -284,7 +285,7 @@ export default function SyncManager() {
           {lastPullResults && (
             <div className="bg-blue-50 rounded-xl p-3 space-y-1 text-xs">
               <p className="font-bold text-blue-700">✅ {isAr ? 'نتائج السحب:' : 'Pull Results:'}</p>
-              {formatResults(lastPullResults, 'pull')?.map(({ entity, count, failed, skipped, errors }) => (
+              {formatResults(lastPullResults, 'pull')?.map(({ entity, count, failed, skipped, errors, skipReasons }) => (
                 <div key={entity} className="space-y-0.5">
                   <div className="flex justify-between text-slate-600">
                     <span>{entity}</span>
@@ -302,6 +303,20 @@ export default function SyncManager() {
                         </li>
                       ))}
                     </ul>
+                  )}
+                  {skipReasons.length > 0 && (
+                    <details className="ltr:pl-3 rtl:pr-3">
+                      <summary className="text-[11px] text-slate-500 cursor-pointer">
+                        {isAr ? `لماذا تم التخطي؟ (${skipReasons.length})` : `Why skipped? (${skipReasons.length})`}
+                      </summary>
+                      <ul className="space-y-0.5 text-[11px] text-slate-500 ltr:text-left rtl:text-right mt-1">
+                        {skipReasons.map((s, i) => (
+                          <li key={i} className="font-mono break-all">
+                            [{s.recordId}] {s.message}
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
                   )}
                 </div>
               ))}

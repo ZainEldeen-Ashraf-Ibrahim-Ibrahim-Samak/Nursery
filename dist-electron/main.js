@@ -28610,6 +28610,7 @@ ipcMain.handle("sync:pull", async (event, args) => {
 			let failed = 0;
 			let orphanSkipped = 0;
 			const errors = [];
+			const skipReasons = [];
 			/** Record a pull failure with its reason (logged + returned to the UI). */
 			const noteError = (recordId, err) => {
 				const message = err instanceof Error ? err.message : String(err);
@@ -28618,6 +28619,17 @@ ipcMain.handle("sync:pull", async (event, args) => {
 					message
 				});
 				console.error(`[sync:pull] ${entity.name} record=${recordId}: ${message}`);
+			};
+			/**
+			* Record *why* a record was skipped (not just that it was), so the UI can show the actual
+			* cause — e.g. "local looked newer" — instead of a bare skip count admins have no way to
+			* act on.
+			*/
+			const noteSkip = (recordId, message) => {
+				if (skipReasons.length < 25) skipReasons.push({
+					recordId: String(recordId),
+					message
+				});
 			};
 			try {
 				const cloudRecords = await entity.model.find({}).lean();
@@ -28631,6 +28643,7 @@ ipcMain.handle("sync:pull", async (event, args) => {
 								pulled++;
 							} else {
 								logSync("pull-skip", entity.name, `${cloudRecord.entity}:${cloudRecord.record_id}`, "skipped");
+								noteSkip(`${cloudRecord.entity}:${cloudRecord.record_id}`, "already exists locally (tombstone already applied)");
 								skipped++;
 							}
 							continue;
@@ -28661,7 +28674,9 @@ ipcMain.handle("sync:pull", async (event, args) => {
 								logSync("pull-update", entity.name, cloudRecord.id, "success");
 								pulled++;
 							} else {
-								logSync("pull-skip", entity.name, cloudRecord.id, "skipped");
+								const reason = (local.updated_at ? new Date(local.updated_at).getTime() : 0) === (cloudRecord.updated_at ? new Date(cloudRecord.updated_at).getTime() : 0) ? `tie on updated_at (local id ${local.id} >= cloud id ${cloudRecord.id}) — local ${local.updated_at ?? "(none)"} kept` : `local looked newer: local updated_at=${local.updated_at ?? "(none)"} vs cloud updated_at=${cloudRecord.updated_at ?? "(none)"}`;
+								logSync("pull-skip", entity.name, cloudRecord.id, "skipped", reason);
+								noteSkip(cloudRecord.id, reason);
 								skipped++;
 							}
 						}
@@ -28671,6 +28686,7 @@ ipcMain.handle("sync:pull", async (event, args) => {
 							orphanSkipped++;
 							skipped++;
 							logSync("pull", entity.name, cloudRecord.id, "skipped-orphan", message);
+							noteSkip(cloudRecord.id, `orphaned — references a missing parent record (stale cloud data): ${message}`);
 						} else {
 							logSync("pull", entity.name, cloudRecord.id, "error", message);
 							noteError(cloudRecord.id, err);
@@ -28695,7 +28711,8 @@ ipcMain.handle("sync:pull", async (event, args) => {
 				pulled,
 				skipped,
 				failed,
-				errors
+				errors,
+				skipReasons
 			};
 		}
 		report(totalWork, totalWork, "done");

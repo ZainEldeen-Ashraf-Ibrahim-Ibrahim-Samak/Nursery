@@ -28,6 +28,7 @@ interface PushPullResults {
     skipped?: number
     failed?: number
     errors?: { recordId: string; message: string }[]
+    skipReasons?: { recordId: string; message: string }[]
   }
 }
 
