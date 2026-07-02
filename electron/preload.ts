@@ -148,7 +148,7 @@ const api = {
     reconnect: () => ipcRenderer.invoke('sync:reconnect'),
     disconnect: () => ipcRenderer.invoke('sync:disconnect'),
     push: () => ipcRenderer.invoke('sync:push'),
-    pull: () => ipcRenderer.invoke('sync:pull'),
+    pull: (force?: boolean) => ipcRenderer.invoke('sync:pull', { force: force === true }),
     status: () => ipcRenderer.invoke('sync:status'),
     autoSync: (args: { enabled: boolean; intervalMinutes?: number }) =>
       ipcRenderer.invoke('sync:auto-sync', args),

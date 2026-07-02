@@ -253,6 +253,23 @@ export default function SyncManager() {
             ⬇️ {isAr ? 'سحب البيانات' : 'Pull Data'}
           </Button>
 
+          <div className="border-t border-slate-100 pt-3 space-y-2">
+            <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+              ⚠️ {isAr
+                ? 'إذا كانت النتائج تظهر "تم التخطي" لكل شيء (الإعدادات، الأطفال، الخدمات، المدفوعات، أنواع الرواتب، الموظفون، الأدوار، تعريفات الخدمات، طرق الدفع)، فهذا يعني أن السجلات المحلية تبدو "أحدث" رغم أنها ليست كذلك فعلياً. استخدم "سحب إجباري" أدناه لتجاوز ذلك والاستبدال ببيانات السحابة دائماً.'
+                : 'If results show everything "skipped" (settings, children, child services, payments, salary types, employees, roles, service definitions, payment methods), local records are only *appearing* newer. Use "Force Pull" below to bypass that and always take the cloud version.'}
+            </p>
+            <Button
+              variant="danger"
+              onClick={() => { resetProgress('pull'); pull(true) }}
+              isLoading={isPulling}
+              disabled={!isConnected}
+              className="w-full"
+            >
+              ⚠️ {isAr ? 'سحب إجباري (استبدال المحلي بالسحابة)' : 'Force Pull (overwrite local with cloud)'}
+            </Button>
+          </div>
+
           {isPulling && (() => {
             const p = getProgress('pull')
             return (

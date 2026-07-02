@@ -197,16 +197,85 @@ ipcMain.handle('storage:clear', async (_event, { confirm }) => {
 
     const db = getDb()
 
-    const clearAll = db.transaction(() => {
-      db.prepare('DELETE FROM payments').run()
-      db.prepare('DELETE FROM salary_payments').run()
-      db.prepare('DELETE FROM expenses').run()
-      db.prepare('DELETE FROM sync_log').run()
-      db.prepare('DELETE FROM children').run()
-      db.prepare('DELETE FROM employees').run()
-    })
+    db.pragma('foreign_keys = OFF')
+    try {
+      const clearAll = db.transaction(() => {
+        db.prepare('DELETE FROM payments').run()
+        db.prepare('DELETE FROM payment_transactions').run()
+        db.prepare('DELETE FROM salary_payments').run()
+        db.prepare('DELETE FROM employee_deductions').run()
+        db.prepare('DELETE FROM expenses').run()
+        db.prepare('DELETE FROM sync_log').run()
+        db.prepare('DELETE FROM tombstones').run()
+        db.prepare('DELETE FROM child_services').run()
+        db.prepare('DELETE FROM children').run()
+        db.prepare('DELETE FROM session_teachers').run()
+        db.prepare('DELETE FROM scheduled_sessions').run()
+        db.prepare('DELETE FROM service_teachers').run()
+        db.prepare('DELETE FROM attendance_records').run()
+        db.prepare('DELETE FROM attendance_conflicts').run()
+        db.prepare('DELETE FROM teacher_payments').run()
+        db.prepare('DELETE FROM attendance_edit_requests').run()
+        db.prepare('DELETE FROM attendance_audit_log').run()
+        db.prepare('DELETE FROM notifications').run()
+        db.prepare('DELETE FROM imported_snapshots').run()
+        db.prepare('DELETE FROM employees').run()
+      })
+      clearAll()
+    } finally {
+      db.pragma('foreign_keys = ON')
+    }
 
-    clearAll()
+    // Clear MongoDB synced collections if a URI is available or if we are connected
+    try {
+      const { getMongoUri } = await import('./syncIPC.js')
+      const mongoUri = getMongoUri()
+      if (mongoUri) {
+        const { getConnectionStatus, connectMongo, disconnectMongo, SYNC_ENTITIES } = await import('../services/mongoSync.js')
+        const status = getConnectionStatus()
+        let tempConnected = false
+        if (!status.connected) {
+          console.log('[storage:clear] MongoDB not connected; attempting temporary connection to clear cloud collections...')
+          await connectMongo(mongoUri)
+          tempConnected = true
+        }
+
+        const clearedEntities = [
+          'children',
+          'child_services',
+          'payments',
+          'employees',
+          'salary_payments',
+          'expenses',
+          'imported_snapshots',
+          'tombstones',
+          'scheduled_sessions',
+          'session_teachers',
+          'attendance_records',
+          'attendance_conflicts',
+          'employee_deductions',
+          'payment_transactions',
+          'service_teachers',
+          'teacher_payments',
+        ]
+
+        console.log('[storage:clear] Clearing MongoDB collections...')
+        for (const entity of SYNC_ENTITIES) {
+          if (clearedEntities.includes(entity.name)) {
+            await entity.model.deleteMany({})
+          }
+        }
+
+        if (tempConnected) {
+          console.log('[storage:clear] Disconnecting temporary MongoDB connection...')
+          await disconnectMongo()
+        }
+      }
+    } catch (mongoError: any) {
+      console.warn('[storage:clear] Failed to clear MongoDB collections:', mongoError.message)
+      // Do not throw; SQLite clear succeeding is paramount, and MongoDB sync might be offline
+    }
+
     return { ok: true }
   } catch (error: any) {
     console.error('storage:clear error:', error)

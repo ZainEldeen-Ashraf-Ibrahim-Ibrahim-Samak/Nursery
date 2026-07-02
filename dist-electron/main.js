@@ -15053,7 +15053,7 @@ var migrations = [
 			try {
 				db.exec("ALTER TABLE salary_payments ADD COLUMN updated_at TEXT;");
 			} catch {}
-			db.exec("UPDATE salary_payments SET updated_at = (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')) WHERE updated_at IS NULL;");
+			db.exec("UPDATE salary_payments SET updated_at = COALESCE(paid_date, '2000-01-01T00:00:00Z') WHERE updated_at IS NULL;");
 			try {
 				db.exec("ALTER TABLE expenses ADD COLUMN updated_at TEXT;");
 			} catch {}
@@ -15151,7 +15151,7 @@ var migrations = [
 			try {
 				db.exec("ALTER TABLE settings ADD COLUMN synced INTEGER DEFAULT 0;");
 			} catch {}
-			db.exec("UPDATE settings SET updated_at = (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')) WHERE updated_at IS NULL;");
+			db.exec("UPDATE settings SET updated_at = '2000-01-01T00:00:00Z' WHERE updated_at IS NULL;");
 		}
 	},
 	{
@@ -28299,14 +28299,33 @@ ipcMain.handle("storage:clear", async (_event, { confirm }) => {
 		requireAdmin();
 		if (!confirm) throw new Error("Explicit confirmation required to clear data");
 		const db = getDb();
-		db.transaction(() => {
-			db.prepare("DELETE FROM payments").run();
-			db.prepare("DELETE FROM salary_payments").run();
-			db.prepare("DELETE FROM expenses").run();
-			db.prepare("DELETE FROM sync_log").run();
-			db.prepare("DELETE FROM children").run();
-			db.prepare("DELETE FROM employees").run();
-		})();
+		db.pragma("foreign_keys = OFF");
+		try {
+			db.transaction(() => {
+				db.prepare("DELETE FROM payments").run();
+				db.prepare("DELETE FROM payment_transactions").run();
+				db.prepare("DELETE FROM salary_payments").run();
+				db.prepare("DELETE FROM employee_deductions").run();
+				db.prepare("DELETE FROM expenses").run();
+				db.prepare("DELETE FROM sync_log").run();
+				db.prepare("DELETE FROM tombstones").run();
+				db.prepare("DELETE FROM child_services").run();
+				db.prepare("DELETE FROM children").run();
+				db.prepare("DELETE FROM session_teachers").run();
+				db.prepare("DELETE FROM scheduled_sessions").run();
+				db.prepare("DELETE FROM service_teachers").run();
+				db.prepare("DELETE FROM attendance_records").run();
+				db.prepare("DELETE FROM attendance_conflicts").run();
+				db.prepare("DELETE FROM teacher_payments").run();
+				db.prepare("DELETE FROM attendance_edit_requests").run();
+				db.prepare("DELETE FROM attendance_audit_log").run();
+				db.prepare("DELETE FROM notifications").run();
+				db.prepare("DELETE FROM imported_snapshots").run();
+				db.prepare("DELETE FROM employees").run();
+			})();
+		} finally {
+			db.pragma("foreign_keys = ON");
+		}
 		return { ok: true };
 	} catch (error) {
 		console.error("storage:clear error:", error);
@@ -29057,12 +29076,17 @@ ipcMain.handle("sync:push", async (event) => {
 });
 /**
 * sync:pull — Pull records from MongoDB that are newer than local.
-* Applies conflict resolution (most-recent updated_at wins, id tie-break).
+* Applies conflict resolution (most-recent updated_at wins, id tie-break), unless
+* `force: true` is passed, in which case every matching cloud record overwrites local
+* unconditionally — for restoring/importing known-good cloud data onto a machine whose local
+* rows have stale-but-technically-"newer" timestamps (e.g. from an old migration backfill bug)
+* that would otherwise make sync:pull report everything as "skipped".
 * Admin only.
 */
-ipcMain.handle("sync:pull", async (event) => {
+ipcMain.handle("sync:pull", async (event, args) => {
 	try {
 		requireAdmin();
+		args?.force;
 		const db = getDb();
 		const { connected } = getConnectionStatus();
 		if (!connected) {

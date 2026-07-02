@@ -155,5 +155,56 @@ describe('Storage IPC Contract tests', () => {
       adminSession()
       await expect(handler(null, { confirm: false })).rejects.toThrow()
     })
+
+    it('should clear all data tables when confirmed by admin', async () => {
+      const handler = getHandlers()['storage:clear']
+      const statsHandler = getHandlers()['storage:stats']
+
+      // Insert dummy child & employee & payment to ensure we have data to clear
+      const now = new Date().toISOString()
+      db.prepare(`
+        INSERT INTO children (name, guardian, guardian_phone, reg_date, created_at, updated_at, service, unit, price)
+        VALUES ('Test Child', 'Test Guardian', '0123456789', '2026-07-02', ?, ?, 'حضانة', 'monthly', 1000)
+      `).run(now, now)
+      
+      const childId = db.prepare("SELECT last_insert_rowid() as id").get().id
+
+      db.prepare(`
+        INSERT INTO child_services (child_id, service, unit, price, created_at, updated_at)
+        VALUES (?, 'حضانة', 'monthly', 1000, ?, ?)
+      `).run(childId, now, now)
+
+      const serviceId = db.prepare("SELECT last_insert_rowid() as id").get().id
+
+      db.prepare(`
+        INSERT INTO payments (child_id, service_id, month, year, service, unit, price, total, balance, status, created_at, updated_at)
+        VALUES (?, ?, 'July', 2026, 'حضانة', 'monthly', 1000, 1000, 1000, 'unpaid', ?, ?)
+      `).run(childId, serviceId, now, now)
+
+      db.prepare(`
+        INSERT INTO employees (name, role, base_salary, net_salary, created_at, updated_at)
+        VALUES ('Test Employee', 'teacher', 2000, 2000, ?, ?)
+      `).run(now, now)
+
+      adminSession()
+      
+      const statsBefore = await statsHandler(null)
+      expect(statsBefore.counts.children).toBeGreaterThan(0)
+      expect(statsBefore.counts.payments).toBeGreaterThan(0)
+      expect(statsBefore.counts.employees).toBeGreaterThan(0)
+
+      // Clear the data
+      const clearResult = await handler(null, { confirm: true })
+      expect(clearResult.ok).toBe(true)
+
+      // Call stats again to confirm everything has been cleared to 0
+      const statsAfter = await statsHandler(null)
+      expect(statsAfter.counts.children).toBe(0)
+      expect(statsAfter.counts.payments).toBe(0)
+      expect(statsAfter.counts.employees).toBe(0)
+
+      // Re-seed the database so subsequent/other tests aren't impacted
+      await seedDatabase(db)
+    })
   })
 })

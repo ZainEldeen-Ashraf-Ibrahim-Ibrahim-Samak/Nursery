@@ -48,7 +48,7 @@ interface SyncState {
   reconnect: () => Promise<boolean>
   disconnect: () => Promise<void>
   push: () => Promise<void>
-  pull: () => Promise<void>
+  pull: (force?: boolean) => Promise<void>
   setAutoSync: (enabled: boolean, intervalMinutes?: number) => Promise<void>
   clearError: () => void
 }
@@ -138,10 +138,10 @@ export const useSyncStore = create<SyncState>((set, get) => ({
     }
   },
 
-  pull: async () => {
+  pull: async (force = false) => {
     set({ isPulling: true, error: null, lastPullResults: null })
     try {
-      const result = await window.api.sync.pull()
+      const result = await window.api.sync.pull(force)
       set({ lastPullResults: result.results, isPulling: false })
       await get().fetchStatus()
     } catch (err: any) {

@@ -241,12 +241,17 @@ ipcMain.handle('sync:push', async (event) => {
 
 /**
  * sync:pull — Pull records from MongoDB that are newer than local.
- * Applies conflict resolution (most-recent updated_at wins, id tie-break).
+ * Applies conflict resolution (most-recent updated_at wins, id tie-break), unless
+ * `force: true` is passed, in which case every matching cloud record overwrites local
+ * unconditionally — for restoring/importing known-good cloud data onto a machine whose local
+ * rows have stale-but-technically-"newer" timestamps (e.g. from an old migration backfill bug)
+ * that would otherwise make sync:pull report everything as "skipped".
  * Admin only.
  */
-ipcMain.handle('sync:pull', async (event) => {
+ipcMain.handle('sync:pull', async (event, args) => {
   try {
     requireAdmin()
+    const force = args?.force === true
     const db = getDb()
     const { connected } = getConnectionStatus()
 
@@ -333,7 +338,7 @@ ipcMain.handle('sync:pull', async (event) => {
                  local.id = local.key as any
               }
               
-              const winner = resolveConflict(local, cloudRecord)
+              const winner = force ? 'cloud' : resolveConflict(local, cloudRecord)
               if (winner === 'cloud') {
                 // Update local with cloud data
                 const columns = Object.keys(cloudRecord).filter((k) => k !== '_id' && k !== 'id' && k !== '__v')

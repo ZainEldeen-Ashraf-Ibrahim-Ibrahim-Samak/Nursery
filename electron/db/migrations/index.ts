@@ -163,7 +163,12 @@ const migrations: Migration[] = [
       } catch {
         // Ignore if already exists
       }
-      db.exec("UPDATE salary_payments SET updated_at = (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')) WHERE updated_at IS NULL;")
+      // Backfill to a fixed old sentinel (NOT "now") — stamping legacy rows with the current
+      // migration time would make them look artificially freshest, so sync:pull's
+      // most-recent-wins conflict resolution would always keep this local row and skip real,
+      // older-but-still-newer-than-epoch cloud data. A sentinel from before this app existed
+      // guarantees any genuine cloud update_at wins the conflict.
+      db.exec("UPDATE salary_payments SET updated_at = COALESCE(paid_date, '2000-01-01T00:00:00Z') WHERE updated_at IS NULL;")
 
       // Add updated_at column to expenses
       try {
@@ -269,7 +274,10 @@ const migrations: Migration[] = [
       } catch {
         // Ignore if already exists
       }
-      db.exec("UPDATE settings SET updated_at = (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')) WHERE updated_at IS NULL;")
+      // Same fix as salary_payments above (migration 003) — a fixed old sentinel, not "now",
+      // so sync:pull's conflict resolution doesn't treat every legacy settings row as
+      // freshest-by-definition and silently skip real cloud updates during pull.
+      db.exec("UPDATE settings SET updated_at = '2000-01-01T00:00:00Z' WHERE updated_at IS NULL;")
     }
   },
   {
