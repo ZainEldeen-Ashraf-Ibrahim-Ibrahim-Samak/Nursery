@@ -28328,7 +28328,6 @@ ipcMain.handle("storage:clear", async (_event, { confirm }) => {
 		try {
 			const { getMongoUri } = await Promise.resolve().then(() => syncIPC_exports);
 			const mongoUri = getMongoUri();
-			console.log("[DEBUG] process.env.NODE_ENV is:", process.env.NODE_ENV);
 			if (mongoUri && process.env.NODE_ENV !== "test") {
 				const { getConnectionStatus, connectMongo, disconnectMongo, SYNC_ENTITIES } = await import("./mongoSync-BoUHKGTi.js");
 				const status = getConnectionStatus();
