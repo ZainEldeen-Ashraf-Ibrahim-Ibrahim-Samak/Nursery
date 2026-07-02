@@ -310,7 +310,7 @@ outstanding balance appear — independent of every other story.
       an error, across all four export types (FR-009)
 - [X] T062 [P] Verify graceful handling when no company logo is configured (Edge Cases) across all
       export/print outputs
-- [ ] T063 Confirm `ReportActions.tsx` (T004) is the single component used by all four report screens,
+- [X] T063 Confirm `ReportActions.tsx` (T004) is the single component used by all four report screens,
       with no per-page duplicate button markup
 - [ ] T064 Run the full `quickstart.md` validation (all 10 scenarios) end-to-end against a dev build
 
