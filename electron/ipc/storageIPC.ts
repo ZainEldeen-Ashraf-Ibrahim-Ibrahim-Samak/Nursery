@@ -230,7 +230,7 @@ ipcMain.handle('storage:clear', async (_event, { confirm }) => {
     try {
       const { getMongoUri } = await import('./syncIPC.js')
       const mongoUri = getMongoUri()
-      if (mongoUri) {
+      if (mongoUri && process.env.NODE_ENV !== 'test') {
         const { getConnectionStatus, connectMongo, disconnectMongo, SYNC_ENTITIES } = await import('../services/mongoSync.js')
         const status = getConnectionStatus()
         let tempConnected = false
