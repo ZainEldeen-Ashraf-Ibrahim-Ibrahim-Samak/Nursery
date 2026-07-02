@@ -25,6 +25,7 @@ win:
   target: nsis
   icon: assets/branding/icon.ico
   executableName: NurseryManagementSystem
+  artifactName: nursery-management-system-setup-${version}.${ext}
 mac:
   target: dmg
   icon: assets/branding/icon.icns
