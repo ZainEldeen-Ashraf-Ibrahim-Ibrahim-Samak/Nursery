@@ -515,8 +515,7 @@ export default function SalariesList() {
           <div className="bg-slate-100 p-1 rounded-lg flex self-start">
             <button
               onClick={() => setActiveTab('payroll')}
-              className={`px-4 py-1.5 rounded-md text-xs font-semibold transition-all ${
-                activeTab === 'payroll'
+              className={`px-4 py-1.5 rounded-md text-xs font-semibold transition-all ${activeTab === 'payroll'
                   ? 'bg-white text-slate-800 shadow-sm'
                   : 'text-slate-500 hover:text-slate-800'
               }`}
