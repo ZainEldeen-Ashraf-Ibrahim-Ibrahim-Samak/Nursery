@@ -83,7 +83,7 @@ export interface Payment {
   created_at: string
   updated_at: string
   synced: number // 0 or 1
-  
+
   // Optional join field for UI
   child_name?: string
   // Pro-rating audit (feature 005)
@@ -232,7 +232,7 @@ export interface SalaryPayment {
   notes?: string | null
   updated_at?: string
   synced: number // 0 or 1
-  
+
   // Optional join fields for UI
   employee_name?: string
   employee_role?: string

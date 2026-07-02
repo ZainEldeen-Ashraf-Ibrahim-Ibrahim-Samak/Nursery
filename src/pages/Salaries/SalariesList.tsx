@@ -28,7 +28,7 @@ const yearsList = [2024, 2025, 2026, 2027, 2028, 2029, 2030]
 export default function SalariesList() {
   const { t, i18n } = useTranslation()
   const { exportSalaries } = useExport()
-  
+
   const {
     employees,
     salaryPayments,
@@ -471,8 +471,8 @@ export default function SalariesList() {
       header: t('status'),
       render: (row: Employee) => (
         <Badge variant={row.is_active ? 'success' : 'danger'}>
-          {row.is_active 
-            ? (i18n.language === 'ar' ? 'نشط' : 'Active') 
+          {row.is_active
+            ? (i18n.language === 'ar' ? 'نشط' : 'Active')
             : (i18n.language === 'ar' ? 'غير نشط' : 'Inactive')}
         </Badge>
       ),
@@ -503,7 +503,7 @@ export default function SalariesList() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900">{i18n.language === 'ar' ? 'إدارة رواتب الموظفين' : 'Staff Salaries Management'}</h1>
           <p className="text-sm text-slate-500 mt-1">
-            {i18n.language === 'ar' 
+            {i18n.language === 'ar'
               ? 'إدارة سجلات الموظفين وصرف رواتبهم الشهرية والبدلات والمكافآت.'
               : 'Manage employee profiles, monthly payroll distributions, bonuses, and allowances.'}
           </p>
@@ -518,17 +518,16 @@ export default function SalariesList() {
               className={`px-4 py-1.5 rounded-md text-xs font-semibold transition-all ${activeTab === 'payroll'
                   ? 'bg-white text-slate-800 shadow-sm'
                   : 'text-slate-500 hover:text-slate-800'
-              }`}
+                }`}
             >
               💵 {i18n.language === 'ar' ? 'المسيرات الشهرية' : 'Monthly Payroll'}
             </button>
             <button
               onClick={() => setActiveTab('employees')}
-              className={`px-4 py-1.5 rounded-md text-xs font-semibold transition-all ${
-                activeTab === 'employees'
+              className={`px-4 py-1.5 rounded-md text-xs font-semibold transition-all ${activeTab === 'employees'
                   ? 'bg-white text-slate-800 shadow-sm'
                   : 'text-slate-500 hover:text-slate-800'
-              }`}
+                }`}
             >
               👥 {i18n.language === 'ar' ? 'دليل الموظفين' : 'Employee Directory'}
             </button>
@@ -644,7 +643,7 @@ export default function SalariesList() {
       >
         <form onSubmit={handleAddEmployee} className="space-y-4 mt-2">
           {formError && <Alert variant="danger" title={t('error')}>{formError}</Alert>}
-          
+
           <Input
             label={i18n.language === 'ar' ? 'الاسم الكامل' : 'Full Name'}
             value={empName}
@@ -700,7 +699,7 @@ export default function SalariesList() {
       >
         <form onSubmit={handleEditEmployee} className="space-y-4 mt-2">
           {formError && <Alert variant="danger" title={t('error')}>{formError}</Alert>}
-          
+
           <Input
             label={i18n.language === 'ar' ? 'الاسم الكامل' : 'Full Name'}
             value={empName}
