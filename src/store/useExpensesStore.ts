@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { Expense } from '../types/index.js'
+import { friendlyError } from '../utils/errors.js'
 
 const arabicMonths = [
   'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
