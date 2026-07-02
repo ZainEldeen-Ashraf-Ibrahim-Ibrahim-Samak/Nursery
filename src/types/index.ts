@@ -174,12 +174,18 @@ export interface AttendanceRecord {
   child_photo_url?: string | null
   teacher_id?: number | null
   teacher_name?: string | null
+  teacher_session_rate?: number | null
   status: AttendanceStatus
   excuse_notes: string | null
   recorded_by: number | null
   recorded_at: string
   updated_at: string
   synced: number
+
+  // Feature 006 — attendance-based teacher payments
+  attended_teacher_id?: number | null
+  teacher_status?: 'present' | 'absent' | null
+  payment?: { generated: boolean; amount: number | null; status: TeacherPaymentStatus | null }
 }
 
 export interface AttendanceConflict {
@@ -218,6 +224,53 @@ export interface Employee {
   created_at: string
   updated_at?: string
   synced: number // 0 or 1
+
+  // Feature 006 — attendance-based teacher payments
+  teacher_session_rate?: number | null
+}
+
+export interface ServiceTeacher {
+  id: number
+  service_id: number
+  employee_id: number
+  created_at: string
+  synced: number
+}
+
+export type TeacherPaymentStatus = 'pending' | 'paid' | 'void'
+
+export interface TeacherPayment {
+  id: number
+  teacher_id: number
+  teacher_name?: string
+  child_id: number
+  child_name?: string
+  attendance_record_id: number
+  attendance_date: string
+  session_cost: number
+  status: TeacherPaymentStatus
+  created_at: string
+  updated_at: string
+  synced: number
+}
+
+export interface PayrollReportRow {
+  teacher_id: number
+  teacher_name: string
+  sessions_paid: number
+  session_cost: number
+  total_salary: number
+}
+
+export interface AttendanceHistoryRow {
+  attendance_date: string
+  teacher_id: number | null
+  teacher_name: string | null
+  teacher_status: 'present' | 'absent' | null
+  child_status: AttendanceStatus
+  payment_generated: boolean
+  payment_status: TeacherPaymentStatus | null
+  session_cost: number | null
 }
 
 export interface SalaryPayment {

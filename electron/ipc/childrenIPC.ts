@@ -260,42 +260,53 @@ ipcMain.handle('children:update', async (_event, { id, patch }) => {
       }
 
       if (enrollments) {
-        // Collect existing child_services rows to detect removals (for payment FK remapping)
-        const existingServices = db.prepare('SELECT id, service FROM child_services WHERE child_id = ?').all(id) as { id: number; service: string }[]
+        // A child can now have more than one enrollment with the SAME service name (feature
+        // 006 — multiple teachers for the same service), so service NAME can no longer
+        // disambiguate which payment belongs to which enrollment. Existing rows are matched
+        // and updated IN PLACE by id (preserving their id, and therefore every payment's
+        // service_id FK, untouched) instead of deleting everything and re-linking by name —
+        // that old approach could collapse two same-named enrollments' payments onto a single
+        // service_id and hit payments' UNIQUE(child_id, service_id, month, year) constraint.
+        const existingServices = db.prepare('SELECT id FROM child_services WHERE child_id = ?').all(id) as { id: number }[]
+        const existingIds = new Set(existingServices.map((e) => e.id))
+        const incomingIds = new Set(enrollments.filter((s: any) => s.id != null).map((s: any) => Number(s.id)))
 
-        // Determine which existing rows to keep: match by position/id if provided, else fall back to service name
-        const incomingIds = new Set(enrollments.filter((s: any) => s.id).map((s: any) => Number(s.id)))
-        const incomingServiceNames = new Set(enrollments.map((s: any) => s.service as string))
-
-        // Remove rows that are gone (not referenced by id or service name in new list)
-        const removedIds = existingServices
-          .filter(e => !incomingIds.has(e.id) && !incomingServiceNames.has(e.service))
-          .map(e => e.id)
+        // Remove only rows genuinely dropped from the form (existed before, not present now).
+        const removedIds = [...existingIds].filter((eid) => !incomingIds.has(eid))
         if (removedIds.length > 0) {
           const placeholders = removedIds.map(() => '?').join(',')
           db.prepare(`UPDATE payments SET service_id = NULL WHERE child_id = ? AND service_id IN (${placeholders})`).run(id, ...removedIds)
           db.prepare(`DELETE FROM child_services WHERE id IN (${placeholders})`).run(...removedIds)
         }
 
-        // Delete ALL existing rows and re-insert so ordering / duplicates are handled cleanly
-        db.prepare(`UPDATE payments SET service_id = NULL WHERE child_id = ?`).run(id)
-        db.prepare(`DELETE FROM child_services WHERE child_id = ?`).run(id)
-
+        const updateSvc = db.prepare(`
+          UPDATE child_services
+          SET service = ?, unit = ?, price = ?, teacher_id = ?, lesson_days = ?, extra_lessons = ?, session_price = ?, updated_at = ?, synced = 0
+          WHERE id = ? AND child_id = ?
+        `)
         const insertSvc = db.prepare(`INSERT INTO child_services (child_id, service, unit, price, teacher_id, lesson_days, extra_lessons, session_price, created_at, updated_at, synced) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`)
         for (const s of enrollments) {
           const sTeacherId = s.teacher_id != null && s.teacher_id !== '' ? Number(s.teacher_id) : null
           const sLessonDays = Array.isArray(s.lesson_days) ? JSON.stringify(s.lesson_days) : (s.lesson_days || null)
           const sExtraLessons = s.extra_lessons != null ? Number(s.extra_lessons) : 0
           const sSessionPrice = s.session_price != null && s.session_price !== '' ? Number(s.session_price) : null
-          insertSvc.run(id, s.service, s.unit, s.price, sTeacherId, sLessonDays, sExtraLessons, sSessionPrice, now, now)
+          const existingId = s.id != null ? Number(s.id) : null
+          if (existingId != null && existingIds.has(existingId)) {
+            updateSvc.run(s.service, s.unit, s.price, sTeacherId, sLessonDays, sExtraLessons, sSessionPrice, now, existingId, id)
+          } else {
+            insertSvc.run(id, s.service, s.unit, s.price, sTeacherId, sLessonDays, sExtraLessons, sSessionPrice, now, now)
+          }
         }
 
-        // Re-link payments to the new service rows by service name
+        // Only brand-new enrollments (no prior id — never had a payment linked to them) fall
+        // back to matching by name, and only among child_services rows that still have no
+        // payments pointing at them.
         db.prepare(`
           UPDATE payments
           SET service_id = (
             SELECT cs.id FROM child_services cs
             WHERE cs.child_id = payments.child_id AND cs.service = payments.service
+              AND NOT EXISTS (SELECT 1 FROM payments p2 WHERE p2.service_id = cs.id)
             LIMIT 1
           )
           WHERE child_id = ? AND service_id IS NULL

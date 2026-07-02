@@ -29,9 +29,9 @@ Single-repo Electron app: `electron/` (main process), `src/` (React renderer). S
 **Purpose**: Translation scaffolding shared by every story's UI work, so no story phase has to touch the
 same i18n files as another.
 
-- [ ] T001 [P] Add empty key groups `teacherPayments`, `serviceTeachers`, `payrollReport`,
+- [X] T001 [P] Add empty key groups `teacherPayments`, `serviceTeachers`, `payrollReport`,
   `attendanceHistory` to `src/i18n/en.json`
-- [ ] T002 [P] Add matching Arabic key groups `teacherPayments`, `serviceTeachers`, `payrollReport`,
+- [X] T002 [P] Add matching Arabic key groups `teacherPayments`, `serviceTeachers`, `payrollReport`,
   `attendanceHistory` to `src/i18n/ar.json`
 
 ---
@@ -44,26 +44,26 @@ avoid every story editing the same file.
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete.
 
-- [ ] T003 Add migration `026_service_teachers` (new `service_teachers` table) in
+- [X] T003 Add migration `026_service_teachers` (new `service_teachers` table) in
   `electron/db/migrations/index.ts` per data-model.md
-- [ ] T004 Add migration `027_teacher_session_rate` (guarded `ALTER TABLE employees ADD COLUMN
+- [X] T004 Add migration `027_teacher_session_rate` (guarded `ALTER TABLE employees ADD COLUMN
   teacher_session_rate REAL`) in `electron/db/migrations/index.ts` per data-model.md
-- [ ] T005 Add migration `028_attendance_teacher_status` (guarded `ALTER TABLE attendance_records ADD
+- [X] T005 Add migration `028_attendance_teacher_status` (guarded `ALTER TABLE attendance_records ADD
   COLUMN attended_teacher_id`, `ADD COLUMN teacher_status`, plus best-effort backfill of existing rows) in
   `electron/db/migrations/index.ts` per data-model.md
-- [ ] T006 Add migration `029_teacher_payments` (new `teacher_payments` table with
+- [X] T006 Add migration `029_teacher_payments` (new `teacher_payments` table with
   `UNIQUE(teacher_id, child_id, attendance_date)` and its two indexes) in
   `electron/db/migrations/index.ts` per data-model.md
-- [ ] T007 Add `ServiceTeacher`, `TeacherPayment`, `PayrollReportRow`, `AttendanceHistoryRow` interfaces
+- [X] T007 Add `ServiceTeacher`, `TeacherPayment`, `PayrollReportRow`, `AttendanceHistoryRow` interfaces
   and extend `Employee` (`teacher_session_rate`) and `AttendanceRecord` (`attended_teacher_id`,
   `teacher_status`) in `src/types/index.ts` per contracts/ipc-contracts.md
-- [ ] T008 Add `serviceTeacherSchema` and `teacherPaymentSchema`, extend `employeeSchema` and
+- [X] T008 Add `serviceTeacherSchema` and `teacherPaymentSchema`, extend `employeeSchema` and
   `attendanceRecordSchema`, and register `service_teachers` + `teacher_payments` in `SYNC_ENTITIES` in
   `electron/services/mongoSync.ts` per data-model.md
-- [ ] T009 Create `electron/ipc/serviceTeachersIPC.ts` and `electron/ipc/teacherPaymentsIPC.ts` and
+- [X] T009 Create `electron/ipc/serviceTeachersIPC.ts` and `electron/ipc/teacherPaymentsIPC.ts` and
   `electron/ipc/payrollIPC.ts` as empty handler-registration files (imported next), so subsequent story
   tasks only add handlers to existing files
-- [ ] T010 Import `serviceTeachersIPC`, `teacherPaymentsIPC`, and `payrollIPC` in `electron/main.ts`
+- [X] T010 Import `serviceTeachersIPC`, `teacherPaymentsIPC`, and `payrollIPC` in `electron/main.ts`
   alongside the other IPC module imports
 
 **Checkpoint**: Schema, types, and sync are ready — user story implementation can now begin.
@@ -82,11 +82,11 @@ reload and are returned by `employees:get`.
 
 ### Implementation for User Story 3
 
-- [ ] T011 [US3] Accept and persist `teacher_session_rate` in `employees:add` and `employees:update` in
+- [X] T011 [US3] Accept and persist `teacher_session_rate` in `employees:add` and `employees:update` in
   `electron/ipc/salariesIPC.ts`
-- [ ] T012 [US3] Add "Per Session Cost" numeric field to the teacher edit form in
+- [X] T012 [US3] Add "Per Session Cost" numeric field to the teacher edit form in
   `src/pages/Employees/EmployeesList.tsx`, wired to `teacher_session_rate`
-- [ ] T013 [US3] Add unit test for `employees:add`/`employees:update` persisting
+- [X] T013 [US3] Add unit test for `employees:add`/`employees:update` persisting
   `teacher_session_rate` (including `null`) in `electron/ipc/salariesIPC.test.ts`
 
 **Checkpoint**: Teachers have independently configurable per-session rates, visible everywhere `Employee`
@@ -103,15 +103,15 @@ is fetched.
 
 ### Implementation for User Story 4
 
-- [ ] T014 [P] [US4] Implement `serviceTeachers:list` and `serviceTeachers:set` handlers in
+- [X] T014 [P] [US4] Implement `serviceTeachers:list` and `serviceTeachers:set` handlers in
   `electron/ipc/serviceTeachersIPC.ts` per contracts/ipc-contracts.md
-- [ ] T015 [US4] Add `serviceTeachers` bridge entries (`list`, `set`) in `electron/preload.ts`
-- [ ] T016 [US4] Add a teacher multi-select control to the service editor in
+- [X] T015 [US4] Add `serviceTeachers` bridge entries (`list`, `set`) in `electron/preload.ts`
+- [X] T016 [US4] Add a teacher multi-select control to the service editor in
   `src/pages/Settings/ServiceDefinitions.tsx`, backed by `serviceTeachers:list`/`set`
-- [ ] T017 [US4] Scope the teacher dropdown in the enrollment section of
+- [X] T017 [US4] Scope the teacher dropdown in the enrollment section of
   `src/pages/Children/ChildForm.tsx` to `serviceTeachers:list` results for the selected service (falling
   back to the existing full `teachers:list` when a service has no configured teacher list)
-- [ ] T018 [P] [US4] Add unit test for `serviceTeachers:set` replacing the full list for a service in
+- [X] T018 [P] [US4] Add unit test for `serviceTeachers:set` replacing the full list for a service in
   `electron/ipc/serviceTeachersIPC.test.ts`
 
 **Checkpoint**: Services support multiple teachers; enrollment UI reflects the correct roster per service.
@@ -129,13 +129,13 @@ form leaves no payment/balance trace.
 
 ### Implementation for User Story 2
 
-- [ ] T019 [US2] Implement `childServices:previewTeacherCost` handler in
+- [X] T019 [US2] Implement `childServices:previewTeacherCost` handler in
   `electron/ipc/childServicesIPC.ts` (weekday-matching remaining-session count × `teacher_session_rate`)
   per research.md #5 and contracts/ipc-contracts.md
-- [ ] T020 [US2] Add `childServices.previewTeacherCost` bridge entry in `electron/preload.ts`
-- [ ] T021 [US2] Show a live "Remaining sessions this month: N · Expected cost: X EGP" preview in the
+- [X] T020 [US2] Add `childServices.previewTeacherCost` bridge entry in `electron/preload.ts`
+- [X] T021 [US2] Show a live "Remaining sessions this month: N · Expected cost: X EGP" preview in the
   enrollment section of `src/pages/Children/ChildForm.tsx`, recomputed on teacher/lesson-day change
-- [ ] T022 [P] [US2] Add unit test for `childServices:previewTeacherCost` covering: mid-month assignment,
+- [X] T022 [P] [US2] Add unit test for `childServices:previewTeacherCost` covering: mid-month assignment,
   zero-remaining-sessions edge case, and a teacher with `teacher_session_rate = null` in
   `electron/ipc/childServicesIPC.test.ts`
 
@@ -154,10 +154,10 @@ attendance is recorded.
 
 ### Implementation for User Story 1
 
-- [ ] T023 [US1] Audit `childServicesIPC.ts` and `childrenIPC.ts` enrollment/assignment code paths to
+- [X] T023 [US1] Audit `childServicesIPC.ts` and `childrenIPC.ts` enrollment/assignment code paths to
   confirm no write touches `employees`, `salary_payments`, or session-count fields as a side effect of
   saving a `child_services`/`children.teacher_id` assignment; remove any such write if found
-- [ ] T024 [US1] Add a regression test asserting a teacher's `attendance:getSummary` and `employees:get`
+- [X] T024 [US1] Add a regression test asserting a teacher's `attendance:getSummary` and `employees:get`
   net salary are identical before and after assigning N children to them (no attendance recorded) in
   `electron/ipc/childServicesIPC.test.ts`
 
@@ -176,20 +176,20 @@ only for teacher-present + child-present, and teacher-present + child-absent-une
 
 ### Implementation for User Story 5
 
-- [ ] T025 [US5] Accept `teacher_status` per record and snapshot `attended_teacher_id` (from the child's
+- [X] T025 [US5] Accept `teacher_status` per record and snapshot `attended_teacher_id` (from the child's
   current `child_services.teacher_id`/`children.teacher_id` for that service) when upserting
   `attendance_records` in `electron/ipc/attendanceIPC.ts` (`attendance:record`)
-- [ ] T026 [US5] Implement the payment-eligibility evaluation (FR-008…FR-011) inside the same
+- [X] T026 [US5] Implement the payment-eligibility evaluation (FR-008…FR-011) inside the same
   `attendance:record` transaction: upsert a `pending` `teacher_payments` row (snapshotting
   `teacher_session_rate` as `session_cost`) when payable, in `electron/ipc/attendanceIPC.ts` (depends on
   T025)
-- [ ] T027 [US5] Implement `teacherPayments:list` handler in `electron/ipc/teacherPaymentsIPC.ts` per
+- [X] T027 [US5] Implement `teacherPayments:list` handler in `electron/ipc/teacherPaymentsIPC.ts` per
   contracts/ipc-contracts.md
-- [ ] T028 [US5] Add `teacherPayments.list` and `teacherPayments.markPaid` bridge entries in
+- [X] T028 [US5] Add `teacherPayments.list` and `teacherPayments.markPaid` bridge entries in
   `electron/preload.ts` (markPaid handler itself is implemented in US6, T032)
-- [ ] T029 [US5] Add a teacher-status control (Present/Absent) alongside the existing child-status control
+- [X] T029 [US5] Add a teacher-status control (Present/Absent) alongside the existing child-status control
   in the attendance UI in `src/pages/Sessions/SessionsList.tsx`
-- [ ] T030 [US5] Add unit tests covering all five payment-eligibility cases (payable and non-payable) for
+- [X] T030 [US5] Add unit tests covering all five payment-eligibility cases (payable and non-payable) for
   `attendance:record` in `electron/ipc/attendanceIPC.test.ts`
 
 **Checkpoint**: Attendance saves automatically and correctly generate teacher payments per the five rules.
@@ -208,15 +208,15 @@ teacher/child/date, with correct status transitions.
 
 ### Implementation for User Story 6
 
-- [ ] T031 [US6] Extend the T026 payment evaluation in `electron/ipc/attendanceIPC.ts` so a disqualifying
+- [X] T031 [US6] Extend the T026 payment evaluation in `electron/ipc/attendanceIPC.ts` so a disqualifying
   edit sets an existing `pending` `teacher_payments` row to `void` (never deletes it, never touches a
   `paid` row), and a requalifying edit on a `void` row moves it back to `pending` with a fresh
   `session_cost` snapshot at the current rate (depends on T026)
-- [ ] T032 [US6] Implement `teacherPayments:markPaid` handler (`pending` → `paid` only) in
+- [X] T032 [US6] Implement `teacherPayments:markPaid` handler (`pending` → `paid` only) in
   `electron/ipc/teacherPaymentsIPC.ts`
-- [ ] T033 [US6] Wire attendance deletion (`attendance:delete` in `electron/ipc/attendanceIPC.ts`) to void
+- [X] T033 [US6] Wire attendance deletion (`attendance:delete` in `electron/ipc/attendanceIPC.ts`) to void
   (not leave orphaned) any associated `pending` `teacher_payments` row, consistent with T031
-- [ ] T034 [P] [US6] Add unit tests for: repeated identical saves produce one row; disqualify → void;
+- [X] T034 [P] [US6] Add unit tests for: repeated identical saves produce one row; disqualify → void;
   requalify → pending with new snapshot; `paid` rows are never auto-voided; deleting attendance voids the
   pending payment, in `electron/ipc/attendanceIPC.test.ts`
 
@@ -235,17 +235,17 @@ and amount for every record.
 
 ### Implementation for User Story 7
 
-- [ ] T035 [US7] Extend `attendance:getSheet` in `electron/ipc/attendanceIPC.ts` to join
+- [X] T035 [US7] Extend `attendance:getSheet` in `electron/ipc/attendanceIPC.ts` to join
   `teacher_payments` and return `teacher_status`, `attended_teacher_id`, and a `payment` object per row
-- [ ] T036 [US7] Implement `attendance:getChildHistory` handler in `electron/ipc/attendanceIPC.ts` per
+- [X] T036 [US7] Implement `attendance:getChildHistory` handler in `electron/ipc/attendanceIPC.ts` per
   contracts/ipc-contracts.md (`AttendanceHistoryRow[]`)
-- [ ] T037 [US7] Add `attendance.getChildHistory` bridge entry in `electron/preload.ts`
-- [ ] T038 [US7] Add "Generated Payment" and "Payment Amount" columns to the attendance table in
+- [X] T037 [US7] Add `attendance.getChildHistory` bridge entry in `electron/preload.ts`
+- [X] T038 [US7] Add "Generated Payment" and "Payment Amount" columns to the attendance table in
   `src/pages/Sessions/SessionsList.tsx` (depends on T035)
-- [ ] T039 [US7] Add an "Attendance History" section to `src/pages/Children/ChildStatement.tsx` listing
+- [X] T039 [US7] Add an "Attendance History" section to `src/pages/Children/ChildStatement.tsx` listing
   date, teacher, teacher status, child status, excused/not, payment-generated flag, and session cost
   (depends on T036, T037)
-- [ ] T040 [P] [US7] Add unit test for `attendance:getChildHistory` field completeness and ordering in
+- [X] T040 [P] [US7] Add unit test for `attendance:getChildHistory` field completeness and ordering in
   `electron/ipc/attendanceIPC.test.ts`
 
 **Checkpoint**: Both attendance and child-profile views give a transparent, matching picture of every
@@ -263,14 +263,14 @@ teacher at a known rate; the report's sessions-paid and total-salary figures mat
 
 ### Implementation for User Story 8
 
-- [ ] T041 [US8] Implement `payroll:report` handler in `electron/ipc/payrollIPC.ts` per
+- [X] T041 [US8] Implement `payroll:report` handler in `electron/ipc/payrollIPC.ts` per
   contracts/ipc-contracts.md (group `teacher_payments` by teacher/month, excluding `void`)
-- [ ] T042 [US8] Add `payroll.report` bridge entry in `electron/preload.ts`
-- [ ] T043 [US8] Create `src/pages/Salaries/PayrollReport.tsx` (month/year picker + per-teacher table:
+- [X] T042 [US8] Add `payroll.report` bridge entry in `electron/preload.ts`
+- [X] T043 [US8] Create `src/pages/Salaries/PayrollReport.tsx` (month/year picker + per-teacher table:
   name, sessions paid, session cost, total salary)
-- [ ] T044 [US8] Add a route for the payroll report page and a link to it from
+- [X] T044 [US8] Add a route for the payroll report page and a link to it from
   `src/pages/Salaries/SalariesList.tsx`
-- [ ] T045 [P] [US8] Add unit test for `payroll:report` aggregation (mixed pending/paid/void rows across
+- [X] T045 [P] [US8] Add unit test for `payroll:report` aggregation (mixed pending/paid/void rows across
   two teachers and two months) in `electron/ipc/payrollIPC.test.ts`
 
 **Checkpoint**: All eight user stories are independently functional; payroll report reconciles with raw
@@ -282,13 +282,13 @@ attendance data.
 
 **Purpose**: Access-control hardening and end-to-end verification across all stories.
 
-- [ ] T046 [P] Enforce `requireAdmin()` on `teacherPayments:list`, `teacherPayments:markPaid`,
+- [X] T046 [P] Enforce `requireAdmin()` on `teacherPayments:list`, `teacherPayments:markPaid`,
   `payroll:report`, and `serviceTeachers:set` in their respective IPC files (confirm none were left on
   `checkAuth` during earlier phases)
-- [ ] T047 [P] Fill in the `teacherPayments`, `serviceTeachers`, `payrollReport`, `attendanceHistory`
+- [X] T047 [P] Fill in the `teacherPayments`, `serviceTeachers`, `payrollReport`, `attendanceHistory`
   translation keys added in T001/T002 with final English and Arabic copy across every touched component
-- [ ] T048 Run through `quickstart.md` end-to-end in the running dev app and fix any discrepancies found
-- [ ] T049 Add `service_teachers` and `teacher_payments` push/pull coverage to the sync integration test
+- [X] T048 Run through `quickstart.md` end-to-end in the running dev app and fix any discrepancies found
+- [X] T049 Add `service_teachers` and `teacher_payments` push/pull coverage to the sync integration test
   (if one exists) or a new lightweight test confirming both entities round-trip through `SYNC_ENTITIES`
 
 ---

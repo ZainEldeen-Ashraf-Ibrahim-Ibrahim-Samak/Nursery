@@ -54,7 +54,7 @@ describe('attendance IPC contract', () => {
   it('attendance:record bulk upserts attendance', async () => {
     const results = await h()['attendance:record']({}, {
       session_id: sessionId,
-      records: [{ child_id: childId, status: 'attended' }]
+      records: [{ child_id: childId, teacher_id: null, status: 'attended' }]
     })
     expect(Array.isArray(results)).toBe(true)
     expect(results[0].status).toBe('attended')
@@ -97,7 +97,11 @@ describe('attendance IPC contract', () => {
   it('attendance:record overwrites with absent_excused', async () => {
     await h()['attendance:record']({}, {
       session_id: sessionId,
-      records: [{ child_id: childId, status: 'absent_excused', excuse_notes: 'Sick' }]
+      // Explicit teacher_id: null targets the same no-teacher row created above — childId's
+      // teacher_id was mutated by the auto-link test in between, so relying on the legacy
+      // children.teacher_id fallback here would resolve a *different* teacher and create a
+      // second row instead of updating this one (a child can now have more than one teacher).
+      records: [{ child_id: childId, teacher_id: null, status: 'absent_excused', excuse_notes: 'Sick' }]
     })
     const sheet = await h()['attendance:getSheet']({}, { session_id: sessionId })
     const rec = sheet.find((r: any) => r.child_id === childId)
@@ -113,8 +117,8 @@ describe('attendance IPC contract', () => {
   })
 
   it('attendance:delete removes a recorded status', async () => {
-    await h()['attendance:record']({}, { session_id: sessionId, records: [{ child_id: childId, status: 'attended' }] })
-    const res = await h()['attendance:delete']({}, { session_id: sessionId, child_ids: [childId] })
+    await h()['attendance:record']({}, { session_id: sessionId, records: [{ child_id: childId, teacher_id: null, status: 'attended' }] })
+    const res = await h()['attendance:delete']({}, { session_id: sessionId, child_ids: [{ child_id: childId, teacher_id: null }] })
     expect(res.ok).toBe(true)
     expect(res.deleted).toBe(1)
     const sheet = await h()['attendance:getSheet']({}, { session_id: sessionId })

@@ -6,7 +6,7 @@ import { Modal } from '../../components/ui/Modal.js'
 import { Input } from '../../components/ui/Input.js'
 import { Alert } from '../../components/ui/Alert.js'
 import { Badge } from '../../components/ui/Badge.js'
-import type { ServiceDefinition } from '../../types/index.js'
+import type { ServiceDefinition, Teacher } from '../../types/index.js'
 
 export default function ServiceDefinitions() {
   const { i18n } = useTranslation()
@@ -23,11 +23,15 @@ export default function ServiceDefinitions() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [successMsg, setSuccessMsg] = useState('')
   const [toDelete, setToDelete] = useState<ServiceDefinition | null>(null)
+  const [allTeachers, setAllTeachers] = useState<Teacher[]>([])
+  const [selectedTeacherIds, setSelectedTeacherIds] = useState<number[]>([])
 
   useEffect(() => { fetchServices() }, [])
+  useEffect(() => { window.api.teachers.list({}).then(setAllTeachers).catch(() => {}) }, [])
 
   const openCreate = () => {
     setEditing(null); setName(''); setPriceMonthly(''); setPriceDaily(''); setPriceHourly(''); setFormError('')
+    setSelectedTeacherIds([])
     setIsFormOpen(true)
   }
   const openEdit = (s: ServiceDefinition) => {
@@ -35,7 +39,13 @@ export default function ServiceDefinitions() {
     setPriceMonthly(s.price_monthly != null ? String(s.price_monthly) : '')
     setPriceDaily(s.price_daily != null ? String(s.price_daily) : '')
     setPriceHourly(s.price_hourly != null ? String(s.price_hourly) : '')
-    setFormError(''); setIsFormOpen(true)
+    setFormError('')
+    window.api.serviceTeachers.list(s.id).then((list: Teacher[]) => setSelectedTeacherIds(list.map((t) => t.id))).catch(() => setSelectedTeacherIds([]))
+    setIsFormOpen(true)
+  }
+
+  const toggleTeacher = (id: number) => {
+    setSelectedTeacherIds((prev) => prev.includes(id) ? prev.filter((t) => t !== id) : [...prev, id])
   }
 
   const handleSubmit = async () => {
@@ -49,6 +59,9 @@ export default function ServiceDefinitions() {
       price_hourly: priceHourly ? Number(priceHourly) : null,
     }
     const result = editing ? await updateService(editing.id, payload) : await addService(payload)
+    if (result) {
+      await window.api.serviceTeachers.set(result.id, selectedTeacherIds)
+    }
     setIsSubmitting(false)
     if (result) { setSuccessMsg(isAr ? 'تم الحفظ.' : 'Saved.'); setIsFormOpen(false) }
   }
@@ -112,6 +125,30 @@ export default function ServiceDefinitions() {
           <Input label={isAr ? 'السعر الشهري (جنيه)' : 'Monthly Price (EGP)'} type="number" value={priceMonthly} onChange={(e) => setPriceMonthly(e.target.value)} min={0} />
           <Input label={isAr ? 'السعر اليومي (جنيه)' : 'Daily Price (EGP)'} type="number" value={priceDaily} onChange={(e) => setPriceDaily(e.target.value)} min={0} />
           <Input label={isAr ? 'السعر بالساعة (جنيه)' : 'Hourly Price (EGP)'} type="number" value={priceHourly} onChange={(e) => setPriceHourly(e.target.value)} min={0} />
+
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-slate-500">{isAr ? 'المعلمون المؤهلون لهذه الخدمة' : 'Teachers qualified for this service'}</label>
+            <div className="flex flex-wrap gap-1.5">
+              {allTeachers.length === 0 ? (
+                <span className="text-xs text-slate-400">{isAr ? 'لا يوجد موظفون' : 'No employees found'}</span>
+              ) : allTeachers.map((tch) => {
+                const active = selectedTeacherIds.includes(tch.id)
+                return (
+                  <button
+                    type="button"
+                    key={tch.id}
+                    onClick={() => toggleTeacher(tch.id)}
+                    className={`px-2.5 py-1 rounded-md text-xs font-semibold border transition-colors ${
+                      active ? 'bg-primary text-white border-primary' : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
+                    }`}
+                  >
+                    {tch.name}
+                  </button>
+                )
+              })}
+            </div>
+            <p className="text-[11px] text-slate-400">{isAr ? 'اتركها فارغة للسماح بأي موظف نشط.' : 'Leave empty to allow any active employee.'}</p>
+          </div>
         </div>
       </Modal>
 

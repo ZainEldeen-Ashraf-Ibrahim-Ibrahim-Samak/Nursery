@@ -81,6 +81,48 @@ ipcMain.handle('childServices:update', async (_event, { id, patch }) => {
   }
 })
 
+// Read-only preview (FR-002/FR-003): counts scheduled weekday occurrences for `lesson_days`
+// (0=Sun…6=Sat) from today through the end of the current calendar month, and multiplies by
+// the teacher's per-session rate. Never writes anything — pure computation for the enrollment UI.
+ipcMain.handle('childServices:previewTeacherCost', async (_event, { teacher_id, lesson_days }) => {
+  try {
+    checkAuth()
+    const db = getDb()
+    const teacher = db.prepare('SELECT teacher_session_rate FROM employees WHERE id = ?').get(teacher_id) as any
+    let rate = teacher?.teacher_session_rate ?? null
+    if (rate == null) {
+      // Mirror the payment engine's fallback (attendanceIPC.ts): if this teacher has no rate
+      // of their own, the org-wide default from Settings is what will actually be charged.
+      const defaultSetting = db.prepare("SELECT value FROM settings WHERE key = 'default_teacher_session_rate'").get() as any
+      const defaultRate = defaultSetting?.value != null ? Number(defaultSetting.value) : NaN
+      rate = !isNaN(defaultRate) && defaultRate > 0 ? defaultRate : 0
+    }
+
+    const days: number[] = Array.isArray(lesson_days) ? lesson_days.map(Number) : []
+
+    const today = new Date()
+    const year = today.getFullYear()
+    const month = today.getMonth()
+    const daysInMonth = new Date(year, month + 1, 0).getDate()
+
+    let remaining = 0
+    if (days.length > 0) {
+      for (let d = today.getDate(); d <= daysInMonth; d++) {
+        const date = new Date(year, month, d)
+        if (days.includes(date.getDay())) remaining++
+      }
+    }
+
+    return {
+      remaining_sessions: remaining,
+      expected_cost: Number((remaining * rate).toFixed(2)),
+      teacher_session_rate: rate
+    }
+  } catch (error: any) {
+    throw new Error(error.message || 'Failed to preview teacher cost')
+  }
+})
+
 ipcMain.handle('childServices:remove', async (_event, { id }) => {
   try {
     requireAdmin()

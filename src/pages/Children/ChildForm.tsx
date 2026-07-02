@@ -29,6 +29,77 @@ const GUARDIAN_PHONE_RE = /^(?:\+?2)?01[0-9]{9}$/
 // Weekday keys in JS getDay() order (0 = Sunday … 6 = Saturday).
 const DAY_KEYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const
 
+/**
+ * Live, read-only preview of remaining scheduled sessions this month and expected teacher
+ * cost (FR-002/FR-003). Self-contained so it never writes anything and doesn't need access
+ * to the parent form's state beyond the two values it depends on.
+ */
+function TeacherCostPreview({ teacherId, lessonDays, isAr }: { teacherId: string; lessonDays: number[]; isAr: boolean }) {
+  const [preview, setPreview] = useState<{ remaining_sessions: number; expected_cost: number } | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    if (!teacherId || lessonDays.length === 0) {
+      setPreview(null)
+      return
+    }
+    window.api.childServices.previewTeacherCost(Number(teacherId), lessonDays).then((result) => {
+      if (!cancelled) setPreview(result)
+    }).catch(() => {
+      if (!cancelled) setPreview(null)
+    })
+    return () => { cancelled = true }
+  }, [teacherId, JSON.stringify(lessonDays)])
+
+  if (!preview) return null
+
+  return (
+    <div className="bg-primary/5 border border-primary/20 rounded-lg px-3 py-2 text-xs text-slate-600 flex items-center justify-between">
+      <span>
+        {isAr
+          ? `الجلسات المتبقية هذا الشهر: ${preview.remaining_sessions}`
+          : `Remaining sessions this month: ${preview.remaining_sessions}`}
+      </span>
+      <span className="font-bold text-slate-800">
+        {isAr ? `التكلفة المتوقعة: ${preview.expected_cost} ج.م` : `Expected cost: ${preview.expected_cost} EGP`}
+      </span>
+    </div>
+  )
+}
+
+/**
+ * Teacher dropdown scoped to the service's configured teacher roster (FR-006/FR-007), falling
+ * back to the full teacher list when the service has no `service_teachers` rows configured yet
+ * (preserves existing behavior for legacy/unrestricted services).
+ */
+function ScopedTeacherSelect({
+  serviceId, allTeachers, value, onChange, noTeacherLabel
+}: { serviceId: number | undefined; allTeachers: Teacher[]; value: string; onChange: (v: string) => void; noTeacherLabel: string }) {
+  const [scoped, setScoped] = useState<Teacher[] | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    if (!serviceId) { setScoped(null); return }
+    window.api.serviceTeachers.list(serviceId).then((list: Teacher[]) => {
+      if (!cancelled) setScoped(list && list.length > 0 ? list : null)
+    }).catch(() => { if (!cancelled) setScoped(null) })
+    return () => { cancelled = true }
+  }, [serviceId])
+
+  const options = scoped ?? allTeachers
+
+  return (
+    <Select
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      options={[
+        { value: '', label: noTeacherLabel },
+        ...options.map((tch) => ({ value: String(tch.id), label: tch.name })),
+      ]}
+    />
+  )
+}
+
 export default function ChildForm() {
   const { t, i18n } = useTranslation()
   const navigate = useNavigate()
@@ -56,7 +127,6 @@ export default function ChildForm() {
   const [teachers, setTeachers] = useState<Teacher[]>([])
 
   const [formErrors, setFormErrors] = useState<Record<string, string>>({})
-  const [settings, setSettings] = useState<Record<string, string>>({})
   const [isLoadingChild, setIsLoadingChild] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [submitStep, setSubmitStep] = useState<'idle' | 'uploading' | 'saving'>('idle')
@@ -66,23 +136,14 @@ export default function ChildForm() {
   // Pro-rate session baseline (kept for pro-rate notice display; per-row session_price drives actual fees)
   const sessionsBaseline = proRateResult?.total_sessions && proRateResult.total_sessions > 0 ? proRateResult.total_sessions : 8
 
-  // Fetch Settings (pricing defaults) and service definitions
+  // Fetch service definitions (Settings → Services — the single source of truth for pricing)
   useEffect(() => {
-    async function loadSettings() {
-      try {
-        const data = await window.api.settings.get()
-        setSettings(data || {})
-      } catch (err) {
-        console.error('Failed to load settings:', err)
-      }
-    }
-    loadSettings()
     fetchServices()
   }, [])
 
-  // Auto-apply prices to service rows with price=0 once settings/service defs finish loading
+  // Auto-apply prices to service rows with price=0 once service defs finish loading
   useEffect(() => {
-    if (Object.keys(settings).length === 0 && serviceDefs.length === 0) return
+    if (serviceDefs.length === 0) return
     setFormData(prev => ({
       ...prev,
       services: prev.services.map(row => {
@@ -95,27 +156,11 @@ export default function ChildForm() {
           if (row.unit === 'شهر' && svcDef.price_monthly != null) resolved = svcDef.price_monthly
           else if (row.unit === 'يوم' && svcDef.price_daily != null) resolved = svcDef.price_daily
           else if ((row.unit === 'ساعة' || row.unit === 'جلسة') && svcDef.price_hourly != null) resolved = svcDef.price_hourly
-        } else {
-          let priceKey = ''
-          if (row.service === 'حضانة') {
-            if (row.unit === 'شهر') priceKey = 'nursery_monthly'
-            else if (row.unit === 'يوم') priceKey = 'nursery_daily'
-            else if (row.unit === 'ساعة') priceKey = 'nursery_hourly'
-          } else if (row.service === 'استضافة') {
-            if (row.unit === 'شهر') priceKey = 'hosting_monthly'
-            else if (row.unit === 'يوم') priceKey = 'hosting_daily'
-            else if (row.unit === 'ساعة') priceKey = 'hosting_hourly'
-          } else if (row.service === 'جلسة' || row.service === 'جلسه') {
-            if (row.unit === 'شهر') priceKey = 'session_monthly'
-            else if (row.unit === 'جلسة' || row.unit === 'ساعة') priceKey = 'session_hourly'
-            else if (row.unit === 'يوم') priceKey = 'session_daily'
-          }
-          if (priceKey && settings[priceKey] !== undefined) resolved = Number(settings[priceKey])
         }
         return resolved > 0 ? { ...row, price: resolved } : row
       })
     }))
-  }, [settings, serviceDefs])
+  }, [serviceDefs])
 
   // Pro-rate calculation — uses first service row's session_price, re-runs when date/services change
   useEffect(() => {
@@ -216,36 +261,40 @@ export default function ChildForm() {
     }
   }, [id, isEdit, fetchChildren])
 
+  // A session-type service ("جلسة") should default to its per-session (hourly) price, not
+  // whichever other price field (monthly/daily) also happens to be set on its
+  // service_definitions row — those get seeded together (migration 015) and are not mutually
+  // exclusive, but a service literally named "session" isn't meant to be billed monthly by
+  // default.
+  const isSessionService = (serviceName: string) => serviceName === 'جلسة' || serviceName === 'جلسه'
+
   // Returns available unit options for a given service name based on which prices are defined
+  // on that service's definition (Settings → Services) — exactly one unit per configured price
+  // field (month/day/hour), read directly from there. No separate "session" unit is added on
+  // top of "hour": they would just duplicate the same price_hourly value under two labels.
+  // Ordered so the FIRST option matches that service's natural billing unit — this order also
+  // drives the default selection in handleAddService/handleServiceChange below, so it must stay
+  // in sync with those.
   const getUnitOptions = (serviceName: string) => {
     const svcDef = serviceDefs.find(d => d.name === serviceName)
-    if (svcDef) {
-      const opts: { value: UnitType; label: string }[] = []
-      if (svcDef.price_monthly != null) opts.push({ value: 'شهر', label: t('units.month') })
-      if (svcDef.price_daily != null) opts.push({ value: 'يوم', label: t('units.day') })
-      if (svcDef.price_hourly != null) {
-        opts.push({ value: 'ساعة', label: t('units.hour') })
-        if (serviceName === 'جلسة' || serviceName === 'جلسه') {
-          opts.push({ value: 'جلسة', label: t('units.session') })
-        }
-      }
-      if (opts.length > 0) return opts
+    if (!svcDef) return []
+    const opts: { value: UnitType; label: string }[] = []
+    const pushMonthly = () => { if (svcDef.price_monthly != null) opts.push({ value: 'شهر', label: t('units.month') }) }
+    const pushDaily = () => { if (svcDef.price_daily != null) opts.push({ value: 'يوم', label: t('units.day') }) }
+    const pushHourly = () => { if (svcDef.price_hourly != null) opts.push({ value: 'ساعة', label: t('units.hour') }) }
+    if (isSessionService(serviceName)) {
+      // Hourly-priced first (the per-session rate), then the less-specific monthly/daily
+      // fallbacks — never a separate "session" unit duplicating the same price field.
+      pushHourly(); pushMonthly(); pushDaily()
+    } else {
+      pushMonthly(); pushDaily(); pushHourly()
     }
-    // fallback: all units
-    const fallbackOpts: { value: UnitType; label: string }[] = [
-      { value: 'شهر' as UnitType, label: t('units.month') },
-      { value: 'يوم' as UnitType, label: t('units.day') },
-      { value: 'ساعة' as UnitType, label: t('units.hour') },
-    ]
-    if (serviceName === 'جلسة' || serviceName === 'جلسه') {
-      fallbackOpts.push({ value: 'جلسة' as UnitType, label: t('units.session') })
-    }
-    return fallbackOpts
+    return opts
   }
 
   const handleAddService = () => {
-    const firstSvc = serviceDefs.length > 0 ? serviceDefs[0] : null
-    const svcName: ServiceType = (firstSvc?.name as ServiceType) ?? 'حضانة'
+    const svcName = serviceDefs[0]?.name as ServiceType | undefined
+    if (!svcName) return
     const unitOpts = getUnitOptions(svcName)
     const defaultUnit = unitOpts[0]?.value ?? 'شهر'
     setFormData(prev => ({
@@ -266,15 +315,12 @@ export default function ChildForm() {
       const newServices = [...prev.services]
       const row = { ...newServices[index], [field]: value }
 
-      // Auto-reset unit to first valid option when service changes
+      // Auto-reset unit to that service's natural default when service changes — must match
+      // getUnitOptions' ordering above, or the selected unit/price won't match what admins
+      // actually configured for that service in Settings → Services.
       if (field === 'service') {
-        const currentServiceDefs = useServiceDefinitionsStore.getState().services
-        const svcDef = currentServiceDefs.find(d => d.name === value)
-        if (svcDef) {
-          if (svcDef.price_monthly != null) row.unit = 'شهر'
-          else if (svcDef.price_daily != null) row.unit = 'يوم'
-          else if (svcDef.price_hourly != null) row.unit = 'ساعة'
-        }
+        const opts = getUnitOptions(value)
+        if (opts[0]) row.unit = opts[0].value
       }
 
       // Auto-price if service or unit changes
@@ -289,23 +335,6 @@ export default function ChildForm() {
           if (row.unit === 'شهر' && svcDef.price_monthly != null) resolved = svcDef.price_monthly
           else if (row.unit === 'يوم' && svcDef.price_daily != null) resolved = svcDef.price_daily
           else if ((row.unit === 'ساعة' || row.unit === 'جلسة') && svcDef.price_hourly != null) resolved = svcDef.price_hourly
-        } else {
-          // Fallback: legacy settings keys
-          let priceKey = ''
-          if (row.service === 'حضانة') {
-            if (row.unit === 'شهر') priceKey = 'nursery_monthly'
-            if (row.unit === 'يوم') priceKey = 'nursery_daily'
-            if (row.unit === 'ساعة') priceKey = 'nursery_hourly'
-          } else if (row.service === 'استضافة') {
-            if (row.unit === 'شهر') priceKey = 'hosting_monthly'
-            if (row.unit === 'يوم') priceKey = 'hosting_daily'
-            if (row.unit === 'ساعة') priceKey = 'hosting_hourly'
-          } else if (row.service === 'جلسة' || row.service === 'جلسه') {
-            if (row.unit === 'شهر') priceKey = 'session_monthly'
-            if (row.unit === 'جلسة' || row.unit === 'ساعة') priceKey = 'session_hourly'
-            if (row.unit === 'يوم') priceKey = 'session_daily'
-          }
-          if (priceKey && settings[priceKey] !== undefined) resolved = Number(settings[priceKey])
         }
         if (resolved > 0) row.price = resolved
       }
@@ -666,15 +695,7 @@ export default function ChildForm() {
                           <Select
                             value={row.service}
                             onChange={(e) => handleServiceChange(index, 'service', e.target.value)}
-                            options={
-                              serviceDefs.length > 0
-                                ? serviceDefs.map(d => ({ value: d.name, label: d.name }))
-                                : [
-                                    { value: 'حضانة', label: t('services.nursery') },
-                                    { value: 'استضافة', label: t('services.hosting') },
-                                    { value: 'جلسة', label: t('services.session') },
-                                  ]
-                            }
+                            options={serviceDefs.map(d => ({ value: d.name, label: d.name }))}
                           />
                         </div>
                         <div className="space-y-1.5">
@@ -700,13 +721,12 @@ export default function ChildForm() {
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                         <div className="space-y-1.5">
                           <label className="text-xs font-semibold text-slate-500">{t('teacher')}</label>
-                          <Select
+                          <ScopedTeacherSelect
+                            serviceId={serviceDefs.find(d => d.name === row.service)?.id}
+                            allTeachers={teachers}
                             value={row.teacher_id}
-                            onChange={(e) => handleServiceChange(index, 'teacher_id', e.target.value)}
-                            options={[
-                              { value: '', label: t('no_teacher') },
-                              ...teachers.map((tch) => ({ value: String(tch.id), label: tch.name })),
-                            ]}
+                            onChange={(v) => handleServiceChange(index, 'teacher_id', v)}
+                            noTeacherLabel={t('no_teacher')}
                           />
                         </div>
                         <div className="space-y-1.5">
@@ -752,6 +772,9 @@ export default function ChildForm() {
                           })}
                         </div>
                       </div>
+
+                      {/* Live remaining-sessions / expected teacher cost preview (FR-002/FR-003) */}
+                      <TeacherCostPreview teacherId={row.teacher_id} lessonDays={row.lesson_days} isAr={ar} />
 
                       {/* Session fee summary for this row (if session_price > 0) */}
                       {Number(row.session_price) > 0 && (

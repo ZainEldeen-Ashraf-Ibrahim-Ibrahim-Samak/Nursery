@@ -18,6 +18,7 @@ import ChildForm from './pages/Children/ChildForm.js'
 import ChildStatement from './pages/Children/ChildStatement.js'
 import MonthlyPayments from './pages/Payments/MonthlyPayments.js'
 import SalariesList from './pages/Salaries/SalariesList.js'
+import PayrollReport from './pages/Salaries/PayrollReport.js'
 import EmployeesList from './pages/Employees/EmployeesList.js'
 import ExpensesList from './pages/Expenses/ExpensesList.js'
 import TargetPlanning from './pages/Target/TargetPlanning.js'
@@ -105,6 +106,14 @@ export default function App() {
             element={
               <RoleGuard allowedRoles={['admin']}>
                 <SalariesList />
+              </RoleGuard>
+            }
+          />
+          <Route
+            path="salaries/payroll-report"
+            element={
+              <RoleGuard allowedRoles={['admin']}>
+                <PayrollReport />
               </RoleGuard>
             }
           />

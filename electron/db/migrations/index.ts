@@ -684,6 +684,119 @@ const migrations: Migration[] = [
         db.exec(`CREATE INDEX IF NOT EXISTS idx_child_services_child ON child_services(child_id);`)
       } catch { /* ignore */ }
     }
+  },
+  {
+    name: '026_service_teachers',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS service_teachers (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          service_id INTEGER NOT NULL REFERENCES service_definitions(id) ON DELETE CASCADE,
+          employee_id INTEGER NOT NULL REFERENCES employees(id),
+          created_at TEXT NOT NULL,
+          synced INTEGER DEFAULT 0,
+          UNIQUE(service_id, employee_id)
+        );
+      `)
+    }
+  },
+  {
+    name: '027_teacher_session_rate',
+    up: (db) => {
+      try { db.exec('ALTER TABLE employees ADD COLUMN teacher_session_rate REAL;') } catch { /* already exists */ }
+    }
+  },
+  {
+    name: '028_attendance_teacher_status',
+    up: (db) => {
+      const addCol = (ddl: string) => { try { db.exec(ddl) } catch { /* already exists */ } }
+      addCol('ALTER TABLE attendance_records ADD COLUMN attended_teacher_id INTEGER REFERENCES employees(id);')
+      addCol("ALTER TABLE attendance_records ADD COLUMN teacher_status TEXT CHECK(teacher_status IN ('present','absent'));")
+
+      // Best-effort backfill: existing rows predate teacher-attendance tracking, so treat the
+      // teacher as having been present (matches the "attended-teacher earns pay" default that
+      // was implicit in the old session_teachers-only model) and snapshot the child's current
+      // assigned teacher.
+      db.exec(`
+        UPDATE attendance_records
+        SET teacher_status = 'present'
+        WHERE teacher_status IS NULL;
+      `)
+      db.exec(`
+        UPDATE attendance_records
+        SET attended_teacher_id = (
+          SELECT teacher_id FROM children WHERE children.id = attendance_records.child_id
+        )
+        WHERE attended_teacher_id IS NULL;
+      `)
+    }
+  },
+  {
+    name: '029_teacher_payments',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS teacher_payments (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          teacher_id INTEGER NOT NULL REFERENCES employees(id),
+          child_id INTEGER NOT NULL REFERENCES children(id) ON DELETE CASCADE,
+          attendance_record_id INTEGER NOT NULL REFERENCES attendance_records(id) ON DELETE CASCADE,
+          attendance_date TEXT NOT NULL,
+          session_cost REAL NOT NULL,
+          status TEXT NOT NULL CHECK(status IN ('pending','paid','void')) DEFAULT 'pending',
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          synced INTEGER DEFAULT 0,
+          UNIQUE(teacher_id, child_id, attendance_date)
+        );
+        CREATE INDEX IF NOT EXISTS idx_teacher_payments_teacher ON teacher_payments(teacher_id);
+        CREATE INDEX IF NOT EXISTS idx_teacher_payments_month ON teacher_payments(attendance_date);
+      `)
+    }
+  },
+  {
+    // MUST run outside a transaction so PRAGMA foreign_keys = OFF takes effect (same pattern
+    // as 025_child_services_drop_unique).
+    name: '030_attendance_records_per_teacher',
+    noTransaction: true,
+    up: (db) => {
+      // A child can have more than one teacher (one per service enrollment in child_services).
+      // The old UNIQUE(session_id, child_id) allowed only a single attendance/teacher row per
+      // child per session, so a child with two teachers could never get a separate attendance
+      // + payment for each. Rebuild with UNIQUE(session_id, child_id, attended_teacher_id) so
+      // each (child, teacher) pair gets its own row.
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS attendance_records_new (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          session_id INTEGER NOT NULL REFERENCES scheduled_sessions(id) ON DELETE CASCADE,
+          child_id INTEGER NOT NULL REFERENCES children(id) ON DELETE CASCADE,
+          status TEXT NOT NULL CHECK(status IN ('attended','absent_excused','absent_unexcused')),
+          excuse_notes TEXT,
+          recorded_by INTEGER REFERENCES users(id),
+          recorded_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          synced INTEGER DEFAULT 0,
+          attended_teacher_id INTEGER REFERENCES employees(id),
+          teacher_status TEXT CHECK(teacher_status IN ('present','absent')),
+          UNIQUE(session_id, child_id, attended_teacher_id)
+        );
+
+        INSERT INTO attendance_records_new
+          (id, session_id, child_id, status, excuse_notes, recorded_by, recorded_at, updated_at,
+           synced, attended_teacher_id, teacher_status)
+        SELECT
+          id, session_id, child_id, status, excuse_notes, recorded_by, recorded_at, updated_at,
+          synced, attended_teacher_id, teacher_status
+        FROM attendance_records;
+
+        DROP TABLE attendance_records;
+        ALTER TABLE attendance_records_new RENAME TO attendance_records;
+      `)
+
+      try {
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_attendance_records_session ON attendance_records(session_id);`)
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_attendance_records_child ON attendance_records(child_id);`)
+      } catch { /* ignore */ }
+    }
   }
 ]
 

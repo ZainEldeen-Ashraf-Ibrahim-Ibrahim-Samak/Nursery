@@ -29,6 +29,26 @@ const api = {
     add: (args: any) => ipcRenderer.invoke('childServices:add', args),
     update: (args: any) => ipcRenderer.invoke('childServices:update', args),
     remove: (args: { id: number }) => ipcRenderer.invoke('childServices:remove', args),
+    previewTeacherCost: (teacher_id: number, lesson_days: number[]) =>
+      ipcRenderer.invoke('childServices:previewTeacherCost', { teacher_id, lesson_days }) as Promise<{ remaining_sessions: number; expected_cost: number; teacher_session_rate: number }>,
+  },
+
+  // Service Teachers
+  serviceTeachers: {
+    list: (service_id: number) => ipcRenderer.invoke('serviceTeachers:list', { service_id }),
+    set: (service_id: number, employee_ids: number[]) => ipcRenderer.invoke('serviceTeachers:set', { service_id, employee_ids }),
+  },
+
+  // Teacher Payments
+  teacherPayments: {
+    list: (filters: { teacher_id?: number; child_id?: number; month?: number; year?: number }) =>
+      ipcRenderer.invoke('teacherPayments:list', filters),
+    markPaid: (ids: number[]) => ipcRenderer.invoke('teacherPayments:markPaid', { ids }) as Promise<{ ok: boolean; updated: number }>,
+  },
+
+  // Payroll
+  payroll: {
+    report: (month: number, year: number) => ipcRenderer.invoke('payroll:report', { month, year }),
   },
   teachers: {
     list: (args?: { role?: string }) => ipcRenderer.invoke('teachers:list', args),
@@ -163,10 +183,12 @@ const api = {
   attendance: {
     getSheet: (sessionId: number) => ipcRenderer.invoke('attendance:getSheet', { session_id: sessionId }),
     record: (sessionId: number, records: any[]) => ipcRenderer.invoke('attendance:record', { session_id: sessionId, records }),
-    delete: (sessionId: number, child_ids: number[]) => ipcRenderer.invoke('attendance:delete', { session_id: sessionId, child_ids }) as Promise<{ ok: boolean; deleted: number }>,
+    delete: (sessionId: number, child_ids: (number | { child_id: number; teacher_id: number | null })[]) =>
+      ipcRenderer.invoke('attendance:delete', { session_id: sessionId, child_ids }) as Promise<{ ok: boolean; deleted: number }>,
     getConflicts: () => ipcRenderer.invoke('attendance:getConflicts'),
     resolveConflict: (conflict_id: number, final_status: string) => ipcRenderer.invoke('attendance:resolveConflict', { conflict_id, final_status }),
     getSummary: (employee_id: number, month: string, year: number) => ipcRenderer.invoke('attendance:getSummary', { employee_id, month, year }),
+    getChildHistory: (child_id: number) => ipcRenderer.invoke('attendance:getChildHistory', { child_id }),
   },
 
   // Employee Deductions

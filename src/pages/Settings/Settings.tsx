@@ -22,11 +22,11 @@ interface TabDef {
 const TAB_DEFS: TabDef[] = [
   {
     id: 'pricing',
-    labelAr: 'التسعير والأهداف',
-    labelEn: 'Pricing & Targets',
-    icon: '💰',
-    descAr: 'أسعار الخدمات والحدود الربحية',
-    descEn: 'Service rates and profit targets',
+    labelAr: 'الأهداف والقدرة الاستيعابية',
+    labelEn: 'Targets & Capacity',
+    icon: '📈',
+    descAr: 'الحدود الربحية والقدرة الاستيعابية — أسعار الخدمات في تبويب «الخدمات»',
+    descEn: 'Profit targets and capacity — service pricing is on the "Services" tab',
   },
   {
     id: 'branding',

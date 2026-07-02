@@ -62,6 +62,7 @@ export default function EmployeesList() {
   const [baseSalary, setBaseSalary] = useState('')
   const [housing, setHousing] = useState('')
   const [transport, setTransport] = useState('')
+  const [teacherSessionRate, setTeacherSessionRate] = useState('')
   const [formError, setFormError] = useState('')
   const [isSubmitLoading, setIsSubmitLoading] = useState(false)
 
@@ -165,7 +166,7 @@ export default function EmployeesList() {
   const openCreate = () => {
     setEditing(null)
     setName(''); setRoleId(''); setSalaryTypeOverrideId('')
-    setBaseSalary(''); setHousing(''); setTransport('')
+    setBaseSalary(''); setHousing(''); setTransport(''); setTeacherSessionRate('')
     setFormError(''); setShowAddRole(false); setNewRoleName('')
     setIsFormOpen(true)
   }
@@ -176,6 +177,7 @@ export default function EmployeesList() {
     setRoleId(emp.role_id ?? '')
     setSalaryTypeOverrideId(emp.salary_type_override_id ?? '')
     setBaseSalary(String(emp.base_salary)); setHousing(String(emp.housing)); setTransport(String(emp.transport))
+    setTeacherSessionRate(emp.teacher_session_rate != null ? String(emp.teacher_session_rate) : '')
     setFormError(''); setShowAddRole(false); setNewRoleName('')
     setIsFormOpen(true)
   }
@@ -215,6 +217,7 @@ export default function EmployeesList() {
       base_salary: Number(baseSalary),
       housing: Number(housing) || 0,
       transport: Number(transport) || 0,
+      teacher_session_rate: teacherSessionRate !== '' ? Number(teacherSessionRate) : null,
     }
     const result = editing ? await updateEmployee(editing.id, payload) : await addEmployee(payload)
     setIsSubmitLoading(false)
@@ -451,6 +454,17 @@ export default function EmployeesList() {
             <Input label={isAr ? 'الراتب الأساسي' : 'Base Salary'} type="number" value={baseSalary} onChange={(e) => setBaseSalary(e.target.value)} disabled={isSubmitLoading} min={0} required />
             <Input label={isAr ? 'بدل سكن' : 'Housing'} type="number" value={housing} onChange={(e) => setHousing(e.target.value)} disabled={isSubmitLoading} min={0} />
             <Input label={isAr ? 'بدل مواصلات' : 'Transport'} type="number" value={transport} onChange={(e) => setTransport(e.target.value)} disabled={isSubmitLoading} min={0} />
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <Input
+              label={isAr ? 'تكلفة الجلسة الواحدة' : 'Per Session Cost'}
+              type="number"
+              value={teacherSessionRate}
+              onChange={(e) => setTeacherSessionRate(e.target.value)}
+              disabled={isSubmitLoading}
+              min={0}
+              placeholder={isAr ? 'اختياري — للمعلمين فقط' : 'Optional — teachers only'}
+            />
           </div>
           <div className="flex justify-between items-center bg-slate-50 rounded-lg px-4 py-3 text-sm">
             <span className="text-slate-500 font-medium">{isAr ? 'صافي الراتب (محسوب)' : 'Net Salary (computed)'}</span>

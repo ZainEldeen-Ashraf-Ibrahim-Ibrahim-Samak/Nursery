@@ -31,19 +31,6 @@ export async function seedDatabase(db: Db): Promise<void> {
     // Non-sensitive defaults; each is overridable via an optional SEED_* env key
     // (first-run only — see specs/002-excel-import-env-config/contracts/env-vars.md).
     const defaultSettings: { key: string; value: string }[] = [
-      // Pricing settings (EGP)
-      { key: 'nursery_monthly', value: seedSetting('SEED_NURSERY_MONTHLY', '2500') },
-      { key: 'nursery_daily', value: seedSetting('SEED_NURSERY_DAILY', '150') },
-      { key: 'nursery_hourly', value: seedSetting('SEED_NURSERY_HOURLY', '30') },
-
-      { key: 'hosting_monthly', value: seedSetting('SEED_HOSTING_MONTHLY', '3000') },
-      { key: 'hosting_daily', value: seedSetting('SEED_HOSTING_DAILY', '200') },
-      { key: 'hosting_hourly', value: seedSetting('SEED_HOSTING_HOURLY', '40') },
-
-      { key: 'session_monthly', value: seedSetting('SEED_SESSION_MONTHLY', '1200') },
-      { key: 'session_hourly', value: seedSetting('SEED_SESSION_HOURLY', '100') },
-      { key: 'session_daily', value: seedSetting('SEED_SESSION_DAILY', '400') },
-
       // Targets & Capacity
       { key: 'target_profit_pct', value: seedSetting('SEED_TARGET_PROFIT_PCT', '0.20') }, // 20%
       { key: 'max_capacity', value: seedSetting('SEED_MAX_CAPACITY', '50') },
@@ -77,6 +64,27 @@ export async function seedDatabase(db: Db): Promise<void> {
       }
     })
     
+    transaction()
+  }
+
+  // Seed default service definitions (Settings → Services — the single source of truth for
+  // service pricing; INSERT OR IGNORE so an admin's edits are never overwritten on restart).
+  {
+    const defaultServices: { name: string; monthly: string; daily: string; hourly: string }[] = [
+      { name: 'حضانة', monthly: seedSetting('SEED_NURSERY_MONTHLY', '2500'), daily: seedSetting('SEED_NURSERY_DAILY', '150'), hourly: seedSetting('SEED_NURSERY_HOURLY', '30') },
+      { name: 'استضافة', monthly: seedSetting('SEED_HOSTING_MONTHLY', '3000'), daily: seedSetting('SEED_HOSTING_DAILY', '200'), hourly: seedSetting('SEED_HOSTING_HOURLY', '40') },
+      { name: 'جلسة', monthly: seedSetting('SEED_SESSION_MONTHLY', '1200'), daily: seedSetting('SEED_SESSION_DAILY', '400'), hourly: seedSetting('SEED_SESSION_HOURLY', '100') },
+    ]
+    const now = new Date().toISOString()
+    const insertService = db.prepare(`
+      INSERT OR IGNORE INTO service_definitions (name, is_custom, price_monthly, price_daily, price_hourly, created_at, updated_at, synced)
+      VALUES (?, 0, ?, ?, ?, ?, ?, 0)
+    `)
+    const transaction = db.transaction(() => {
+      for (const s of defaultServices) {
+        insertService.run(s.name, Number(s.monthly), Number(s.daily), Number(s.hourly), now, now)
+      }
+    })
     transaction()
   }
 }

@@ -36,11 +36,31 @@ export default function SessionsList() {
   const [successMsg, setSuccessMsg] = useState('')
   const [toDelete, setToDelete] = useState<ScheduledSession | null>(null)
 
+  // Search state
+  const [sessionsSearch, setSessionsSearch] = useState('')
+  const [attendanceSearch, setAttendanceSearch] = useState('')
+
+  // Teacher filters
+  const [hasTeacherFilter, setHasTeacherFilter] = useState(false)
+  const [teacherFilterId, setTeacherFilterId] = useState<number | ''>('')
+
   // Attendance sheet state
   const [viewingSessionId, setViewingSessionId] = useState<number | null>(null)
-  const [attendanceEdits, setAttendanceEdits] = useState<Record<number, { status: AttendanceStatus | null; excuse_notes: string }>>({})
+  // Keyed by "childId:teacherId" (teacherId is "none" when the child has no teacher at all) —
+  // a child can appear more than once in `sheet` when they have multiple teachers across
+  // service enrollments, so child_id alone is no longer a unique key.
+  const [attendanceEdits, setAttendanceEdits] = useState<Record<string, { status: AttendanceStatus | null; excuse_notes: string; teacher_status: 'present' | 'absent' }>>({})
   const [isSavingAttendance, setIsSavingAttendance] = useState(false)
-  const [sessionCredit, setSessionCredit] = useState<{ payable: boolean; hasTeachers: boolean; credits: { employee_id: number; name: string; amount: number }[] } | null>(null)
+  // Org-wide fallback rate (Settings → Salary Types → Default Teacher Session Rate), used only
+  // to preview the same rate resolution the backend applies (own rate → this default → none).
+  const [orgDefaultRate, setOrgDefaultRate] = useState<number | null>(null)
+
+  useEffect(() => {
+    window.api.settings.get().then((s: Record<string, string>) => {
+      const n = s.default_teacher_session_rate ? Number(s.default_teacher_session_rate) : NaN
+      setOrgDefaultRate(!isNaN(n) && n > 0 ? n : null)
+    }).catch(() => setOrgDefaultRate(null))
+  }, [])
 
   // Today's auto-session detection
   const [todayChildren, setTodayChildren] = useState<{ id: number; name: string }[]>([])
@@ -95,26 +115,63 @@ export default function SessionsList() {
 
   const openAttendance = async (sessionId: number) => {
     setViewingSessionId(sessionId)
-    setSessionCredit(null)
     await fetchSheet(sessionId)
     setAttendanceEdits({})
-    try { setSessionCredit(await window.api.sessions.salaryCredit(sessionId)) } catch { setSessionCredit(null) }
+    setAttendanceSearch('')
+    setHasTeacherFilter(false)
+    setTeacherFilterId('')
   }
 
-  const getEdit = (rec: AttendanceRecord) => attendanceEdits[rec.child_id] || { status: rec.status as AttendanceStatus | null, excuse_notes: rec.excuse_notes || '' }
+  const editKey = (rec: AttendanceRecord) => `${rec.child_id}:${rec.teacher_id ?? 'none'}`
 
-  const setEdit = (childId: number, field: 'status' | 'excuse_notes', value: string) => {
+  const getEdit = (rec: AttendanceRecord) => attendanceEdits[editKey(rec)] || {
+    status: rec.status as AttendanceStatus | null,
+    excuse_notes: rec.excuse_notes || '',
+    teacher_status: (rec.teacher_status as 'present' | 'absent') || 'present'
+  }
+
+  // Live preview of what will actually be paid, using the SAME rate resolution the backend
+  // applies (attendanceIPC.ts): a teacher's own teacher_session_rate first, the org-wide
+  // default_teacher_session_rate setting only if they have none, and no payment at all only
+  // if neither exists. This replaces the old sessions:salaryCredit banner, which read a
+  // completely different, unrelated field (salary_types.session_rate) and could show a number
+  // that disagreed with what the attendance-based payment engine actually generates.
+  const teacherPaymentPreview = (() => {
+    const totals = new Map<number, { name: string; amount: number }>()
+    let anyTeacherAssigned = false
+    for (const rec of sheet) {
+      if (!rec.teacher_id) continue
+      anyTeacherAssigned = true
+      const edit = getEdit(rec)
+      const payable = edit.teacher_status === 'present' && (edit.status === 'attended' || edit.status === 'absent_unexcused')
+      if (!payable) continue
+      const rate = rec.teacher_session_rate ?? orgDefaultRate
+      if (rate == null) continue
+      const existing = totals.get(rec.teacher_id)
+      totals.set(rec.teacher_id, { name: rec.teacher_name || '', amount: (existing?.amount ?? 0) + rate })
+    }
+    return { credits: [...totals.entries()].map(([employee_id, v]) => ({ employee_id, ...v })), hasTeachers: anyTeacherAssigned }
+  })()
+
+  const setEdit = (key: string, field: 'status' | 'excuse_notes', value: string) => {
     setAttendanceEdits((prev) => ({
       ...prev,
-      [childId]: { ...(prev[childId] || { status: null, excuse_notes: '' }), [field]: value }
+      [key]: { ...(prev[key] || { status: null, excuse_notes: '', teacher_status: 'present' }), [field]: value }
+    }))
+  }
+
+  const setTeacherStatus = (key: string, teacherStatus: 'present' | 'absent') => {
+    setAttendanceEdits((prev) => ({
+      ...prev,
+      [key]: { ...(prev[key] || { status: null, excuse_notes: '', teacher_status: 'present' }), teacher_status: teacherStatus }
     }))
   }
 
   // Clicking the already-selected status clears it (back to no status); otherwise selects it.
-  const toggleStatus = (childId: number, status: AttendanceStatus, current: AttendanceStatus | null) => {
+  const toggleStatus = (key: string, status: AttendanceStatus, current: AttendanceStatus | null) => {
     setAttendanceEdits((prev) => ({
       ...prev,
-      [childId]: { ...(prev[childId] || { status: null, excuse_notes: '' }), status: current === status ? null : status }
+      [key]: { ...(prev[key] || { status: null, excuse_notes: '', teacher_status: 'present' }), status: current === status ? null : status }
     }))
   }
 
@@ -124,30 +181,41 @@ export default function SessionsList() {
     const records = sheet
       .map((rec) => {
         const edit = getEdit(rec)
-        return { child_id: rec.child_id, status: edit.status, excuse_notes: edit.excuse_notes || undefined }
+        return { child_id: rec.child_id, teacher_id: rec.teacher_id ?? null, status: edit.status, excuse_notes: edit.excuse_notes || undefined, teacher_status: edit.teacher_status }
       })
-      .filter((r): r is { child_id: number; status: AttendanceStatus; excuse_notes: string | undefined } => r.status != null)
-    // Children whose previously-saved status was cleared in the sheet — remove their records
-    // so they don't reappear as selected after saving.
-    const clearedChildIds = sheet
-      .filter((rec) => rec.child_id in attendanceEdits && attendanceEdits[rec.child_id].status == null && rec.status != null)
-      .map((rec) => rec.child_id)
+      .filter((r): r is { child_id: number; teacher_id: number | null; status: AttendanceStatus; excuse_notes: string | undefined; teacher_status: 'present' | 'absent' } => r.status != null)
+    // (child, teacher) rows whose previously-saved status was cleared in the sheet — remove
+    // their records so they don't reappear as selected after saving.
+    const clearedItems = sheet
+      .filter((rec) => editKey(rec) in attendanceEdits && attendanceEdits[editKey(rec)].status == null && rec.status != null)
+      .map((rec) => ({ child_id: rec.child_id, teacher_id: rec.teacher_id ?? null }))
     const ok = await recordBulk(viewingSessionId, records)
     if (ok) {
-      if (clearedChildIds.length > 0) {
-        try { await window.api.attendance.delete(viewingSessionId, clearedChildIds) } catch { /* best-effort */ }
+      if (clearedItems.length > 0) {
+        try { await window.api.attendance.delete(viewingSessionId, clearedItems) } catch { /* best-effort */ }
       }
+      // Re-fetch the sheet so the teacher-payment badges reflect what was just generated
+      // (attended_teacher_id/teacher_status/payment are computed server-side and were not
+      // known at the time the sheet was first opened), and refresh the outer session list so
+      // its attendance_count badge doesn't go stale until a full page reload.
+      const freshSheet = await window.api.attendance.getSheet(viewingSessionId)
+      await fetchSheet(viewingSessionId)
+      fetchSessions(fromDate, toDate)
+
+      // Summarize what was ACTUALLY generated (from teacher_payments, via the real rate
+      // resolution), grouped by the teacher who was actually credited — not the legacy
+      // salary_types-based estimate, which could disagree with the real per-teacher rate.
       let msg = isAr ? 'تم حفظ الحضور.' : 'Attendance saved.'
-      try {
-        const credit = await window.api.sessions.salaryCredit(viewingSessionId)
-        setSessionCredit(credit)
-        if (credit.payable && credit.credits.length > 0) {
-          const lines = credit.credits
-            .map((c) => `${c.name} ${c.amount >= 0 ? '+' : ''}${c.amount} ${isAr ? 'ج.م' : 'EGP'}`)
-            .join('، ')
-          msg += isAr ? ` 💰 تم احتساب راتب الجلسة: ${lines}` : ` 💰 Session salary credited: ${lines}`
+      const generated = new Map<string, number>()
+      for (const rec of freshSheet as AttendanceRecord[]) {
+        if (rec.payment?.generated && rec.teacher_name && rec.payment.amount != null) {
+          generated.set(rec.teacher_name, (generated.get(rec.teacher_name) ?? 0) + rec.payment.amount)
         }
-      } catch { /* salary note is best-effort; never block the save */ }
+      }
+      if (generated.size > 0) {
+        const lines = [...generated.entries()].map(([name, amount]) => `${name} +${amount} ${isAr ? 'ج.م' : 'EGP'}`).join('، ')
+        msg += isAr ? ` 💰 تم احتساب راتب المعلمين: ${lines}` : ` 💰 Teacher payments credited: ${lines}`
+      }
       setSuccessMsg(msg)
       setViewingSessionId(null)
     }
@@ -189,6 +257,18 @@ export default function SessionsList() {
     )
   }
 
+  const filteredSessions = sessions.filter(s => {
+    if (!sessionsSearch) return true
+    const searchLower = sessionsSearch.toLowerCase()
+    return (
+      s.session_date.includes(searchLower) ||
+      (s.group_name && s.group_name.toLowerCase().includes(searchLower)) ||
+      (s.service_name && s.service_name.toLowerCase().includes(searchLower)) ||
+      (s.notes && s.notes.toLowerCase().includes(searchLower)) ||
+      (s.teachers && s.teachers.some((t: any) => t.name.toLowerCase().includes(searchLower)))
+    )
+  })
+
   return (
     <div className="p-6 space-y-6">
       <div className="flex justify-between items-center">
@@ -223,19 +303,33 @@ export default function SessionsList() {
         </div>
       )}
 
-      {/* Date filters */}
-      <div className="flex gap-3 items-end">
-        <Input label={isAr ? 'من' : 'From'} type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
-        <Input label={isAr ? 'إلى' : 'To'} type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} />
+      {/* Date filters & Search */}
+      <div className="flex flex-col sm:flex-row gap-3 items-end">
+        <div className="flex gap-3 items-end flex-1">
+          <Input label={isAr ? 'من' : 'From'} type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
+          <Input label={isAr ? 'إلى' : 'To'} type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} />
+        </div>
+        <div className="w-full sm:w-64">
+          <Input
+            label={isAr ? 'البحث' : 'Search'}
+            placeholder={isAr ? 'المجموعة، الملاحظات...' : 'Group, notes...'}
+            value={sessionsSearch}
+            onChange={(e) => setSessionsSearch(e.target.value)}
+          />
+        </div>
       </div>
 
       {isLoading ? (
         <p className="text-slate-400 text-sm">{isAr ? 'جارٍ التحميل...' : 'Loading...'}</p>
-      ) : sessions.length === 0 ? (
-        <p className="text-slate-400 text-sm">{isAr ? 'لا توجد جلسات في هذه الفترة.' : 'No sessions in this period.'}</p>
+      ) : filteredSessions.length === 0 ? (
+        <p className="text-slate-400 text-sm">
+          {sessions.length === 0
+            ? (isAr ? 'لا توجد جلسات في هذه الفترة.' : 'No sessions in this period.')
+            : (isAr ? 'لا توجد نتائج مطابقة للبحث.' : 'No sessions matching search.')}
+        </p>
       ) : (
         <div className="space-y-2">
-          {sessions.map((s) => {
+          {filteredSessions.map((s) => {
             const st = sessionStatus(s.session_date)
             const isClosed = st === 'closed'
             return (
@@ -307,6 +401,24 @@ export default function SessionsList() {
       {(() => {
         const viewingSession = sessions.find(s => s.id === viewingSessionId)
         const viewingClosed = viewingSession ? sessionStatus(viewingSession.session_date) === 'closed' : false
+        // Teachers actually assigned to a child in this session's sheet — not every teacher in the system.
+        const sheetTeachers = (() => {
+          const map = new Map<number, string>()
+          for (const rec of sheet) {
+            if (rec.teacher_id && rec.teacher_name && !map.has(rec.teacher_id)) map.set(rec.teacher_id, rec.teacher_name)
+          }
+          return [...map.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name))
+        })()
+        const filteredSheet = sheet.filter(rec => {
+          if (hasTeacherFilter && !rec.teacher_id) return false
+          if (teacherFilterId !== '' && rec.teacher_id !== teacherFilterId) return false
+          if (!attendanceSearch) return true
+          const searchLower = attendanceSearch.toLowerCase()
+          return (
+            (rec.child_name && rec.child_name.toLowerCase().includes(searchLower)) ||
+            (rec.teacher_name && rec.teacher_name.toLowerCase().includes(searchLower))
+          )
+        })
         return (
       <Modal isOpen={!!viewingSessionId} onClose={() => setViewingSessionId(null)}
         title={isAr ? 'كشف الحضور' : 'Attendance Sheet'}
@@ -324,32 +436,26 @@ export default function SessionsList() {
             🔒 {isAr ? 'هذه الجلسة مغلقة — تم إغلاقها تلقائياً بواسطة النظام. يمكن عرض الحضور فقط.' : 'This session is closed — auto-closed by the system. Attendance is view-only.'}
           </div>
         )}
-        {/* Teacher salary banner — always shows who earns from this session and why, so it's
-            never a mystery whether salary will be credited. */}
-        {sessionCredit && (
-          sessionCredit.credits.length > 0 ? (
-            <div className={`mb-3 rounded-lg px-3 py-2 text-sm border ${sessionCredit.payable ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-amber-50 border-amber-200 text-amber-800'}`}>
-              <div className="font-semibold">💰 {isAr ? 'راتب الجلسة للمعلمين:' : 'Session salary for teachers:'}</div>
-              <ul className="mt-1 space-y-0.5">
-                {sessionCredit.credits.map((c) => (
-                  <li key={c.employee_id}>
-                    {c.name}: <span className="font-semibold">+{c.amount} {isAr ? 'ج.م' : 'EGP'}</span>
-                  </li>
-                ))}
-              </ul>
-              <div className="mt-1 text-xs">
-                {sessionCredit.payable
-                  ? (isAr ? '✅ سيُحتسب لهذه الجلسة (يوجد حضور/غياب بدون عذر).' : '✅ Will be credited for this session (a child attended / was absent without excuse).')
-                  : (isAr ? '⏳ لن يُحتسب حتى تسجّل حضور طفل أو غياب بدون عذر.' : '⏳ Not credited yet — mark a child attended or absent-without-excuse.')}
-              </div>
-            </div>
-          ) : (
-            <div className="mb-3 rounded-lg px-3 py-2 text-sm bg-slate-50 border border-slate-200 text-slate-600">
-              ℹ️ {sessionCredit.hasTeachers
-                ? (isAr ? 'المعلمون المعينون ليسوا على نظام راتب لكل جلسة، فلا يُحتسب راتب جلسة.' : 'Assigned teacher(s) are not on a per-session salary type, so no per-session salary is credited.')
-                : (isAr ? 'لا يوجد معلم معيّن لهذه الجلسة. عيّن معلماً من «تعديل» لاحتساب راتب الجلسة.' : 'No teacher is assigned to this session. Assign one via Edit to credit session salary.')}
-            </div>
-          )
+        {/* Teacher payment banner — reflects the SAME rate resolution as the real payment
+            engine (own rate → Settings default → none), so this preview can never disagree
+            with what actually gets generated once Save is pressed. */}
+        {teacherPaymentPreview.credits.length > 0 ? (
+          <div className="mb-3 rounded-lg px-3 py-2 text-sm border bg-emerald-50 border-emerald-200 text-emerald-800">
+            <div className="font-semibold">💰 {isAr ? 'دفعات المعلمين المتوقعة لهذه الجلسة:' : 'Expected teacher payments for this session:'}</div>
+            <ul className="mt-1 space-y-0.5">
+              {teacherPaymentPreview.credits.map((c) => (
+                <li key={c.employee_id}>
+                  {c.name}: <span className="font-semibold">+{c.amount} {isAr ? 'ج.م' : 'EGP'}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : (
+          <div className="mb-3 rounded-lg px-3 py-2 text-sm bg-slate-50 border border-slate-200 text-slate-600">
+            ℹ️ {teacherPaymentPreview.hasTeachers
+              ? (isAr ? 'لا يوجد دفعات متوقعة حتى الآن — سجّل حضور المعلم وحضور/غياب بدون عذر للطفل.' : 'No expected payments yet — mark the teacher present and the child attended/absent-without-excuse.')
+              : (isAr ? 'لا يوجد معلم معيّن لأي طفل في هذه الجلسة.' : 'No teacher is assigned to any child in this session.')}
+          </div>
         )}
         {sheetError && <Alert variant="danger" onClose={clearSheetError}>{sheetError}</Alert>}
         {sheetLoading ? (
@@ -358,62 +464,131 @@ export default function SessionsList() {
           <p className="text-sm text-slate-400">{isAr ? 'لا يوجد أطفال مسجلون في هذه الجلسة.' : 'No children enrolled for this session.'}</p>
         ) : (
           <div className="space-y-3">
-            {sheet.map((rec) => {
-              const edit = getEdit(rec)
-              return (
-                <div key={rec.child_id} className="flex flex-col sm:flex-row sm:items-center gap-2 p-3 border border-slate-100 rounded-lg">
-                  <button
-                    type="button"
-                    onClick={() => navigate(`/children/${rec.child_id}/statement`)}
-                    className="flex items-center gap-2 flex-1 text-start hover:opacity-75 transition-opacity"
-                  >
-                    <div className="w-8 h-8 rounded-full overflow-hidden bg-slate-100 border border-slate-200 flex items-center justify-center shrink-0">
-                      {rec.child_photo_url
-                        ? <img src={rec.child_photo_url} alt={rec.child_name} className="w-full h-full object-cover" />
-                        : <span className="text-sm text-slate-300">🧒</span>
-                      }
-                    </div>
-                    <span className="flex flex-col">
-                      <span className="font-medium text-sm text-slate-800">{rec.child_name}</span>
-                      <span className="text-xs text-slate-400">
-                        {rec.teacher_name
-                          ? `👩‍🏫 ${rec.teacher_name}`
-                          : (isAr ? '⚠️ لا يوجد معلم' : '⚠️ No teacher')}
+            <Input
+              placeholder={isAr ? 'البحث عن طفل أو معلم...' : 'Search child or teacher...'}
+              value={attendanceSearch}
+              onChange={(e) => setAttendanceSearch(e.target.value)}
+            />
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+              <div className="flex-1">
+                <select
+                  value={teacherFilterId}
+                  onChange={(e) => setTeacherFilterId(e.target.value === '' ? '' : Number(e.target.value))}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700 bg-white focus:outline-none focus:ring-2 focus:ring-sky-200"
+                >
+                  <option value="">{isAr ? 'كل المعلمين' : 'All teachers'}</option>
+                  {sheetTeachers.map((t) => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
+                  ))}
+                </select>
+              </div>
+              <label className="flex items-center gap-2 text-sm text-slate-600 whitespace-nowrap select-none">
+                <input
+                  type="checkbox"
+                  checked={hasTeacherFilter}
+                  onChange={(e) => setHasTeacherFilter(e.target.checked)}
+                  className="rounded border-slate-300"
+                />
+                {isAr ? 'لديه معلم' : 'Has teacher'}
+              </label>
+            </div>
+            {filteredSheet.length === 0 ? (
+              <p className="text-sm text-slate-400 text-center py-4">{isAr ? 'لا توجد نتائج مطابقة للبحث.' : 'No matching results found.'}</p>
+            ) : (
+              filteredSheet.map((rec) => {
+                const edit = getEdit(rec)
+                const key = editKey(rec)
+                return (
+                  <div key={key} className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-2 p-3 border border-slate-100 rounded-lg">
+                    <button
+                      type="button"
+                      onClick={() => navigate(`/children/${rec.child_id}/statement`)}
+                      className="flex items-center gap-2 flex-1 text-start hover:opacity-75 transition-opacity"
+                    >
+                      <div className="w-8 h-8 rounded-full overflow-hidden bg-slate-100 border border-slate-200 flex items-center justify-center shrink-0">
+                        {rec.child_photo_url
+                          ? <img src={rec.child_photo_url} alt={rec.child_name} className="w-full h-full object-cover" />
+                          : <span className="text-sm text-slate-300">🧒</span>
+                        }
+                      </div>
+                      <span className="flex flex-col">
+                        <span className="font-medium text-sm text-slate-800">{rec.child_name}</span>
+                        <span className="text-xs text-slate-400">
+                          {rec.teacher_name
+                            ? (rec.teacher_session_rate == null
+                                ? (isAr ? `⚠️ ${rec.teacher_name} — لا يوجد سعر جلسة محدد` : `⚠️ ${rec.teacher_name} — no session rate set`)
+                                : `👩‍🏫 ${rec.teacher_name}`)
+                            : (isAr ? '⚠️ لا يوجد معلم' : '⚠️ No teacher')}
+                        </span>
                       </span>
-                    </span>
-                  </button>
-                  <div className="flex gap-1">
-                    {(['attended', 'absent_excused', 'absent_unexcused'] as AttendanceStatus[]).map((status) => (
-                      <button
-                        key={status}
-                        type="button"
+                    </button>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 shrink-0">
+                        👩‍🏫 {isAr ? 'المعلم' : 'Teacher'}
+                      </span>
+                      <div className="flex gap-1">
+                        {(['present', 'absent'] as const).map((ts) => (
+                          <button
+                            key={ts}
+                            type="button"
+                            disabled={viewingClosed}
+                            onClick={() => !viewingClosed && setTeacherStatus(key, ts)}
+                            className={[
+                              'px-2 py-1 rounded text-xs font-medium border transition-all',
+                              viewingClosed ? 'cursor-default opacity-70' : '',
+                              edit.teacher_status === ts
+                                ? ts === 'present' ? 'bg-sky-100 border-sky-400 text-sky-700' : 'bg-red-100 border-red-400 text-red-700'
+                                : 'bg-white border-slate-200 text-slate-400 hover:border-slate-400'
+                            ].join(' ')}
+                          >
+                            {ts === 'present' ? (isAr ? 'حاضر' : 'Present') : (isAr ? 'غائب' : 'Absent')}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 shrink-0">
+                        🧒 {isAr ? 'الطفل' : 'Child'}
+                      </span>
+                      <div className="flex gap-1">
+                        {(['attended', 'absent_excused', 'absent_unexcused'] as AttendanceStatus[]).map((status) => (
+                          <button
+                            key={status}
+                            type="button"
+                            disabled={viewingClosed}
+                            onClick={() => !viewingClosed && toggleStatus(key, status, edit.status)}
+                            className={[
+                              'px-2 py-1 rounded text-xs font-medium border transition-all',
+                              viewingClosed ? 'cursor-default opacity-70' : '',
+                              edit.status === status
+                                ? status === 'attended' ? 'bg-emerald-100 border-emerald-400 text-emerald-700' : status === 'absent_excused' ? 'bg-amber-100 border-amber-400 text-amber-700' : 'bg-red-100 border-red-400 text-red-700'
+                                : 'bg-white border-slate-200 text-slate-400 hover:border-slate-400'
+                            ].join(' ')}
+                          >
+                            {statusLabel(status)}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    {edit.status === 'absent_excused' && (
+                      <input
+                        type="text"
                         disabled={viewingClosed}
-                        onClick={() => !viewingClosed && toggleStatus(rec.child_id, status, edit.status)}
-                        className={[
-                          'px-2 py-1 rounded text-xs font-medium border transition-all',
-                          viewingClosed ? 'cursor-default opacity-70' : '',
-                          edit.status === status
-                            ? status === 'attended' ? 'bg-emerald-100 border-emerald-400 text-emerald-700' : status === 'absent_excused' ? 'bg-amber-100 border-amber-400 text-amber-700' : 'bg-red-100 border-red-400 text-red-700'
-                            : 'bg-white border-slate-200 text-slate-400 hover:border-slate-400'
-                        ].join(' ')}
-                      >
-                        {statusLabel(status)}
-                      </button>
-                    ))}
+                        value={edit.excuse_notes}
+                        onChange={(e) => !viewingClosed && setEdit(key, 'excuse_notes', e.target.value)}
+                        placeholder={isAr ? 'سبب الغياب بعذر...' : 'Reason...'}
+                        className="flex-1 text-xs border border-slate-200 rounded px-2 py-1 disabled:bg-slate-50 disabled:cursor-default"
+                      />
+                    )}
+                    {rec.payment?.generated && (
+                      <span className="text-xs font-semibold px-2 py-1 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 whitespace-nowrap">
+                        {isAr ? `💰 دفعة: ${rec.payment.amount ?? 0} ج.م` : `💰 Payment: ${rec.payment.amount ?? 0} EGP`}
+                      </span>
+                    )}
                   </div>
-                  {edit.status === 'absent_excused' && (
-                    <input
-                      type="text"
-                      disabled={viewingClosed}
-                      value={edit.excuse_notes}
-                      onChange={(e) => !viewingClosed && setEdit(rec.child_id, 'excuse_notes', e.target.value)}
-                      placeholder={isAr ? 'سبب الغياب بعذر...' : 'Reason...'}
-                      className="flex-1 text-xs border border-slate-200 rounded px-2 py-1 disabled:bg-slate-50 disabled:cursor-default"
-                    />
-                  )}
-                </div>
-              )
-            })}
+                )
+              })
+            )}
           </div>
         )}
       </Modal>

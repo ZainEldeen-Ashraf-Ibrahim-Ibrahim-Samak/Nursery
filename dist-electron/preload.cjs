@@ -25,8 +25,27 @@ electron.contextBridge.exposeInMainWorld("api", {
 		list: (args) => electron.ipcRenderer.invoke("childServices:list", args),
 		add: (args) => electron.ipcRenderer.invoke("childServices:add", args),
 		update: (args) => electron.ipcRenderer.invoke("childServices:update", args),
-		remove: (args) => electron.ipcRenderer.invoke("childServices:remove", args)
+		remove: (args) => electron.ipcRenderer.invoke("childServices:remove", args),
+		previewTeacherCost: (teacher_id, lesson_days) => electron.ipcRenderer.invoke("childServices:previewTeacherCost", {
+			teacher_id,
+			lesson_days
+		})
 	},
+	serviceTeachers: {
+		list: (service_id) => electron.ipcRenderer.invoke("serviceTeachers:list", { service_id }),
+		set: (service_id, employee_ids) => electron.ipcRenderer.invoke("serviceTeachers:set", {
+			service_id,
+			employee_ids
+		})
+	},
+	teacherPayments: {
+		list: (filters) => electron.ipcRenderer.invoke("teacherPayments:list", filters),
+		markPaid: (ids) => electron.ipcRenderer.invoke("teacherPayments:markPaid", { ids })
+	},
+	payroll: { report: (month, year) => electron.ipcRenderer.invoke("payroll:report", {
+		month,
+		year
+	}) },
 	teachers: { list: (args) => electron.ipcRenderer.invoke("teachers:list", args) },
 	payments: {
 		get: (args) => electron.ipcRenderer.invoke("payments:get", args),
@@ -150,7 +169,8 @@ electron.contextBridge.exposeInMainWorld("api", {
 			employee_id,
 			month,
 			year
-		})
+		}),
+		getChildHistory: (child_id) => electron.ipcRenderer.invoke("attendance:getChildHistory", { child_id })
 	},
 	deductions: {
 		list: (args) => electron.ipcRenderer.invoke("deductions:list", args),

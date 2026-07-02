@@ -15,14 +15,34 @@ function monthBounds(month: string, year: number | string) {
 }
 
 /**
+ * Sums this employee's attendance-based teacher_payments for a month (feature 006), excluding
+ * Void rows. This is the authoritative per-session earnings source for any employee who has
+ * their own `teacher_session_rate` configured — it reflects their REAL rate and REAL attendance,
+ * not the older session_teachers/salary_types estimate (which used a shared, role-level rate and
+ * a cruder "was any child payable in this session" count).
+ */
+function getTeacherPaymentsForMonth(db: any, employeeId: number, start: string, end: string) {
+  const row = db.prepare(`
+    SELECT COUNT(*) as cnt, COALESCE(SUM(session_cost), 0) as total
+    FROM teacher_payments
+    WHERE teacher_id = ? AND status IN ('pending','paid') AND attendance_date >= ? AND attendance_date <= ?
+  `).get(employeeId, start, end) as { cnt: number; total: number }
+  return { count: row.cnt, total: row.total }
+}
+
+/**
  * Computes an employee's base monthly pay for a period from their effective salary type.
  * For per-session/hybrid types this reflects how many sessions were actually payable
  * (a session is payable when a child attended or was absent without excuse). Shared by
  * salary:get and salary:update so a saved payroll row never disagrees with the live view.
+ *
+ * If the employee has their own `teacher_session_rate` configured (feature 006), their
+ * per-session earnings come from the teacher_payments ledger instead of the salary-type
+ * estimate — that ledger is what attendance actually generated, at their real rate.
  */
 function computeBaseSalary(db: any, employeeId: number, month: string, year: number | string) {
   const row = db.prepare(`
-    SELECT e.net_salary, COALESCE(e.salary_type_override_id, er.salary_type_id) as eff
+    SELECT e.net_salary, e.teacher_session_rate, COALESCE(e.salary_type_override_id, er.salary_type_id) as eff
     FROM employees e LEFT JOIN employee_roles er ON e.role_id = er.id WHERE e.id = ?
   `).get(employeeId) as any
   const netSalary = row?.net_salary ?? 0
@@ -32,30 +52,46 @@ function computeBaseSalary(db: any, employeeId: number, month: string, year: num
   let salaryTypeName: string | null = null
   let salaryTypeMode: string | null = null
 
+  const { start, end } = monthBounds(month, year)
+  const hasOwnTeacherRate = row?.teacher_session_rate != null
+  const teacherPayments = hasOwnTeacherRate ? getTeacherPaymentsForMonth(db, employeeId, start, end) : null
+
   if (row?.eff) {
     const st = db.prepare('SELECT * FROM salary_types WHERE id = ?').get(row.eff) as any
     if (st) {
       salaryTypeName = st.name
       salaryTypeMode = st.mode
-      const { start, end } = monthBounds(month, year)
-      const sessionIds = (db.prepare(`
-        SELECT ss.id FROM scheduled_sessions ss
-        JOIN session_teachers stc ON stc.session_id = ss.id
-        WHERE stc.employee_id = ? AND ss.session_date >= ? AND ss.session_date <= ?
-      `).all(employeeId, start, end) as { id: number }[]).map((s) => s.id)
-      totalSessions = sessionIds.length
-      if (sessionIds.length > 0) {
-        const ph = sessionIds.map(() => '?').join(',')
-        payableSessions = (db.prepare(`
-          SELECT COUNT(DISTINCT session_id) as cnt FROM attendance_records
-          WHERE session_id IN (${ph}) AND status IN ('attended','absent_unexcused')
-        `).get(...sessionIds) as { cnt: number }).cnt
+
+      if (hasOwnTeacherRate && (st.mode === 'per_session_fixed' || st.mode === 'hybrid')) {
+        payableSessions = teacherPayments!.count
+        totalSessions = teacherPayments!.count
+        base = st.mode === 'hybrid' ? (st.monthly_rate ?? 0) + teacherPayments!.total : teacherPayments!.total
+      } else {
+        const sessionIds = (db.prepare(`
+          SELECT ss.id FROM scheduled_sessions ss
+          JOIN session_teachers stc ON stc.session_id = ss.id
+          WHERE stc.employee_id = ? AND ss.session_date >= ? AND ss.session_date <= ?
+        `).all(employeeId, start, end) as { id: number }[]).map((s) => s.id)
+        totalSessions = sessionIds.length
+        if (sessionIds.length > 0) {
+          const ph = sessionIds.map(() => '?').join(',')
+          payableSessions = (db.prepare(`
+            SELECT COUNT(DISTINCT session_id) as cnt FROM attendance_records
+            WHERE session_id IN (${ph}) AND status IN ('attended','absent_unexcused')
+          `).get(...sessionIds) as { cnt: number }).cnt
+        }
+        if (st.mode === 'fixed_monthly') base = st.monthly_rate ?? netSalary
+        else if (st.mode === 'per_session_fixed') base = payableSessions * (st.session_rate ?? 0)
+        else if (st.mode === 'per_session_pct') base = payableSessions * (st.session_pct ?? 0) * 100
+        else if (st.mode === 'hybrid') base = (st.monthly_rate ?? 0) + payableSessions * (st.session_rate ?? 0)
       }
-      if (st.mode === 'fixed_monthly') base = st.monthly_rate ?? netSalary
-      else if (st.mode === 'per_session_fixed') base = payableSessions * (st.session_rate ?? 0)
-      else if (st.mode === 'per_session_pct') base = payableSessions * (st.session_pct ?? 0) * 100
-      else if (st.mode === 'hybrid') base = (st.monthly_rate ?? 0) + payableSessions * (st.session_rate ?? 0)
     }
+  } else if (hasOwnTeacherRate) {
+    // No salary type at all, but this employee is a per-session teacher under the
+    // attendance-based system — their earnings ARE the teacher_payments total, not netSalary.
+    payableSessions = teacherPayments!.count
+    totalSessions = teacherPayments!.count
+    base = teacherPayments!.total
   }
 
   return { base, payableSessions, totalSessions, salaryTypeName, salaryTypeMode }
@@ -84,7 +120,7 @@ ipcMain.handle('employees:add', async (_event, employeeInput) => {
   try {
     requireAdmin()
     const db = getDb()
-    const { name, role_id, base_salary, housing = 0, transport = 0, salary_type_override_id = null } = employeeInput
+    const { name, role_id, base_salary, housing = 0, transport = 0, salary_type_override_id = null, teacher_session_rate = null } = employeeInput
 
     if (!name || base_salary === undefined) {
       throw new Error('جميع الحقول الإلزامية مطلوبة / Missing required fields')
@@ -102,9 +138,9 @@ ipcMain.handle('employees:add', async (_event, employeeInput) => {
     const now = new Date().toISOString()
 
     const result = db.prepare(`
-      INSERT INTO employees (name, role, role_id, salary_type_override_id, base_salary, housing, transport, net_salary, is_active, created_at, updated_at, synced)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, 0)
-    `).run(name, roleText, role_id ?? null, salary_type_override_id, Number(base_salary), Number(housing), Number(transport), netSalary, now, now)
+      INSERT INTO employees (name, role, role_id, salary_type_override_id, base_salary, housing, transport, net_salary, is_active, created_at, updated_at, synced, teacher_session_rate)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, 0, ?)
+    `).run(name, roleText, role_id ?? null, salary_type_override_id, Number(base_salary), Number(housing), Number(transport), netSalary, now, now, teacher_session_rate !== null ? Number(teacher_session_rate) : null)
 
     const createdId = Number(result.lastInsertRowid)
     const createdEmployee = db.prepare(`
@@ -139,6 +175,9 @@ ipcMain.handle('employees:update', async (_event, { id, patch }) => {
     const base_salary = patch.base_salary !== undefined ? Number(patch.base_salary) : emp.base_salary
     const housing = patch.housing !== undefined ? Number(patch.housing) : emp.housing
     const transport = patch.transport !== undefined ? Number(patch.transport) : emp.transport
+    const teacher_session_rate = patch.teacher_session_rate !== undefined
+      ? (patch.teacher_session_rate === null ? null : Number(patch.teacher_session_rate))
+      : emp.teacher_session_rate
 
     // Sync role text from role_id
     if (patch.role_id !== undefined && patch.role_id !== null) {
@@ -150,11 +189,24 @@ ipcMain.handle('employees:update', async (_event, { id, patch }) => {
 
     const netSalary = base_salary + housing + transport
 
+    const now = new Date().toISOString()
     db.prepare(`
       UPDATE employees
-      SET name = ?, role = ?, role_id = ?, salary_type_override_id = ?, base_salary = ?, housing = ?, transport = ?, net_salary = ?, updated_at = ?, synced = 0
+      SET name = ?, role = ?, role_id = ?, salary_type_override_id = ?, base_salary = ?, housing = ?, transport = ?, net_salary = ?, updated_at = ?, synced = 0, teacher_session_rate = ?
       WHERE id = ?
-    `).run(name, role, role_id, salary_type_override_id, base_salary, housing, transport, netSalary, new Date().toISOString(), id)
+    `).run(name, role, role_id, salary_type_override_id, base_salary, housing, transport, netSalary, now, teacher_session_rate, id)
+
+    // If the teacher's own per-session rate changed and is now set, re-snapshot any of their
+    // still-Pending payments to the corrected rate immediately — otherwise a payment generated
+    // before the rate was configured (or generated from the org-wide Settings fallback) would
+    // stay stale until that attendance record happened to be re-saved. Paid/Void rows are never
+    // touched, consistent with the attendance-time re-snapshot rule (research.md #7).
+    if (patch.teacher_session_rate !== undefined && teacher_session_rate !== emp.teacher_session_rate && teacher_session_rate != null) {
+      db.prepare(`
+        UPDATE teacher_payments SET session_cost = ?, updated_at = ?, synced = 0
+        WHERE teacher_id = ? AND status = 'pending'
+      `).run(teacher_session_rate, now, id)
+    }
 
     const updatedEmployee = db.prepare(`
       SELECT e.*, er.name as role_name FROM employees e LEFT JOIN employee_roles er ON e.role_id = er.id WHERE e.id = ?
@@ -221,59 +273,16 @@ ipcMain.handle('salary:get', async (_event, { month, year }) => {
       ORDER BY e.name ASC
     `).all(month, year, month, year) as any[]
 
-    // Enrich with salary type info and compute actual_paid by formula
-    const monthNum = String(month === 'يناير' ? 1 : month === 'فبراير' ? 2 : month === 'مارس' ? 3 : month === 'أبريل' ? 4 : month === 'مايو' ? 5 : month === 'يونيو' ? 6 : month === 'يوليو' ? 7 : month === 'أغسطس' ? 8 : month === 'سبتمبر' ? 9 : month === 'أكتوبر' ? 10 : month === 'نوفمبر' ? 11 : 12).padStart(2, '0')
-    const yearStr = String(year)
-    const monthStart = `${yearStr}-${monthNum}-01`
-    const monthEnd = `${yearStr}-${monthNum}-31`
-
+    // Enrich with salary type info and compute actual_paid by formula. Delegates to
+    // computeBaseSalary (shared with salary:update) instead of duplicating the per-mode
+    // formulas here, so this view can never disagree with what gets saved — and so the
+    // feature-006 teacher_payments override (own rate wins over the salary-type estimate)
+    // only has to be implemented in one place.
     return rows.map((row) => {
-      let salaryTypeName: string | null = null
-      let salaryTypeMode: string | null = null
-      let computedActualPaid = row.net_salary
-
-      if (row.effective_salary_type_id) {
-        const st = db.prepare('SELECT * FROM salary_types WHERE id = ?').get(row.effective_salary_type_id) as any
-        if (st) {
-          salaryTypeName = st.name
-          salaryTypeMode = st.mode
-
-          // Get payable sessions for this employee this month
-          let payableSessions = 0
-          const sessionIds = (db.prepare(`
-            SELECT ss.id FROM scheduled_sessions ss
-            JOIN session_teachers stc ON stc.session_id = ss.id
-            WHERE stc.employee_id = ? AND ss.session_date >= ? AND ss.session_date <= ?
-          `).all(row.employee_id, monthStart, monthEnd) as { id: number }[]).map((s) => s.id)
-
-          if (sessionIds.length > 0) {
-            const placeholders = sessionIds.map(() => '?').join(',')
-            // Count distinct sessions that have at least one *payable* attendance record.
-            // A session is payable when a child attended or was absent without excuse;
-            // sessions where every child is absent-with-excuse do not pay.
-            // (One row per child per session — COUNT(*) would inflate the number by child count.)
-            const attendedRows = db.prepare(`
-              SELECT COUNT(DISTINCT session_id) as cnt FROM attendance_records
-              WHERE session_id IN (${placeholders}) AND status IN ('attended','absent_unexcused')
-            `).get(...sessionIds) as { cnt: number }
-            payableSessions = attendedRows.cnt
-          }
-
-          if (st.mode === 'fixed_monthly') {
-            computedActualPaid = st.monthly_rate ?? row.net_salary
-          } else if (st.mode === 'per_session_fixed') {
-            computedActualPaid = payableSessions * (st.session_rate ?? 0)
-          } else if (st.mode === 'per_session_pct') {
-            // session revenue: sum of child service prices for sessions attended this month
-            computedActualPaid = payableSessions * (st.session_pct ?? 0) * 100 // placeholder; session_revenue TBD
-          } else if (st.mode === 'hybrid') {
-            computedActualPaid = (st.monthly_rate ?? 0) + payableSessions * (st.session_rate ?? 0)
-          }
-
-          row.payable_sessions = payableSessions
-          row.total_sessions = sessionIds.length
-        }
-      }
+      const { base: computedActualPaid, payableSessions, totalSessions, salaryTypeName, salaryTypeMode } =
+        computeBaseSalary(db, row.employee_id, month, year)
+      row.payable_sessions = payableSessions
+      row.total_sessions = totalSessions
 
       const bonus = row.bonus ?? 0
       // Sum itemised deductions from employee_deductions table

@@ -9,7 +9,8 @@ import { Table } from '../../components/ui/Table.js'
 import { Badge } from '../../components/ui/Badge.js'
 import { Alert } from '../../components/ui/Alert.js'
 import { LoadingSpinner } from '../../components/ui/LoadingSpinner.js'
-import type { ChildStatement as ChildStatementType, ChildStatementRow } from '../../types/index.js'
+import { useAuthStore } from '../../store/useAuthStore.js'
+import type { ChildStatement as ChildStatementType, ChildStatementRow, AttendanceHistoryRow } from '../../types/index.js'
 
 const arabicMonths = [
   'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
@@ -33,6 +34,16 @@ export default function ChildStatement() {
   
   const [isExportingExcel, setIsExportingExcel] = useState(false)
   const [isExportingPdf, setIsExportingPdf] = useState(false)
+
+  // Attendance history (FR-019) — admin-only, per the access-control clarification.
+  const { user } = useAuthStore()
+  const isAdmin = user?.role === 'admin'
+  const [attendanceHistory, setAttendanceHistory] = useState<AttendanceHistoryRow[]>([])
+
+  useEffect(() => {
+    if (!id || !isAdmin) return
+    window.api.attendance.getChildHistory(Number(id)).then(setAttendanceHistory).catch(() => setAttendanceHistory([]))
+  }, [id, isAdmin])
 
   // Fetch statement data
   const fetchStatement = async () => {
@@ -353,6 +364,28 @@ export default function ChildStatement() {
           emptyMessage={i18n.language === 'ar' ? 'لا يوجد سجل مطالبات لهذا الطفل بعد.' : 'No payment records for this child.'}
         />
       </div>
+
+      {/* Attendance History (FR-019) — admin-only */}
+      {isAdmin && (
+        <div className="space-y-4">
+          <h3 className="text-lg font-bold text-slate-800">
+            🗓️ {i18n.language === 'ar' ? 'سجل الحضور الكامل' : 'Complete Attendance History'}
+          </h3>
+          <Table
+            columns={[
+              { key: 'attendance_date', header: i18n.language === 'ar' ? 'التاريخ' : 'Date', render: (r: AttendanceHistoryRow) => r.attendance_date },
+              { key: 'teacher_name', header: i18n.language === 'ar' ? 'المعلم' : 'Teacher', render: (r: AttendanceHistoryRow) => r.teacher_name || '—' },
+              { key: 'teacher_status', header: i18n.language === 'ar' ? 'حالة المعلم' : 'Teacher Status', render: (r: AttendanceHistoryRow) => r.teacher_status === 'present' ? (i18n.language === 'ar' ? 'حاضر' : 'Present') : r.teacher_status === 'absent' ? (i18n.language === 'ar' ? 'غائب' : 'Absent') : '—' },
+              { key: 'child_status', header: i18n.language === 'ar' ? 'حالة الطفل' : 'Child Status', render: (r: AttendanceHistoryRow) => r.child_status === 'attended' ? (i18n.language === 'ar' ? 'حاضر' : 'Attended') : r.child_status === 'absent_excused' ? (i18n.language === 'ar' ? 'غائب بعذر' : 'Excused') : (i18n.language === 'ar' ? 'غائب بدون عذر' : 'Unexcused') },
+              { key: 'payment_generated', header: i18n.language === 'ar' ? 'تم الدفع' : 'Payment', render: (r: AttendanceHistoryRow) => r.payment_generated ? <Badge variant="success">{i18n.language === 'ar' ? 'نعم' : 'Yes'}</Badge> : <Badge variant="neutral">{i18n.language === 'ar' ? 'لا' : 'No'}</Badge> },
+              { key: 'session_cost', header: i18n.language === 'ar' ? 'تكلفة الجلسة' : 'Session Cost', render: (r: AttendanceHistoryRow) => r.session_cost != null ? formatCurrency(r.session_cost) : '—' },
+            ]}
+            data={attendanceHistory}
+            keyExtractor={(row, index) => `${row.attendance_date}-${index}`}
+            emptyMessage={i18n.language === 'ar' ? 'لا يوجد سجل حضور لهذا الطفل بعد.' : 'No attendance history for this child yet.'}
+          />
+        </div>
+      )}
     </div>
   )
 }

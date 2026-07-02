@@ -11,6 +11,7 @@ import { Input } from '../../components/ui/Input.js'
 import { Select } from '../../components/ui/Select.js'
 import { Modal } from '../../components/ui/Modal.js'
 import { useExport } from '../../hooks/useExport.js'
+import { useNavigate } from 'react-router-dom'
 import type { Employee, SalaryPayment } from '../../types/index.js'
 
 const arabicMonths = [
@@ -27,6 +28,7 @@ const yearsList = [2024, 2025, 2026, 2027, 2028, 2029, 2030]
 
 export default function SalariesList() {
   const { t, i18n } = useTranslation()
+  const navigate = useNavigate()
   const { exportSalaries } = useExport()
 
   const {
@@ -511,6 +513,9 @@ export default function SalariesList() {
 
         {/* Tab Selector & Export Buttons */}
         <div className="flex flex-col md:flex-row items-stretch md:items-center gap-4 w-full md:w-auto">
+          <Button variant="outline" onClick={() => navigate('/salaries/payroll-report')}>
+            📊 {i18n.language === 'ar' ? 'تقرير رواتب المعلمين' : 'Teacher Payroll Report'}
+          </Button>
           {/* Tab Switcher */}
           <div className="bg-slate-100 p-1 rounded-lg flex self-start">
             <button

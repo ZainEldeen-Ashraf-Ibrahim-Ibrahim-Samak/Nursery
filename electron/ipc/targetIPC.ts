@@ -22,6 +22,19 @@ function calcCoveragePct(collected: number, requiredRevenue: number): number {
   return Number(Math.min(1, collected / requiredRevenue).toFixed(4))
 }
 
+// Single source of truth for service pricing (Settings → Services / service_definitions),
+// no more legacy `settings` table pricing keys. نصف يوم/جلسة use price_hourly, otherwise
+// price_monthly, matching the prior nursery/hosting/session semantics.
+function getServicePricing(db: ReturnType<typeof getDb>): Record<string, number> {
+  const defs = db.prepare('SELECT name, price_monthly, price_hourly FROM service_definitions').all() as
+    { name: string; price_monthly: number | null; price_hourly: number | null }[]
+  const pricing: Record<string, number> = {}
+  for (const d of defs) {
+    pricing[d.name] = Number((d.name === 'جلسة' || d.name === 'جلسه' ? d.price_hourly : d.price_monthly) ?? 0)
+  }
+  return pricing
+}
+
 /**
  * target:get { year }
  * Returns a per-month array of target data for a given year:
@@ -117,15 +130,7 @@ ipcMain.handle('target:capacity-plan', (_event, { numClasses, classCapacity, num
 
     const totalCapacity = nc * cc
 
-    const settings  = db.prepare('SELECT key, value FROM settings').all() as { key: string; value: string }[]
-    const settingMap: Record<string, string> = {}
-    for (const s of settings) settingMap[s.key] = s.value
-
-    const pricing: Record<string, number> = {
-      حضانة:  Number(settingMap['nursery_monthly']  || 2500),
-      استضافة: Number(settingMap['hosting_monthly'] || 3000),
-      جلسة:   Number(settingMap['session_hourly']   || 100),
-    }
+    const pricing = getServicePricing(db)
 
     // Per-service: children/sessions needed to hit desiredRevenue alone
     const scenarios: Record<string, { childrenNeeded: number; feasible: boolean; maxRevenue: number; utilization: number }> = {}
@@ -185,15 +190,7 @@ ipcMain.handle('target:calc', async (_event, { distribution, month, year, target
     const db = getDb()
 
     // Get current pricing
-    const settings = db.prepare('SELECT key, value FROM settings').all() as { key: string; value: string }[]
-    const settingMap: Record<string, string> = {}
-    for (const s of settings) settingMap[s.key] = s.value
-
-    const pricing: Record<string, number> = {
-      حضانة: Number(settingMap['nursery_monthly'] || 2500),
-      استضافة: Number(settingMap['hosting_monthly'] || 3000),
-      جلسة: Number(settingMap['session_hourly'] || 100)
-    }
+    const pricing = getServicePricing(db)
 
     // Compute projected monthly revenue
     let projectedRevenue = 0

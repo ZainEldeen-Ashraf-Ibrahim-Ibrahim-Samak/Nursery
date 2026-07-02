@@ -15564,6 +15564,112 @@ var migrations = [
 				db.exec(`CREATE INDEX IF NOT EXISTS idx_child_services_child ON child_services(child_id);`);
 			} catch {}
 		}
+	},
+	{
+		name: "026_service_teachers",
+		up: (db) => {
+			db.exec(`
+        CREATE TABLE IF NOT EXISTS service_teachers (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          service_id INTEGER NOT NULL REFERENCES service_definitions(id) ON DELETE CASCADE,
+          employee_id INTEGER NOT NULL REFERENCES employees(id),
+          created_at TEXT NOT NULL,
+          synced INTEGER DEFAULT 0,
+          UNIQUE(service_id, employee_id)
+        );
+      `);
+		}
+	},
+	{
+		name: "027_teacher_session_rate",
+		up: (db) => {
+			try {
+				db.exec("ALTER TABLE employees ADD COLUMN teacher_session_rate REAL;");
+			} catch {}
+		}
+	},
+	{
+		name: "028_attendance_teacher_status",
+		up: (db) => {
+			const addCol = (ddl) => {
+				try {
+					db.exec(ddl);
+				} catch {}
+			};
+			addCol("ALTER TABLE attendance_records ADD COLUMN attended_teacher_id INTEGER REFERENCES employees(id);");
+			addCol("ALTER TABLE attendance_records ADD COLUMN teacher_status TEXT CHECK(teacher_status IN ('present','absent'));");
+			db.exec(`
+        UPDATE attendance_records
+        SET teacher_status = 'present'
+        WHERE teacher_status IS NULL;
+      `);
+			db.exec(`
+        UPDATE attendance_records
+        SET attended_teacher_id = (
+          SELECT teacher_id FROM children WHERE children.id = attendance_records.child_id
+        )
+        WHERE attended_teacher_id IS NULL;
+      `);
+		}
+	},
+	{
+		name: "029_teacher_payments",
+		up: (db) => {
+			db.exec(`
+        CREATE TABLE IF NOT EXISTS teacher_payments (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          teacher_id INTEGER NOT NULL REFERENCES employees(id),
+          child_id INTEGER NOT NULL REFERENCES children(id) ON DELETE CASCADE,
+          attendance_record_id INTEGER NOT NULL REFERENCES attendance_records(id) ON DELETE CASCADE,
+          attendance_date TEXT NOT NULL,
+          session_cost REAL NOT NULL,
+          status TEXT NOT NULL CHECK(status IN ('pending','paid','void')) DEFAULT 'pending',
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          synced INTEGER DEFAULT 0,
+          UNIQUE(teacher_id, child_id, attendance_date)
+        );
+        CREATE INDEX IF NOT EXISTS idx_teacher_payments_teacher ON teacher_payments(teacher_id);
+        CREATE INDEX IF NOT EXISTS idx_teacher_payments_month ON teacher_payments(attendance_date);
+      `);
+		}
+	},
+	{
+		name: "030_attendance_records_per_teacher",
+		noTransaction: true,
+		up: (db) => {
+			db.exec(`
+        CREATE TABLE IF NOT EXISTS attendance_records_new (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          session_id INTEGER NOT NULL REFERENCES scheduled_sessions(id) ON DELETE CASCADE,
+          child_id INTEGER NOT NULL REFERENCES children(id) ON DELETE CASCADE,
+          status TEXT NOT NULL CHECK(status IN ('attended','absent_excused','absent_unexcused')),
+          excuse_notes TEXT,
+          recorded_by INTEGER REFERENCES users(id),
+          recorded_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          synced INTEGER DEFAULT 0,
+          attended_teacher_id INTEGER REFERENCES employees(id),
+          teacher_status TEXT CHECK(teacher_status IN ('present','absent')),
+          UNIQUE(session_id, child_id, attended_teacher_id)
+        );
+
+        INSERT INTO attendance_records_new
+          (id, session_id, child_id, status, excuse_notes, recorded_by, recorded_at, updated_at,
+           synced, attended_teacher_id, teacher_status)
+        SELECT
+          id, session_id, child_id, status, excuse_notes, recorded_by, recorded_at, updated_at,
+          synced, attended_teacher_id, teacher_status
+        FROM attendance_records;
+
+        DROP TABLE attendance_records;
+        ALTER TABLE attendance_records_new RENAME TO attendance_records;
+      `);
+			try {
+				db.exec(`CREATE INDEX IF NOT EXISTS idx_attendance_records_session ON attendance_records(session_id);`);
+				db.exec(`CREATE INDEX IF NOT EXISTS idx_attendance_records_child ON attendance_records(child_id);`);
+			} catch {}
+		}
 	}
 ];
 function runMigrations(db) {
@@ -17502,42 +17608,6 @@ async function seedDatabase(db) {
 	{
 		const defaultSettings = [
 			{
-				key: "nursery_monthly",
-				value: seedSetting("SEED_NURSERY_MONTHLY", "2500")
-			},
-			{
-				key: "nursery_daily",
-				value: seedSetting("SEED_NURSERY_DAILY", "150")
-			},
-			{
-				key: "nursery_hourly",
-				value: seedSetting("SEED_NURSERY_HOURLY", "30")
-			},
-			{
-				key: "hosting_monthly",
-				value: seedSetting("SEED_HOSTING_MONTHLY", "3000")
-			},
-			{
-				key: "hosting_daily",
-				value: seedSetting("SEED_HOSTING_DAILY", "200")
-			},
-			{
-				key: "hosting_hourly",
-				value: seedSetting("SEED_HOSTING_HOURLY", "40")
-			},
-			{
-				key: "session_monthly",
-				value: seedSetting("SEED_SESSION_MONTHLY", "1200")
-			},
-			{
-				key: "session_hourly",
-				value: seedSetting("SEED_SESSION_HOURLY", "100")
-			},
-			{
-				key: "session_daily",
-				value: seedSetting("SEED_SESSION_DAILY", "400")
-			},
-			{
 				key: "target_profit_pct",
 				value: seedSetting("SEED_TARGET_PROFIT_PCT", "0.20")
 			},
@@ -17612,6 +17682,36 @@ async function seedDatabase(db) {
     `);
 		db.transaction(() => {
 			for (const setting of defaultSettings) insertSetting.run(setting.key, setting.value);
+		})();
+	}
+	{
+		const defaultServices = [
+			{
+				name: "حضانة",
+				monthly: seedSetting("SEED_NURSERY_MONTHLY", "2500"),
+				daily: seedSetting("SEED_NURSERY_DAILY", "150"),
+				hourly: seedSetting("SEED_NURSERY_HOURLY", "30")
+			},
+			{
+				name: "استضافة",
+				monthly: seedSetting("SEED_HOSTING_MONTHLY", "3000"),
+				daily: seedSetting("SEED_HOSTING_DAILY", "200"),
+				hourly: seedSetting("SEED_HOSTING_HOURLY", "40")
+			},
+			{
+				name: "جلسة",
+				monthly: seedSetting("SEED_SESSION_MONTHLY", "1200"),
+				daily: seedSetting("SEED_SESSION_DAILY", "400"),
+				hourly: seedSetting("SEED_SESSION_HOURLY", "100")
+			}
+		];
+		const now = (/* @__PURE__ */ new Date()).toISOString();
+		const insertService = db.prepare(`
+      INSERT OR IGNORE INTO service_definitions (name, is_custom, price_monthly, price_daily, price_hourly, created_at, updated_at, synced)
+      VALUES (?, 0, ?, ?, ?, ?, ?, 0)
+    `);
+		db.transaction(() => {
+			for (const s of defaultServices) insertService.run(s.name, Number(s.monthly), Number(s.daily), Number(s.hourly), now, now);
 		})();
 	}
 }
@@ -22087,30 +22187,36 @@ ipcMain.handle("children:update", async (_event, { id, patch }) => {
 				db.prepare(query).run(...params);
 			}
 			if (enrollments) {
-				const existingServices = db.prepare("SELECT id, service FROM child_services WHERE child_id = ?").all(id);
-				const incomingIds = new Set(enrollments.filter((s) => s.id).map((s) => Number(s.id)));
-				const incomingServiceNames = new Set(enrollments.map((s) => s.service));
-				const removedIds = existingServices.filter((e) => !incomingIds.has(e.id) && !incomingServiceNames.has(e.service)).map((e) => e.id);
+				const existingServices = db.prepare("SELECT id FROM child_services WHERE child_id = ?").all(id);
+				const existingIds = new Set(existingServices.map((e) => e.id));
+				const incomingIds = new Set(enrollments.filter((s) => s.id != null).map((s) => Number(s.id)));
+				const removedIds = [...existingIds].filter((eid) => !incomingIds.has(eid));
 				if (removedIds.length > 0) {
 					const placeholders = removedIds.map(() => "?").join(",");
 					db.prepare(`UPDATE payments SET service_id = NULL WHERE child_id = ? AND service_id IN (${placeholders})`).run(id, ...removedIds);
 					db.prepare(`DELETE FROM child_services WHERE id IN (${placeholders})`).run(...removedIds);
 				}
-				db.prepare(`UPDATE payments SET service_id = NULL WHERE child_id = ?`).run(id);
-				db.prepare(`DELETE FROM child_services WHERE child_id = ?`).run(id);
+				const updateSvc = db.prepare(`
+          UPDATE child_services
+          SET service = ?, unit = ?, price = ?, teacher_id = ?, lesson_days = ?, extra_lessons = ?, session_price = ?, updated_at = ?, synced = 0
+          WHERE id = ? AND child_id = ?
+        `);
 				const insertSvc = db.prepare(`INSERT INTO child_services (child_id, service, unit, price, teacher_id, lesson_days, extra_lessons, session_price, created_at, updated_at, synced) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`);
 				for (const s of enrollments) {
 					const sTeacherId = s.teacher_id != null && s.teacher_id !== "" ? Number(s.teacher_id) : null;
 					const sLessonDays = Array.isArray(s.lesson_days) ? JSON.stringify(s.lesson_days) : s.lesson_days || null;
 					const sExtraLessons = s.extra_lessons != null ? Number(s.extra_lessons) : 0;
 					const sSessionPrice = s.session_price != null && s.session_price !== "" ? Number(s.session_price) : null;
-					insertSvc.run(id, s.service, s.unit, s.price, sTeacherId, sLessonDays, sExtraLessons, sSessionPrice, now, now);
+					const existingId = s.id != null ? Number(s.id) : null;
+					if (existingId != null && existingIds.has(existingId)) updateSvc.run(s.service, s.unit, s.price, sTeacherId, sLessonDays, sExtraLessons, sSessionPrice, now, existingId, id);
+					else insertSvc.run(id, s.service, s.unit, s.price, sTeacherId, sLessonDays, sExtraLessons, sSessionPrice, now, now);
 				}
 				db.prepare(`
           UPDATE payments
           SET service_id = (
             SELECT cs.id FROM child_services cs
             WHERE cs.child_id = payments.child_id AND cs.service = payments.service
+              AND NOT EXISTS (SELECT 1 FROM payments p2 WHERE p2.service_id = cs.id)
             LIMIT 1
           )
           WHERE child_id = ? AND service_id IS NULL
@@ -22228,6 +22334,35 @@ ipcMain.handle("childServices:update", async (_event, { id, patch }) => {
 	} catch (error) {
 		console.error("Failed to update child service:", error);
 		throw new Error(error.message || "Failed to update child service");
+	}
+});
+ipcMain.handle("childServices:previewTeacherCost", async (_event, { teacher_id, lesson_days }) => {
+	try {
+		checkAuth$4();
+		const db = getDb();
+		let rate = db.prepare("SELECT teacher_session_rate FROM employees WHERE id = ?").get(teacher_id)?.teacher_session_rate ?? null;
+		if (rate == null) {
+			const defaultSetting = db.prepare("SELECT value FROM settings WHERE key = 'default_teacher_session_rate'").get();
+			const defaultRate = defaultSetting?.value != null ? Number(defaultSetting.value) : NaN;
+			rate = !isNaN(defaultRate) && defaultRate > 0 ? defaultRate : 0;
+		}
+		const days = Array.isArray(lesson_days) ? lesson_days.map(Number) : [];
+		const today = /* @__PURE__ */ new Date();
+		const year = today.getFullYear();
+		const month = today.getMonth();
+		const daysInMonth = new Date(year, month + 1, 0).getDate();
+		let remaining = 0;
+		if (days.length > 0) for (let d = today.getDate(); d <= daysInMonth; d++) {
+			const date = new Date(year, month, d);
+			if (days.includes(date.getDay())) remaining++;
+		}
+		return {
+			remaining_sessions: remaining,
+			expected_cost: Number((remaining * rate).toFixed(2)),
+			teacher_session_rate: rate
+		};
+	} catch (error) {
+		throw new Error(error.message || "Failed to preview teacher cost");
 	}
 });
 ipcMain.handle("childServices:remove", async (_event, { id }) => {
@@ -22637,14 +22772,36 @@ function monthBounds(month, year) {
 	};
 }
 /**
+* Sums this employee's attendance-based teacher_payments for a month (feature 006), excluding
+* Void rows. This is the authoritative per-session earnings source for any employee who has
+* their own `teacher_session_rate` configured — it reflects their REAL rate and REAL attendance,
+* not the older session_teachers/salary_types estimate (which used a shared, role-level rate and
+* a cruder "was any child payable in this session" count).
+*/
+function getTeacherPaymentsForMonth(db, employeeId, start, end) {
+	const row = db.prepare(`
+    SELECT COUNT(*) as cnt, COALESCE(SUM(session_cost), 0) as total
+    FROM teacher_payments
+    WHERE teacher_id = ? AND status IN ('pending','paid') AND attendance_date >= ? AND attendance_date <= ?
+  `).get(employeeId, start, end);
+	return {
+		count: row.cnt,
+		total: row.total
+	};
+}
+/**
 * Computes an employee's base monthly pay for a period from their effective salary type.
 * For per-session/hybrid types this reflects how many sessions were actually payable
 * (a session is payable when a child attended or was absent without excuse). Shared by
 * salary:get and salary:update so a saved payroll row never disagrees with the live view.
+*
+* If the employee has their own `teacher_session_rate` configured (feature 006), their
+* per-session earnings come from the teacher_payments ledger instead of the salary-type
+* estimate — that ledger is what attendance actually generated, at their real rate.
 */
 function computeBaseSalary(db, employeeId, month, year) {
 	const row = db.prepare(`
-    SELECT e.net_salary, COALESCE(e.salary_type_override_id, er.salary_type_id) as eff
+    SELECT e.net_salary, e.teacher_session_rate, COALESCE(e.salary_type_override_id, er.salary_type_id) as eff
     FROM employees e LEFT JOIN employee_roles er ON e.role_id = er.id WHERE e.id = ?
   `).get(employeeId);
 	const netSalary = row?.net_salary ?? 0;
@@ -22653,30 +22810,42 @@ function computeBaseSalary(db, employeeId, month, year) {
 	let totalSessions = 0;
 	let salaryTypeName = null;
 	let salaryTypeMode = null;
+	const { start, end } = monthBounds(month, year);
+	const hasOwnTeacherRate = row?.teacher_session_rate != null;
+	const teacherPayments = hasOwnTeacherRate ? getTeacherPaymentsForMonth(db, employeeId, start, end) : null;
 	if (row?.eff) {
 		const st = db.prepare("SELECT * FROM salary_types WHERE id = ?").get(row.eff);
 		if (st) {
 			salaryTypeName = st.name;
 			salaryTypeMode = st.mode;
-			const { start, end } = monthBounds(month, year);
-			const sessionIds = db.prepare(`
-        SELECT ss.id FROM scheduled_sessions ss
-        JOIN session_teachers stc ON stc.session_id = ss.id
-        WHERE stc.employee_id = ? AND ss.session_date >= ? AND ss.session_date <= ?
-      `).all(employeeId, start, end).map((s) => s.id);
-			totalSessions = sessionIds.length;
-			if (sessionIds.length > 0) {
-				const ph = sessionIds.map(() => "?").join(",");
-				payableSessions = db.prepare(`
-          SELECT COUNT(DISTINCT session_id) as cnt FROM attendance_records
-          WHERE session_id IN (${ph}) AND status IN ('attended','absent_unexcused')
-        `).get(...sessionIds).cnt;
+			if (hasOwnTeacherRate && (st.mode === "per_session_fixed" || st.mode === "hybrid")) {
+				payableSessions = teacherPayments.count;
+				totalSessions = teacherPayments.count;
+				base = st.mode === "hybrid" ? (st.monthly_rate ?? 0) + teacherPayments.total : teacherPayments.total;
+			} else {
+				const sessionIds = db.prepare(`
+          SELECT ss.id FROM scheduled_sessions ss
+          JOIN session_teachers stc ON stc.session_id = ss.id
+          WHERE stc.employee_id = ? AND ss.session_date >= ? AND ss.session_date <= ?
+        `).all(employeeId, start, end).map((s) => s.id);
+				totalSessions = sessionIds.length;
+				if (sessionIds.length > 0) {
+					const ph = sessionIds.map(() => "?").join(",");
+					payableSessions = db.prepare(`
+            SELECT COUNT(DISTINCT session_id) as cnt FROM attendance_records
+            WHERE session_id IN (${ph}) AND status IN ('attended','absent_unexcused')
+          `).get(...sessionIds).cnt;
+				}
+				if (st.mode === "fixed_monthly") base = st.monthly_rate ?? netSalary;
+				else if (st.mode === "per_session_fixed") base = payableSessions * (st.session_rate ?? 0);
+				else if (st.mode === "per_session_pct") base = payableSessions * (st.session_pct ?? 0) * 100;
+				else if (st.mode === "hybrid") base = (st.monthly_rate ?? 0) + payableSessions * (st.session_rate ?? 0);
 			}
-			if (st.mode === "fixed_monthly") base = st.monthly_rate ?? netSalary;
-			else if (st.mode === "per_session_fixed") base = payableSessions * (st.session_rate ?? 0);
-			else if (st.mode === "per_session_pct") base = payableSessions * (st.session_pct ?? 0) * 100;
-			else if (st.mode === "hybrid") base = (st.monthly_rate ?? 0) + payableSessions * (st.session_rate ?? 0);
 		}
+	} else if (hasOwnTeacherRate) {
+		payableSessions = teacherPayments.count;
+		totalSessions = teacherPayments.count;
+		base = teacherPayments.total;
 	}
 	return {
 		base,
@@ -22704,7 +22873,7 @@ ipcMain.handle("employees:add", async (_event, employeeInput) => {
 	try {
 		requireAdmin();
 		const db = getDb();
-		const { name, role_id, base_salary, housing = 0, transport = 0, salary_type_override_id = null } = employeeInput;
+		const { name, role_id, base_salary, housing = 0, transport = 0, salary_type_override_id = null, teacher_session_rate = null } = employeeInput;
 		if (!name || base_salary === void 0) throw new Error("جميع الحقول الإلزامية مطلوبة / Missing required fields");
 		let roleText = employeeInput.role ?? "";
 		if (role_id) {
@@ -22715,9 +22884,9 @@ ipcMain.handle("employees:add", async (_event, employeeInput) => {
 		const netSalary = Number(base_salary) + Number(housing) + Number(transport);
 		const now = (/* @__PURE__ */ new Date()).toISOString();
 		const result = db.prepare(`
-      INSERT INTO employees (name, role, role_id, salary_type_override_id, base_salary, housing, transport, net_salary, is_active, created_at, updated_at, synced)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, 0)
-    `).run(name, roleText, role_id ?? null, salary_type_override_id, Number(base_salary), Number(housing), Number(transport), netSalary, now, now);
+      INSERT INTO employees (name, role, role_id, salary_type_override_id, base_salary, housing, transport, net_salary, is_active, created_at, updated_at, synced, teacher_session_rate)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, 0, ?)
+    `).run(name, roleText, role_id ?? null, salary_type_override_id, Number(base_salary), Number(housing), Number(transport), netSalary, now, now, teacher_session_rate !== null ? Number(teacher_session_rate) : null);
 		const createdId = Number(result.lastInsertRowid);
 		return db.prepare(`
       SELECT e.*, er.name as role_name FROM employees e LEFT JOIN employee_roles er ON e.role_id = er.id WHERE e.id = ?
@@ -22741,6 +22910,7 @@ ipcMain.handle("employees:update", async (_event, { id, patch }) => {
 		const base_salary = patch.base_salary !== void 0 ? Number(patch.base_salary) : emp.base_salary;
 		const housing = patch.housing !== void 0 ? Number(patch.housing) : emp.housing;
 		const transport = patch.transport !== void 0 ? Number(patch.transport) : emp.transport;
+		const teacher_session_rate = patch.teacher_session_rate !== void 0 ? patch.teacher_session_rate === null ? null : Number(patch.teacher_session_rate) : emp.teacher_session_rate;
 		if (patch.role_id !== void 0 && patch.role_id !== null) {
 			const roleRow = db.prepare("SELECT name FROM employee_roles WHERE id = ?").get(patch.role_id);
 			if (!roleRow) throw new Error("الدور غير موجود / Role not found");
@@ -22748,11 +22918,16 @@ ipcMain.handle("employees:update", async (_event, { id, patch }) => {
 			role_id = patch.role_id;
 		}
 		const netSalary = base_salary + housing + transport;
+		const now = (/* @__PURE__ */ new Date()).toISOString();
 		db.prepare(`
       UPDATE employees
-      SET name = ?, role = ?, role_id = ?, salary_type_override_id = ?, base_salary = ?, housing = ?, transport = ?, net_salary = ?, updated_at = ?, synced = 0
+      SET name = ?, role = ?, role_id = ?, salary_type_override_id = ?, base_salary = ?, housing = ?, transport = ?, net_salary = ?, updated_at = ?, synced = 0, teacher_session_rate = ?
       WHERE id = ?
-    `).run(name, role, role_id, salary_type_override_id, base_salary, housing, transport, netSalary, (/* @__PURE__ */ new Date()).toISOString(), id);
+    `).run(name, role, role_id, salary_type_override_id, base_salary, housing, transport, netSalary, now, teacher_session_rate, id);
+		if (patch.teacher_session_rate !== void 0 && teacher_session_rate !== emp.teacher_session_rate && teacher_session_rate != null) db.prepare(`
+        UPDATE teacher_payments SET session_cost = ?, updated_at = ?, synced = 0
+        WHERE teacher_id = ? AND status = 'pending'
+      `).run(teacher_session_rate, now, id);
 		return db.prepare(`
       SELECT e.*, er.name as role_name FROM employees e LEFT JOIN employee_roles er ON e.role_id = er.id WHERE e.id = ?
     `).get(id);
@@ -22778,7 +22953,7 @@ ipcMain.handle("salary:get", async (_event, { month, year }) => {
 		requireAdmin();
 		const db = getDb();
 		if (!month || !year) throw new Error("Month and year are required");
-		const rows = db.prepare(`
+		return db.prepare(`
       SELECT
         COALESCE(s.id, -e.id) as id,
         e.id as employee_id,
@@ -22802,41 +22977,10 @@ ipcMain.handle("salary:get", async (_event, { month, year }) => {
       LEFT JOIN employee_roles er ON e.role_id = er.id
       WHERE e.is_active = 1 OR s.id IS NOT NULL
       ORDER BY e.name ASC
-    `).all(month, year, month, year);
-		const monthNum = String(month === "يناير" ? 1 : month === "فبراير" ? 2 : month === "مارس" ? 3 : month === "أبريل" ? 4 : month === "مايو" ? 5 : month === "يونيو" ? 6 : month === "يوليو" ? 7 : month === "أغسطس" ? 8 : month === "سبتمبر" ? 9 : month === "أكتوبر" ? 10 : month === "نوفمبر" ? 11 : 12).padStart(2, "0");
-		const yearStr = String(year);
-		const monthStart = `${yearStr}-${monthNum}-01`;
-		const monthEnd = `${yearStr}-${monthNum}-31`;
-		return rows.map((row) => {
-			let salaryTypeName = null;
-			let salaryTypeMode = null;
-			let computedActualPaid = row.net_salary;
-			if (row.effective_salary_type_id) {
-				const st = db.prepare("SELECT * FROM salary_types WHERE id = ?").get(row.effective_salary_type_id);
-				if (st) {
-					salaryTypeName = st.name;
-					salaryTypeMode = st.mode;
-					let payableSessions = 0;
-					const sessionIds = db.prepare(`
-            SELECT ss.id FROM scheduled_sessions ss
-            JOIN session_teachers stc ON stc.session_id = ss.id
-            WHERE stc.employee_id = ? AND ss.session_date >= ? AND ss.session_date <= ?
-          `).all(row.employee_id, monthStart, monthEnd).map((s) => s.id);
-					if (sessionIds.length > 0) {
-						const placeholders = sessionIds.map(() => "?").join(",");
-						payableSessions = db.prepare(`
-              SELECT COUNT(DISTINCT session_id) as cnt FROM attendance_records
-              WHERE session_id IN (${placeholders}) AND status IN ('attended','absent_unexcused')
-            `).get(...sessionIds).cnt;
-					}
-					if (st.mode === "fixed_monthly") computedActualPaid = st.monthly_rate ?? row.net_salary;
-					else if (st.mode === "per_session_fixed") computedActualPaid = payableSessions * (st.session_rate ?? 0);
-					else if (st.mode === "per_session_pct") computedActualPaid = payableSessions * (st.session_pct ?? 0) * 100;
-					else if (st.mode === "hybrid") computedActualPaid = (st.monthly_rate ?? 0) + payableSessions * (st.session_rate ?? 0);
-					row.payable_sessions = payableSessions;
-					row.total_sessions = sessionIds.length;
-				}
-			}
+    `).all(month, year, month, year).map((row) => {
+			const { base: computedActualPaid, payableSessions, totalSessions, salaryTypeName, salaryTypeMode } = computeBaseSalary(db, row.employee_id, month, year);
+			row.payable_sessions = payableSessions;
+			row.total_sessions = totalSessions;
 			const bonus = row.bonus ?? 0;
 			const deductionSum = db.prepare("SELECT COALESCE(SUM(amount), 0) as total FROM employee_deductions WHERE employee_id = ? AND month = ? AND year = ?").get(row.employee_id, month, Number(year))?.total ?? 0;
 			return {
@@ -23042,6 +23186,12 @@ function calcCoveragePct(collected, requiredRevenue) {
 	if (requiredRevenue <= 0) return 1;
 	return Number(Math.min(1, collected / requiredRevenue).toFixed(4));
 }
+function getServicePricing(db) {
+	const defs = db.prepare("SELECT name, price_monthly, price_hourly FROM service_definitions").all();
+	const pricing = {};
+	for (const d of defs) pricing[d.name] = Number((d.name === "جلسة" || d.name === "جلسه" ? d.price_hourly : d.price_monthly) ?? 0);
+	return pricing;
+}
 /**
 * target:get { year }
 * Returns a per-month array of target data for a given year:
@@ -23117,14 +23267,7 @@ ipcMain.handle("target:capacity-plan", (_event, { numClasses, classCapacity, num
 		const ns = Math.max(0, Number(numStaff || 0));
 		const dr = Math.max(0, Number(desiredRevenue || 0));
 		const totalCapacity = nc * cc;
-		const settings = db.prepare("SELECT key, value FROM settings").all();
-		const settingMap = {};
-		for (const s of settings) settingMap[s.key] = s.value;
-		const pricing = {
-			حضانة: Number(settingMap["nursery_monthly"] || 2500),
-			استضافة: Number(settingMap["hosting_monthly"] || 3e3),
-			جلسة: Number(settingMap["session_hourly"] || 100)
-		};
+		const pricing = getServicePricing(db);
 		const scenarios = {};
 		for (const [service, price] of Object.entries(pricing)) {
 			const childrenNeeded = price > 0 ? Math.ceil(dr / price) : 0;
@@ -23171,14 +23314,7 @@ ipcMain.handle("target:calc", async (_event, { distribution, month, year, target
 	try {
 		requireAdmin();
 		const db = getDb();
-		const settings = db.prepare("SELECT key, value FROM settings").all();
-		const settingMap = {};
-		for (const s of settings) settingMap[s.key] = s.value;
-		const pricing = {
-			حضانة: Number(settingMap["nursery_monthly"] || 2500),
-			استضافة: Number(settingMap["hosting_monthly"] || 3e3),
-			جلسة: Number(settingMap["session_hourly"] || 100)
-		};
+		const pricing = getServicePricing(db);
 		let projectedRevenue = 0;
 		const unitsNeeded = {};
 		for (const [service, count] of Object.entries(distribution)) {
@@ -26761,7 +26897,7 @@ ipcMain.handle("storage:import", async (event, args) => {
 			if (result.canceled || result.filePaths.length === 0) throw new Error("Import cancelled");
 			filePath = result.filePaths[0];
 		}
-		const { importFromWorkbook } = await import("./importService-CPbO9Omw.js");
+		const { importFromWorkbook } = await import("./importService-D6aYz79l.js");
 		return { imported: await importFromWorkbook(filePath, progressReporter(event, "import")) };
 	} catch (error) {
 		console.error("storage:import error:", error);
@@ -27004,7 +27140,8 @@ var employeeSchema = new Schema({
 	is_active: Number,
 	created_at: String,
 	updated_at: String,
-	synced: Number
+	synced: Number,
+	teacher_session_rate: Number
 }, sharedOptions);
 var EmployeeModel = mongoose.models["sync_employees"] || mongoose.model("sync_employees", employeeSchema);
 var salaryPaymentSchema = new Schema({
@@ -27140,7 +27277,9 @@ var attendanceRecordSchema = new Schema({
 	recorded_by: Number,
 	recorded_at: String,
 	updated_at: String,
-	synced: Number
+	synced: Number,
+	attended_teacher_id: Number,
+	teacher_status: String
 }, sharedOptions);
 var AttendanceRecordModel = mongoose.models["sync_attendance_records"] || mongoose.model("sync_attendance_records", attendanceRecordSchema);
 var attendanceConflictSchema = new Schema({
@@ -27205,6 +27344,35 @@ var paymentTransactionSchema = new Schema({
 	synced: Number
 }, sharedOptions);
 var PaymentTransactionModel = mongoose.models["sync_payment_transactions"] || mongoose.model("sync_payment_transactions", paymentTransactionSchema);
+var serviceTeacherSchema = new Schema({
+	id: {
+		type: Number,
+		required: true,
+		unique: true
+	},
+	service_id: Number,
+	employee_id: Number,
+	created_at: String,
+	synced: Number
+}, sharedOptions);
+var ServiceTeacherModel = mongoose.models["sync_service_teachers"] || mongoose.model("sync_service_teachers", serviceTeacherSchema);
+var teacherPaymentSchema = new Schema({
+	id: {
+		type: Number,
+		required: true,
+		unique: true
+	},
+	teacher_id: Number,
+	child_id: Number,
+	attendance_record_id: Number,
+	attendance_date: String,
+	session_cost: Number,
+	status: String,
+	created_at: String,
+	updated_at: String,
+	synced: Number
+}, sharedOptions);
+var TeacherPaymentModel = mongoose.models["sync_teacher_payments"] || mongoose.model("sync_teacher_payments", teacherPaymentSchema);
 var SYNC_ENTITIES = [
 	{
 		name: "children",
@@ -27305,6 +27473,16 @@ var SYNC_ENTITIES = [
 		name: "payment_transactions",
 		model: PaymentTransactionModel,
 		table: "payment_transactions"
+	},
+	{
+		name: "service_teachers",
+		model: ServiceTeacherModel,
+		table: "service_teachers"
+	},
+	{
+		name: "teacher_payments",
+		model: TeacherPaymentModel,
+		table: "teacher_payments"
 	}
 ];
 //#endregion
@@ -28189,6 +28367,18 @@ ipcMain.handle("sessions:proRateCalc", async (_event, args) => {
 });
 //#endregion
 //#region electron/ipc/attendanceIPC.ts
+/**
+* Pure payment-eligibility rule (spec.md FR-008…FR-011):
+*   teacher present + child attended            → payable
+*   teacher present + child absent (unexcused)   → payable
+*   teacher present + child absent (excused)     → not payable
+*   teacher absent (any child status)            → not payable
+* Exported for direct unit testing without touching the database.
+*/
+function isPaymentEligible(teacherStatus, childStatus) {
+	if (teacherStatus !== "present") return false;
+	return childStatus === "attended" || childStatus === "absent_unexcused";
+}
 ipcMain.handle("attendance:getSheet", async (_event, { session_id }) => {
 	try {
 		checkAuth$6();
@@ -28206,26 +28396,90 @@ ipcMain.handle("attendance:getSheet", async (_event, { session_id }) => {
 			const [y, m, d] = session.session_date.split("-").map(Number);
 			dayOfWeek = new Date(y, m - 1, d).getDay();
 		}
-		return db.prepare(`
-      SELECT c.id as child_id, c.name as child_name, c.photo_url as child_photo_url, c.lesson_days,
-        c.teacher_id, te.name as teacher_name,
-        ar.id as attendance_id, ar.status, ar.excuse_notes, ar.recorded_by, ar.recorded_at, ar.updated_at
-      FROM children c
-      LEFT JOIN employees te ON te.id = c.teacher_id
-      LEFT JOIN attendance_records ar ON ar.child_id = c.id AND ar.session_id = ?
-      WHERE c.is_active = 1
-      ORDER BY c.name ASC
-    `).all(session_id).filter((c) => {
-			if (c.attendance_id) return true;
-			if (!c.lesson_days || c.lesson_days === "[]" || c.lesson_days === "") return true;
+		const activeChildren = db.prepare(`
+      SELECT id as child_id, name as child_name, photo_url as child_photo_url, lesson_days
+      FROM children WHERE is_active = 1
+    `).all();
+		const enrollments = db.prepare(`
+      SELECT DISTINCT cs.child_id, cs.teacher_id, cs.lesson_days as enrollment_lesson_days
+      FROM child_services cs
+      WHERE cs.teacher_id IS NOT NULL
+    `).all();
+		const enrollmentsByChild = /* @__PURE__ */ new Map();
+		for (const en of enrollments) {
+			if (!enrollmentsByChild.has(en.child_id)) enrollmentsByChild.set(en.child_id, []);
+			enrollmentsByChild.get(en.child_id).push(en);
+		}
+		const candidates = [];
+		for (const c of activeChildren) {
+			const childEnrollments = enrollmentsByChild.get(c.child_id) ?? [];
+			if (childEnrollments.length === 0) candidates.push({
+				child_id: c.child_id,
+				child_name: c.child_name,
+				child_photo_url: c.child_photo_url,
+				teacher_id: null,
+				lesson_days: c.lesson_days
+			});
+			else {
+				const seenTeachers = /* @__PURE__ */ new Set();
+				for (const en of childEnrollments) {
+					if (seenTeachers.has(en.teacher_id)) continue;
+					seenTeachers.add(en.teacher_id);
+					candidates.push({
+						child_id: c.child_id,
+						child_name: c.child_name,
+						child_photo_url: c.child_photo_url,
+						teacher_id: en.teacher_id,
+						lesson_days: en.enrollment_lesson_days || c.lesson_days
+					});
+				}
+			}
+		}
+		const teacherIds = [...new Set(candidates.map((c) => c.teacher_id).filter((id) => id != null))];
+		const teachersById = /* @__PURE__ */ new Map();
+		if (teacherIds.length > 0) {
+			const ph = teacherIds.map(() => "?").join(",");
+			for (const t of db.prepare(`SELECT id, name, teacher_session_rate FROM employees WHERE id IN (${ph})`).all(...teacherIds)) teachersById.set(t.id, t);
+		}
+		const rows = candidates.map((cand) => {
+			const teacher = cand.teacher_id != null ? teachersById.get(cand.teacher_id) : null;
+			const ar = cand.teacher_id != null ? db.prepare(`SELECT * FROM attendance_records WHERE session_id = ? AND child_id = ? AND attended_teacher_id = ?`).get(session_id, cand.child_id, cand.teacher_id) : db.prepare(`SELECT * FROM attendance_records WHERE session_id = ? AND child_id = ? AND attended_teacher_id IS NULL`).get(session_id, cand.child_id);
+			const tp = ar ? db.prepare(`SELECT * FROM teacher_payments WHERE attendance_record_id = ?`).get(ar.id) : null;
+			return {
+				child_id: cand.child_id,
+				child_name: cand.child_name,
+				child_photo_url: cand.child_photo_url,
+				lesson_days: cand.lesson_days,
+				teacher_id: cand.teacher_id,
+				teacher_name: teacher?.name ?? null,
+				teacher_session_rate: teacher?.teacher_session_rate ?? null,
+				attendance_id: ar?.id ?? null,
+				status: ar?.status ?? null,
+				excuse_notes: ar?.excuse_notes ?? null,
+				recorded_by: ar?.recorded_by ?? null,
+				recorded_at: ar?.recorded_at ?? null,
+				updated_at: ar?.updated_at ?? null,
+				attended_teacher_id: ar?.attended_teacher_id ?? null,
+				teacher_status: ar?.teacher_status ?? null,
+				payment: {
+					generated: tp?.status === "pending" || tp?.status === "paid",
+					amount: tp?.session_cost ?? null,
+					status: tp?.status ?? null
+				}
+			};
+		}).filter((r) => {
+			if (r.attendance_id) return true;
+			if (!r.lesson_days || r.lesson_days === "[]" || r.lesson_days === "") return true;
 			if (dayOfWeek === null) return true;
 			try {
-				const days = JSON.parse(c.lesson_days);
+				const days = JSON.parse(r.lesson_days);
 				return days.length === 0 || days.includes(dayOfWeek);
 			} catch {
 				return true;
 			}
 		}).map(({ lesson_days, ...rest }) => rest);
+		rows.sort((a, b) => a.child_name.localeCompare(b.child_name));
+		return rows;
 	} catch (error) {
 		throw new Error(error.message || "Failed to get attendance sheet");
 	}
@@ -28239,38 +28493,71 @@ ipcMain.handle("attendance:record", async (_event, args) => {
 		const results = [];
 		const sessionId = args?.session_id;
 		const records = Array.isArray(args) ? args : args?.records ?? [];
-		const payableChildrenBySession = /* @__PURE__ */ new Map();
+		const payableTeachersBySession = /* @__PURE__ */ new Map();
 		db.transaction(() => {
 			for (const rec of records) {
 				const session_id = sessionId ?? rec.session_id;
-				const { child_id, status, excuse_notes = null } = rec;
+				const { child_id, status, excuse_notes = null, teacher_status = "present" } = rec;
 				if (![
 					"attended",
 					"absent_excused",
 					"absent_unexcused"
 				].includes(status)) throw new Error(`Invalid status: ${status}`);
-				db.prepare(`
-          INSERT INTO attendance_records (session_id, child_id, status, excuse_notes, recorded_by, recorded_at, updated_at, synced)
-          VALUES (?, ?, ?, ?, ?, ?, ?, 0)
-          ON CONFLICT(session_id, child_id) DO UPDATE SET
-            status = excluded.status,
-            excuse_notes = excluded.excuse_notes,
-            recorded_by = excluded.recorded_by,
-            updated_at = excluded.updated_at,
-            synced = 0
-        `).run(session_id, child_id, status, excuse_notes, user?.id ?? null, now, now);
-				if (status === "attended" || status === "absent_unexcused") {
-					if (!payableChildrenBySession.has(session_id)) payableChildrenBySession.set(session_id, /* @__PURE__ */ new Set());
-					payableChildrenBySession.get(session_id).add(child_id);
+				if (teacher_status !== "present" && teacher_status !== "absent") throw new Error(`Invalid teacher_status: ${teacher_status}`);
+				let attended_teacher_id;
+				if ("teacher_id" in rec) attended_teacher_id = rec.teacher_id ?? null;
+				else attended_teacher_id = db.prepare("SELECT teacher_id FROM children WHERE id = ?").get(child_id)?.teacher_id ?? null;
+				const attendanceDate = db.prepare("SELECT session_date FROM scheduled_sessions WHERE id = ?").get(session_id)?.session_date;
+				const existingRecord = attended_teacher_id == null ? db.prepare("SELECT id FROM attendance_records WHERE session_id = ? AND child_id = ? AND attended_teacher_id IS NULL").get(session_id, child_id) : null;
+				if (existingRecord) db.prepare(`
+            UPDATE attendance_records
+            SET status = ?, excuse_notes = ?, recorded_by = ?, updated_at = ?, teacher_status = ?, synced = 0
+            WHERE id = ?
+          `).run(status, excuse_notes, user?.id ?? null, now, teacher_status, existingRecord.id);
+				else db.prepare(`
+            INSERT INTO attendance_records (session_id, child_id, status, excuse_notes, recorded_by, recorded_at, updated_at, synced, attended_teacher_id, teacher_status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+            ON CONFLICT(session_id, child_id, attended_teacher_id) DO UPDATE SET
+              status = excluded.status,
+              excuse_notes = excluded.excuse_notes,
+              recorded_by = excluded.recorded_by,
+              updated_at = excluded.updated_at,
+              teacher_status = excluded.teacher_status,
+              synced = 0
+          `).run(session_id, child_id, status, excuse_notes, user?.id ?? null, now, now, attended_teacher_id, teacher_status);
+				const savedRecord = attended_teacher_id == null ? db.prepare("SELECT * FROM attendance_records WHERE session_id = ? AND child_id = ? AND attended_teacher_id IS NULL").get(session_id, child_id) : db.prepare("SELECT * FROM attendance_records WHERE session_id = ? AND child_id = ? AND attended_teacher_id = ?").get(session_id, child_id, attended_teacher_id);
+				if (attended_teacher_id && attendanceDate) {
+					const existing = db.prepare(`
+            SELECT * FROM teacher_payments WHERE teacher_id = ? AND child_id = ? AND attendance_date = ?
+          `).get(attended_teacher_id, child_id, attendanceDate);
+					const payable = isPaymentEligible(teacher_status, status);
+					let effectiveRate = db.prepare("SELECT teacher_session_rate FROM employees WHERE id = ?").get(attended_teacher_id)?.teacher_session_rate ?? null;
+					if (effectiveRate == null) {
+						const defaultSetting = db.prepare("SELECT value FROM settings WHERE key = 'default_teacher_session_rate'").get();
+						const defaultRate = defaultSetting?.value != null ? Number(defaultSetting.value) : NaN;
+						if (!isNaN(defaultRate) && defaultRate > 0) effectiveRate = defaultRate;
+					}
+					const hasEffectiveRate = effectiveRate != null;
+					if (payable && hasEffectiveRate) {
+						if (!existing || existing.status === "void" || existing.status === "pending") db.prepare(`
+                INSERT INTO teacher_payments (teacher_id, child_id, attendance_record_id, attendance_date, session_cost, status, created_at, updated_at, synced)
+                VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, 0)
+                ON CONFLICT(teacher_id, child_id, attendance_date) DO UPDATE SET
+                  attendance_record_id = excluded.attendance_record_id,
+                  session_cost = excluded.session_cost,
+                  status = 'pending',
+                  updated_at = excluded.updated_at,
+                  synced = 0
+              `).run(attended_teacher_id, child_id, savedRecord.id, attendanceDate, effectiveRate, now, now);
+					} else if ((!payable || !hasEffectiveRate) && existing && existing.status === "pending") db.prepare(`UPDATE teacher_payments SET status = 'void', updated_at = ?, synced = 0 WHERE id = ?`).run(now, existing.id);
 				}
-				results.push(db.prepare("SELECT * FROM attendance_records WHERE session_id = ? AND child_id = ?").get(session_id, child_id));
+				if ((status === "attended" || status === "absent_unexcused") && attended_teacher_id != null) {
+					if (!payableTeachersBySession.has(session_id)) payableTeachersBySession.set(session_id, /* @__PURE__ */ new Set());
+					payableTeachersBySession.get(session_id).add(attended_teacher_id);
+				}
+				results.push(savedRecord);
 			}
-			for (const [session_id, childIds] of payableChildrenBySession) {
-				const ids = [...childIds];
-				const placeholders = ids.map(() => "?").join(",");
-				const teacherRows = db.prepare(`SELECT DISTINCT teacher_id FROM children WHERE id IN (${placeholders}) AND teacher_id IS NOT NULL`).all(...ids);
-				for (const { teacher_id } of teacherRows) db.prepare("INSERT OR IGNORE INTO session_teachers (session_id, employee_id, synced) VALUES (?, ?, 0)").run(session_id, teacher_id);
-			}
+			for (const [session_id, teacherIds] of payableTeachersBySession) for (const teacher_id of teacherIds) db.prepare("INSERT OR IGNORE INTO session_teachers (session_id, employee_id, synced) VALUES (?, ?, 0)").run(session_id, teacher_id);
 		})();
 		return results;
 	} catch (error) {
@@ -28281,22 +28568,30 @@ ipcMain.handle("attendance:delete", async (_event, { session_id, child_ids }) =>
 	try {
 		checkAuth$6();
 		const db = getDb();
-		const ids = Array.isArray(child_ids) ? child_ids : [];
-		if (ids.length === 0) return {
+		const items = (Array.isArray(child_ids) ? child_ids : []).map((it) => typeof it === "object" ? {
+			child_id: it.child_id,
+			teacher_id: it.teacher_id
+		} : {
+			child_id: it,
+			teacher_id: void 0
+		});
+		if (items.length === 0) return {
 			ok: true,
 			deleted: 0
 		};
-		const placeholders = ids.map(() => "?").join(",");
 		let deleted = 0;
+		const now = (/* @__PURE__ */ new Date()).toISOString();
 		db.transaction(() => {
-			db.prepare(`
-        DELETE FROM attendance_conflicts
-        WHERE attendance_record_id IN (
-          SELECT id FROM attendance_records WHERE session_id = ? AND child_id IN (${placeholders})
-        )
-      `).run(session_id, ...ids);
-			const res = db.prepare(`DELETE FROM attendance_records WHERE session_id = ? AND child_id IN (${placeholders})`).run(session_id, ...ids);
-			deleted = Number(res.changes);
+			for (const item of items) {
+				const records = item.teacher_id !== void 0 ? item.teacher_id == null ? db.prepare("SELECT id FROM attendance_records WHERE session_id = ? AND child_id = ? AND attended_teacher_id IS NULL").all(session_id, item.child_id) : db.prepare("SELECT id FROM attendance_records WHERE session_id = ? AND child_id = ? AND attended_teacher_id = ?").all(session_id, item.child_id, item.teacher_id) : db.prepare("SELECT id FROM attendance_records WHERE session_id = ? AND child_id = ?").all(session_id, item.child_id);
+				for (const { id: recordId } of records) {
+					if (db.prepare(`SELECT 1 FROM teacher_payments WHERE attendance_record_id = ? AND status = 'paid'`).get(recordId)) continue;
+					db.prepare(`UPDATE teacher_payments SET status = 'void', updated_at = ?, synced = 0 WHERE status = 'pending' AND attendance_record_id = ?`).run(now, recordId);
+					db.prepare(`DELETE FROM attendance_conflicts WHERE attendance_record_id = ?`).run(recordId);
+					const res = db.prepare(`DELETE FROM attendance_records WHERE id = ?`).run(recordId);
+					deleted += Number(res.changes);
+				}
+			}
 		})();
 		return {
 			ok: true,
@@ -28304,6 +28599,33 @@ ipcMain.handle("attendance:delete", async (_event, { session_id, child_ids }) =>
 		};
 	} catch (error) {
 		throw new Error(error.message || "Failed to delete attendance");
+	}
+});
+ipcMain.handle("attendance:getChildHistory", async (_event, { child_id }) => {
+	try {
+		requireAdmin();
+		return getDb().prepare(`
+      SELECT
+        ss.session_date as attendance_date,
+        ar.attended_teacher_id as teacher_id,
+        e.name as teacher_name,
+        ar.teacher_status,
+        ar.status as child_status,
+        CASE WHEN tp.status IN ('pending','paid') THEN 1 ELSE 0 END as payment_generated,
+        tp.status as payment_status,
+        tp.session_cost
+      FROM attendance_records ar
+      JOIN scheduled_sessions ss ON ss.id = ar.session_id
+      LEFT JOIN employees e ON e.id = ar.attended_teacher_id
+      LEFT JOIN teacher_payments tp ON tp.attendance_record_id = ar.id
+      WHERE ar.child_id = ?
+      ORDER BY ss.session_date DESC
+    `).all(child_id).map((row) => ({
+			...row,
+			payment_generated: !!row.payment_generated
+		}));
+	} catch (error) {
+		throw new Error(error.message || "Failed to get attendance history");
 	}
 });
 ipcMain.handle("attendance:getConflicts", async () => {
@@ -28450,6 +28772,122 @@ ipcMain.handle("deductions:remove", async (_event, { id }) => {
 	requireAdmin();
 	getDb().prepare("DELETE FROM employee_deductions WHERE id = ?").run(id);
 	return { ok: true };
+});
+//#endregion
+//#region electron/ipc/serviceTeachersIPC.ts
+ipcMain.handle("serviceTeachers:list", async (_event, { service_id }) => {
+	try {
+		checkAuth$6();
+		return getDb().prepare(`
+      SELECT e.id, e.name, e.role
+      FROM service_teachers st
+      JOIN employees e ON st.employee_id = e.id
+      WHERE st.service_id = ? AND e.is_active = 1
+      ORDER BY e.name ASC
+    `).all(service_id);
+	} catch (error) {
+		throw new Error(error.message || "Failed to list service teachers");
+	}
+});
+ipcMain.handle("serviceTeachers:set", async (_event, { service_id, employee_ids }) => {
+	try {
+		requireAdmin();
+		const db = getDb();
+		const ids = Array.isArray(employee_ids) ? employee_ids : [];
+		const now = (/* @__PURE__ */ new Date()).toISOString();
+		db.transaction(() => {
+			db.prepare("DELETE FROM service_teachers WHERE service_id = ?").run(service_id);
+			for (const empId of ids) db.prepare(`
+          INSERT OR IGNORE INTO service_teachers (service_id, employee_id, created_at, synced)
+          VALUES (?, ?, ?, 0)
+        `).run(service_id, empId, now);
+		})();
+		return { ok: true };
+	} catch (error) {
+		throw new Error(error.message || "Failed to set service teachers");
+	}
+});
+//#endregion
+//#region electron/ipc/teacherPaymentsIPC.ts
+ipcMain.handle("teacherPayments:list", async (_event, filters) => {
+	try {
+		requireAdmin();
+		const db = getDb();
+		const { teacher_id, child_id, month, year } = filters || {};
+		let query = `
+      SELECT tp.*, e.name as teacher_name, c.name as child_name
+      FROM teacher_payments tp
+      JOIN employees e ON tp.teacher_id = e.id
+      JOIN children c ON tp.child_id = c.id
+      WHERE 1=1
+    `;
+		const params = [];
+		if (teacher_id) {
+			query += " AND tp.teacher_id = ?";
+			params.push(teacher_id);
+		}
+		if (child_id) {
+			query += " AND tp.child_id = ?";
+			params.push(child_id);
+		}
+		if (month && year) {
+			const mm = String(month).padStart(2, "0");
+			query += " AND strftime('%Y-%m', tp.attendance_date) = ?";
+			params.push(`${year}-${mm}`);
+		}
+		query += " ORDER BY tp.attendance_date DESC";
+		return db.prepare(query).all(...params);
+	} catch (error) {
+		throw new Error(error.message || "Failed to list teacher payments");
+	}
+});
+ipcMain.handle("teacherPayments:markPaid", async (_event, { ids }) => {
+	try {
+		requireAdmin();
+		const db = getDb();
+		const list = Array.isArray(ids) ? ids : [];
+		if (list.length === 0) return {
+			ok: true,
+			updated: 0
+		};
+		const placeholders = list.map(() => "?").join(",");
+		const now = (/* @__PURE__ */ new Date()).toISOString();
+		const result = db.prepare(`
+      UPDATE teacher_payments SET status = 'paid', updated_at = ?, synced = 0
+      WHERE id IN (${placeholders}) AND status = 'pending'
+    `).run(now, ...list);
+		return {
+			ok: true,
+			updated: Number(result.changes)
+		};
+	} catch (error) {
+		throw new Error(error.message || "Failed to mark payments as paid");
+	}
+});
+//#endregion
+//#region electron/ipc/payrollIPC.ts
+ipcMain.handle("payroll:report", async (_event, { month, year }) => {
+	try {
+		requireAdmin();
+		const db = getDb();
+		const monthKey = `${year}-${String(month).padStart(2, "0")}`;
+		return db.prepare(`
+      SELECT
+        e.id as teacher_id,
+        e.name as teacher_name,
+        e.teacher_session_rate as session_cost,
+        COUNT(tp.id) as sessions_paid,
+        COALESCE(SUM(tp.session_cost), 0) as total_salary
+      FROM employees e
+      JOIN teacher_payments tp ON tp.teacher_id = e.id
+        AND tp.status IN ('pending','paid')
+        AND strftime('%Y-%m', tp.attendance_date) = ?
+      GROUP BY e.id
+      ORDER BY e.name ASC
+    `).all(monthKey);
+	} catch (error) {
+		throw new Error(error.message || "Failed to generate payroll report");
+	}
 });
 //#endregion
 //#region electron/main.ts

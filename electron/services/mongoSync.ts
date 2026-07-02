@@ -229,7 +229,8 @@ const employeeSchema = new Schema({
   is_active: Number,
   created_at: String,
   updated_at: String,
-  synced: Number
+  synced: Number,
+  teacher_session_rate: Number
 }, sharedOptions)
 
 export const EmployeeModel: Model<any> = mongoose.models['sync_employees'] ||
@@ -374,7 +375,9 @@ const attendanceRecordSchema = new Schema({
   recorded_by: Number,
   recorded_at: String,
   updated_at: String,
-  synced: Number
+  synced: Number,
+  attended_teacher_id: Number,
+  teacher_status: String
 }, sharedOptions)
 
 export const AttendanceRecordModel: Model<any> = mongoose.models['sync_attendance_records'] ||
@@ -446,6 +449,37 @@ const paymentTransactionSchema = new Schema({
 export const PaymentTransactionModel: Model<any> = mongoose.models['sync_payment_transactions'] ||
   mongoose.model('sync_payment_transactions', paymentTransactionSchema)
 
+// ── Service Teachers ──────────────────────────────────────────────────────────
+
+const serviceTeacherSchema = new Schema({
+  id: { type: Number, required: true, unique: true },
+  service_id: Number,
+  employee_id: Number,
+  created_at: String,
+  synced: Number
+}, sharedOptions)
+
+export const ServiceTeacherModel: Model<any> = mongoose.models['sync_service_teachers'] ||
+  mongoose.model('sync_service_teachers', serviceTeacherSchema)
+
+// ── Teacher Payments ──────────────────────────────────────────────────────────
+
+const teacherPaymentSchema = new Schema({
+  id: { type: Number, required: true, unique: true },
+  teacher_id: Number,
+  child_id: Number,
+  attendance_record_id: Number,
+  attendance_date: String,
+  session_cost: Number,
+  status: String,
+  created_at: String,
+  updated_at: String,
+  synced: Number
+}, sharedOptions)
+
+export const TeacherPaymentModel: Model<any> = mongoose.models['sync_teacher_payments'] ||
+  mongoose.model('sync_teacher_payments', teacherPaymentSchema)
+
 // ── Entity registry ───────────────────────────────────────────────────────────
 
 export const SYNC_ENTITIES: {
@@ -473,4 +507,6 @@ export const SYNC_ENTITIES: {
   { name: 'payment_methods', model: PaymentMethodModel, table: 'payment_methods' },
   { name: 'employee_deductions', model: EmployeeDeductionModel, table: 'employee_deductions' },
   { name: 'payment_transactions', model: PaymentTransactionModel, table: 'payment_transactions' },
+  { name: 'service_teachers', model: ServiceTeacherModel, table: 'service_teachers' },
+  { name: 'teacher_payments', model: TeacherPaymentModel, table: 'teacher_payments' },
 ]

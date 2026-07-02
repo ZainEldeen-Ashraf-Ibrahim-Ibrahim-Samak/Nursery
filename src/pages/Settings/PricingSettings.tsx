@@ -6,16 +6,10 @@ import { Input } from '../../components/ui/Input.js'
 import { Button } from '../../components/ui/Button.js'
 import { Alert } from '../../components/ui/Alert.js'
 
+// Service pricing (nursery/hosting/session rates) lives exclusively in service_definitions,
+// managed on the Settings → Services tab — this tab only holds the Targets & Capacity
+// settings, which are not service-specific and have no equivalent there.
 type SettingsKey =
-  | 'nursery_monthly'
-  | 'nursery_daily'
-  | 'nursery_hourly'
-  | 'hosting_monthly'
-  | 'hosting_daily'
-  | 'hosting_hourly'
-  | 'session_monthly'
-  | 'session_hourly'
-  | 'session_daily'
   | 'target_profit_pct'
   | 'max_capacity'
   | 'work_days'
@@ -25,15 +19,6 @@ type SettingsState = Record<SettingsKey, string>
 type FieldErrors = Partial<Record<SettingsKey, string>>
 
 const PRICING_KEYS: SettingsKey[] = [
-  'nursery_monthly',
-  'nursery_daily',
-  'nursery_hourly',
-  'hosting_monthly',
-  'hosting_daily',
-  'hosting_hourly',
-  'session_monthly',
-  'session_hourly',
-  'session_daily',
   'target_profit_pct',
   'max_capacity',
   'work_days',
@@ -41,15 +26,6 @@ const PRICING_KEYS: SettingsKey[] = [
 ]
 
 const DEFAULT_SETTINGS: SettingsState = {
-  nursery_monthly: '0',
-  nursery_daily: '0',
-  nursery_hourly: '0',
-  hosting_monthly: '0',
-  hosting_daily: '0',
-  hosting_hourly: '0',
-  session_monthly: '0',
-  session_hourly: '0',
-  session_daily: '0',
   target_profit_pct: '0.20',
   max_capacity: '50',
   work_days: '22',
@@ -57,7 +33,7 @@ const DEFAULT_SETTINGS: SettingsState = {
 }
 
 export default function PricingSettings() {
-  const { t, i18n } = useTranslation()
+  const { i18n } = useTranslation()
   const isAr = i18n.language === 'ar'
 
   const [settings, setSettings] = useState<SettingsState>(DEFAULT_SETTINGS)
@@ -68,15 +44,6 @@ export default function PricingSettings() {
 
   // Human-readable field labels for validation messages
   const fieldLabels: Record<SettingsKey, string> = {
-    nursery_monthly: isAr ? 'الحضانة / الشهر' : 'Nursery / Month',
-    nursery_daily: isAr ? 'الحضانة / اليوم' : 'Nursery / Day',
-    nursery_hourly: isAr ? 'الحضانة / الساعة' : 'Nursery / Hour',
-    hosting_monthly: isAr ? 'الإيواء / الشهر' : 'Hosting / Month',
-    hosting_daily: isAr ? 'الإيواء / اليوم' : 'Hosting / Day',
-    hosting_hourly: isAr ? 'الإيواء / الساعة' : 'Hosting / Hour',
-    session_monthly: isAr ? 'الجلسة / الشهر' : 'Session / Month',
-    session_hourly: isAr ? 'الجلسة / الساعة' : 'Session / Hour',
-    session_daily: isAr ? 'الجلسة / اليوم' : 'Session / Day',
     target_profit_pct: isAr ? 'نسبة الربح المستهدفة' : 'Target Profit Rate',
     max_capacity: isAr ? 'القدرة الاستيعابية' : 'Max Capacity',
     work_days: isAr ? 'أيام العمل / الشهر' : 'Work Days / Month',
@@ -179,7 +146,7 @@ export default function PricingSettings() {
       if (result && result.ok) {
         setMessage({
           type: 'success',
-          text: isAr ? 'تم حفظ إعدادات التسعير بنجاح ✓' : 'Pricing settings saved successfully ✓',
+          text: isAr ? 'تم حفظ الإعدادات بنجاح ✓' : 'Settings saved successfully ✓',
         })
         // Refresh to confirm persisted values
         setSettings((prev) => ({ ...prev, ...toSave }))
@@ -224,106 +191,6 @@ export default function PricingSettings() {
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Nursery Section */}
-        <Card className="p-6 space-y-4">
-          <h2 className="text-lg font-bold text-slate-900 border-b border-slate-100 pb-2 flex items-center gap-2">
-            <span className="text-primary">👶</span> {t('services.nursery')}
-          </h2>
-          <div className="space-y-3">
-            <Input
-              label={`${t('units.month')} (EGP)`}
-              type="number"
-              value={settings.nursery_monthly}
-              onChange={(e) => handleChange('nursery_monthly', e.target.value)}
-              min={0}
-              error={fieldErrors.nursery_monthly}
-            />
-            <Input
-              label={`${t('units.day')} (EGP)`}
-              type="number"
-              value={settings.nursery_daily}
-              onChange={(e) => handleChange('nursery_daily', e.target.value)}
-              min={0}
-              error={fieldErrors.nursery_daily}
-            />
-            <Input
-              label={`${t('units.hour')} (EGP)`}
-              type="number"
-              value={settings.nursery_hourly}
-              onChange={(e) => handleChange('nursery_hourly', e.target.value)}
-              min={0}
-              error={fieldErrors.nursery_hourly}
-            />
-          </div>
-        </Card>
-
-        {/* Hosting Section */}
-        <Card className="p-6 space-y-4">
-          <h2 className="text-lg font-bold text-slate-900 border-b border-slate-100 pb-2 flex items-center gap-2">
-            <span className="text-primary">🏠</span> {t('services.hosting')}
-          </h2>
-          <div className="space-y-3">
-            <Input
-              label={`${t('units.month')} (EGP)`}
-              type="number"
-              value={settings.hosting_monthly}
-              onChange={(e) => handleChange('hosting_monthly', e.target.value)}
-              min={0}
-              error={fieldErrors.hosting_monthly}
-            />
-            <Input
-              label={`${t('units.day')} (EGP)`}
-              type="number"
-              value={settings.hosting_daily}
-              onChange={(e) => handleChange('hosting_daily', e.target.value)}
-              min={0}
-              error={fieldErrors.hosting_daily}
-            />
-            <Input
-              label={`${t('units.hour')} (EGP)`}
-              type="number"
-              value={settings.hosting_hourly}
-              onChange={(e) => handleChange('hosting_hourly', e.target.value)}
-              min={0}
-              error={fieldErrors.hosting_hourly}
-            />
-          </div>
-        </Card>
-
-        {/* Sessions Section */}
-        <Card className="p-6 space-y-4">
-          <h2 className="text-lg font-bold text-slate-900 border-b border-slate-100 pb-2 flex items-center gap-2">
-            <span className="text-primary">💬</span> {t('services.session')}
-          </h2>
-          <div className="space-y-3">
-            <Input
-              label={`${t('units.month')} (EGP)`}
-              type="number"
-              value={settings.session_monthly}
-              onChange={(e) => handleChange('session_monthly', e.target.value)}
-              min={0}
-              error={fieldErrors.session_monthly}
-            />
-            <Input
-              label={`${t('units.session')} / ${t('units.hour')} (EGP)`}
-              type="number"
-              value={settings.session_hourly}
-              onChange={(e) => handleChange('session_hourly', e.target.value)}
-              min={0}
-              error={fieldErrors.session_hourly}
-            />
-            <Input
-              label={`${t('units.day')} (EGP)`}
-              type="number"
-              value={settings.session_daily}
-              onChange={(e) => handleChange('session_daily', e.target.value)}
-              min={0}
-              error={fieldErrors.session_daily}
-            />
-          </div>
-        </Card>
-
-        {/* Targets & Capacities Section */}
         <Card className="p-6 space-y-4">
           <h2 className="text-lg font-bold text-slate-900 border-b border-slate-100 pb-2 flex items-center gap-2">
             <span className="text-primary">📈</span>{' '}
@@ -369,6 +236,12 @@ export default function PricingSettings() {
           </div>
         </Card>
       </div>
+
+      <p className="text-xs text-slate-400">
+        {isAr
+          ? '💡 أسعار الخدمات (الحضانة، الإيواء، الجلسات) تُدار من تبويب «الخدمات».'
+          : '💡 Service pricing (nursery, hosting, sessions) is managed on the "Services" tab.'}
+      </p>
 
       <div className="flex justify-end items-center gap-3 pt-4 border-t border-slate-100">
         {isSaving && (
