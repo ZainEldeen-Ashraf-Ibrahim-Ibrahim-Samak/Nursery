@@ -1,7 +1,7 @@
 <!-- SPECKIT START -->
-Active feature plan: `specs/005-roles-salary-services/plan.md`
+Active feature plan: `specs/006-salary-attendance-reports/plan.md`
 (see also: spec.md, research.md, data-model.md, contracts/ipc-contracts.md, quickstart.md in the same directory)
-Prior features: `specs/004-child-enrollment-enhancements/plan.md`, `specs/003-multi-service-full-sync/plan.md`, `specs/002-excel-import-env-config/plan.md`, `specs/001-nursery-management-system/plan.md`
+Prior features: `specs/005-roles-salary-services/plan.md`, `specs/004-child-enrollment-enhancements/plan.md`, `specs/003-multi-service-full-sync/plan.md`, `specs/002-excel-import-env-config/plan.md`, `specs/001-nursery-management-system/plan.md`
 
 Stack: Electron 28 + React 18 + TypeScript (Vite, Tailwind, Zustand). Local data in SQLite
 (Node's built-in `node:sqlite` via the `Db` wrapper in `electron/db/connection.ts`, main process only — not
