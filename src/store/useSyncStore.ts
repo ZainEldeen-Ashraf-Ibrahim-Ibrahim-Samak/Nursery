@@ -25,6 +25,7 @@ interface PushPullResults {
   [entityName: string]: {
     pushed?: number
     pulled?: number
+    merged?: number
     skipped?: number
     failed?: number
     errors?: { recordId: string; message: string }[]

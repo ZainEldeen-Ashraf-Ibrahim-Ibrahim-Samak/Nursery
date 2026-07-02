@@ -28388,6 +28388,7 @@ ipcMain.handle("storage:audit", async () => {
 //#endregion
 //#region electron/ipc/syncIPC.ts
 var syncIPC_exports = /* @__PURE__ */ __exportAll({
+	computeMergeColumns: () => computeMergeColumns,
 	getMongoUri: () => getMongoUri,
 	resolveConflict: () => resolveConflict,
 	startAutoSync: () => startAutoSync,
@@ -28399,6 +28400,29 @@ function resolveConflict(local, cloud) {
 	if (cloudTs > localTs) return "cloud";
 	if (localTs > cloudTs) return "local";
 	return local.id >= cloud.id ? "local" : "cloud";
+}
+/**
+* When local "wins" a conflict, the cloud row must still be reconciled into local instead of
+* discarded — this computes which columns to fill in: any column that's NULL/undefined/empty
+* string locally gets the cloud value; local's own non-empty values always take precedence.
+* Pure/exported so the merge semantics are unit-testable without a database.
+*/
+function computeMergeColumns(local, cloud) {
+	const columns = [];
+	const values = [];
+	for (const c of Object.keys(cloud)) {
+		if (c === "_id" || c === "id" || c === "__v") continue;
+		const localVal = local[c];
+		const cloudVal = cloud[c];
+		if ((localVal === null || localVal === void 0 || localVal === "") && !(cloudVal === null || cloudVal === void 0 || cloudVal === "")) {
+			columns.push(c);
+			values.push(cloudVal);
+		}
+	}
+	return {
+		columns,
+		values
+	};
 }
 function logSync(action, entityType, recordId, status, error = null) {
 	try {
@@ -28606,6 +28630,7 @@ ipcMain.handle("sync:pull", async (event, args) => {
 		const results = {};
 		for (const entity of SYNC_ENTITIES) {
 			let pulled = 0;
+			let merged = 0;
 			let skipped = 0;
 			let failed = 0;
 			let orphanSkipped = 0;
@@ -28674,10 +28699,23 @@ ipcMain.handle("sync:pull", async (event, args) => {
 								logSync("pull-update", entity.name, cloudRecord.id, "success");
 								pulled++;
 							} else {
-								const reason = (local.updated_at ? new Date(local.updated_at).getTime() : 0) === (cloudRecord.updated_at ? new Date(cloudRecord.updated_at).getTime() : 0) ? `tie on updated_at (local id ${local.id} >= cloud id ${cloudRecord.id}) — local ${local.updated_at ?? "(none)"} kept` : `local looked newer: local updated_at=${local.updated_at ?? "(none)"} vs cloud updated_at=${cloudRecord.updated_at ?? "(none)"}`;
-								logSync("pull-skip", entity.name, cloudRecord.id, "skipped", reason);
-								noteSkip(cloudRecord.id, reason);
-								skipped++;
+								const { columns: changedColumns, values: mergedValues } = computeMergeColumns(local, cloudRecord);
+								if (changedColumns.length > 0) {
+									const setClause = changedColumns.map((c) => `${c} = ?`).join(", ");
+									const idField = entity.name === "settings" ? "key" : "id";
+									db.prepare(`UPDATE ${entity.table} SET ${setClause}, synced = 1 WHERE ${idField} = ?`).run(...mergedValues, cloudRecord.id);
+									const reason = `merged — filled in ${changedColumns.join(", ")} from cloud (local values for everything else kept)`;
+									logSync("pull-merge", entity.name, cloudRecord.id, "merged", reason);
+									noteSkip(cloudRecord.id, reason);
+									merged++;
+								} else {
+									const idField = entity.name === "settings" ? "key" : "id";
+									db.prepare(`UPDATE ${entity.table} SET synced = 1 WHERE ${idField} = ?`).run(cloudRecord.id);
+									const reason = "already identical to cloud — marked synced, nothing to merge";
+									logSync("pull-merge", entity.name, cloudRecord.id, "merged", reason);
+									noteSkip(cloudRecord.id, reason);
+									merged++;
+								}
 							}
 						}
 					} catch (err) {
@@ -28709,6 +28747,7 @@ ipcMain.handle("sync:pull", async (event, args) => {
 			}
 			results[entity.name] = {
 				pulled,
+				merged,
 				skipped,
 				failed,
 				errors,

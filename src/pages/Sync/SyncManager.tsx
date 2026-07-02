@@ -63,6 +63,7 @@ export default function SyncManager() {
     return Object.entries(results).map(([entity, stats]) => ({
       entity,
       count: mode === 'push' ? stats.pushed ?? 0 : stats.pulled ?? 0,
+      merged: stats.merged ?? 0,
       failed: stats.failed ?? 0,
       skipped: stats.skipped ?? 0,
       errors: (stats.errors ?? []) as { recordId: string; message: string }[],
@@ -257,8 +258,8 @@ export default function SyncManager() {
           <div className="border-t border-slate-100 pt-3 space-y-2">
             <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
               ⚠️ {isAr
-                ? 'إذا كانت النتائج تظهر "تم التخطي" لكل شيء (الإعدادات، الأطفال، الخدمات، المدفوعات، أنواع الرواتب، الموظفون، الأدوار، تعريفات الخدمات، طرق الدفع)، فهذا يعني أن السجلات المحلية تبدو "أحدث" رغم أنها ليست كذلك فعلياً. استخدم "سحب إجباري" أدناه لتجاوز ذلك والاستبدال ببيانات السحابة دائماً.'
-                : 'If results show everything "skipped" (settings, children, child services, payments, salary types, employees, roles, service definitions, payment methods), local records are only *appearing* newer. Use "Force Pull" below to bypass that and always take the cloud version.'}
+                ? 'السجلات المتعارضة الآن تُدمج تلقائياً بدلاً من تخطيها: أي حقل فارغ محلياً يُملأ من السحابة، وتبقى قيم جهازك المحلي كما هي فيما عداه. إذا أردت استبدال بيانات هذا الجهاز بالكامل ببيانات السحابة (وليس فقط دمج الفراغات)، استخدم "سحب إجباري" أدناه.'
+                : 'Conflicting records are now merged automatically instead of being skipped: any field empty locally gets filled in from the cloud, while this device\'s own values are kept everywhere else. If you want to fully replace this device\'s data with the cloud version (not just fill gaps), use "Force Pull" below.'}
             </p>
             <Button
               variant="danger"
@@ -285,12 +286,13 @@ export default function SyncManager() {
           {lastPullResults && (
             <div className="bg-blue-50 rounded-xl p-3 space-y-1 text-xs">
               <p className="font-bold text-blue-700">✅ {isAr ? 'نتائج السحب:' : 'Pull Results:'}</p>
-              {formatResults(lastPullResults, 'pull')?.map(({ entity, count, failed, skipped, errors, skipReasons }) => (
+              {formatResults(lastPullResults, 'pull')?.map(({ entity, count, merged, failed, skipped, errors, skipReasons }) => (
                 <div key={entity} className="space-y-0.5">
                   <div className="flex justify-between text-slate-600">
                     <span>{entity}</span>
                     <span>
                       <span className="text-blue-600 font-semibold">↓ {count}</span>
+                      {merged > 0 && <span className="text-emerald-600"> ({merged} {isAr ? 'تم دمجها' : 'merged'})</span>}
                       {skipped > 0 && <span className="text-slate-400"> ({skipped} skipped)</span>}
                       {failed > 0 && <span className="text-red-500"> ({failed} failed)</span>}
                     </span>
@@ -307,7 +309,7 @@ export default function SyncManager() {
                   {skipReasons.length > 0 && (
                     <details className="ltr:pl-3 rtl:pr-3">
                       <summary className="text-[11px] text-slate-500 cursor-pointer">
-                        {isAr ? `لماذا تم التخطي؟ (${skipReasons.length})` : `Why skipped? (${skipReasons.length})`}
+                        {isAr ? `تفاصيل الدمج (${skipReasons.length})` : `Merge details (${skipReasons.length})`}
                       </summary>
                       <ul className="space-y-0.5 text-[11px] text-slate-500 ltr:text-left rtl:text-right mt-1">
                         {skipReasons.map((s, i) => (
