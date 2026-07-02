@@ -99,7 +99,8 @@ electron.contextBridge.exposeInMainWorld("api", {
 		salaries: (args) => electron.ipcRenderer.invoke("export:salaries", args),
 		expenses: (args) => electron.ipcRenderer.invoke("export:expenses", args),
 		employees: (args) => electron.ipcRenderer.invoke("export:employees", args),
-		payrollReport: (args) => electron.ipcRenderer.invoke("export:payrollReport", args)
+		payrollReport: (args) => electron.ipcRenderer.invoke("export:payrollReport", args),
+		childReport: (args) => electron.ipcRenderer.invoke("export:childReport", args)
 	},
 	print: { preview: (args) => electron.ipcRenderer.invoke("print:preview", args) },
 	storage: {

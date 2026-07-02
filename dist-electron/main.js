@@ -24405,6 +24405,220 @@ function generateExpensesSheet(worksheet, workbook, brand, year, lang) {
 	formatGridData(worksheet, startRow + 1, currencyColumns);
 	autofitColumns(worksheet);
 }
+function generateChildReportSheet(worksheet, workbook, brand, childId, lang) {
+	const db = getDb();
+	const isAr = lang === "ar";
+	const child = db.prepare("SELECT * FROM children WHERE id = ?").get(childId);
+	if (!child) throw new Error(`Child not found with ID: ${childId}`);
+	let row = writeBrandingHeader(worksheet, workbook, brand, lang, isAr ? `تقرير الطفل الشامل: ${child.name}` : `Full Child Report: ${child.name}`);
+	const sectionTitle = (text) => {
+		const cell = worksheet.getCell(`A${row}`);
+		cell.value = text;
+		cell.font = {
+			name: FONT_FAMILY,
+			size: 12,
+			bold: true,
+			color: { argb: "FFFFFFFF" }
+		};
+		cell.fill = {
+			type: "pattern",
+			pattern: "solid",
+			fgColor: { argb: "FF0F766E" }
+		};
+		worksheet.mergeCells(`A${row}:F${row}`);
+		row += 1;
+	};
+	const kv = (label, value) => {
+		worksheet.getCell(`A${row}`).value = label;
+		worksheet.getCell(`A${row}`).font = {
+			name: FONT_FAMILY,
+			size: 10,
+			bold: true,
+			color: { argb: "FF64748B" }
+		};
+		worksheet.getCell(`B${row}`).value = value ?? "";
+		worksheet.getCell(`B${row}`).font = {
+			name: FONT_FAMILY,
+			size: 10
+		};
+		row += 1;
+	};
+	sectionTitle(isAr ? "📋 البيانات الشخصية" : "📋 Personal Information");
+	kv(isAr ? "الاسم" : "Name", child.name);
+	kv(isAr ? "ولي الأمر" : "Guardian", child.guardian);
+	kv(isAr ? "هاتف ولي الأمر" : "Guardian Phone", child.guardian_phone);
+	kv(isAr ? "تاريخ التسجيل" : "Registration Date", child.reg_date);
+	kv(isAr ? "الحالة" : "Status", child.is_active ? isAr ? "نشط" : "Active" : isAr ? "غير نشط" : "Inactive");
+	row += 1;
+	sectionTitle(isAr ? "🏷️ الخدمات المشترك بها والمعلمون" : "🏷️ Enrolled Services & Assigned Teacher(s)");
+	const services = db.prepare(`
+    SELECT cs.service, cs.unit, cs.price, e.name as teacher_name
+    FROM child_services cs
+    LEFT JOIN employees e ON e.id = cs.teacher_id
+    WHERE cs.child_id = ?
+  `).all(childId);
+	const svcHeaderRow = worksheet.getRow(row);
+	svcHeaderRow.values = isAr ? [
+		"الخدمة",
+		"الوحدة",
+		"السعر",
+		"المعلم"
+	] : [
+		"Service",
+		"Unit",
+		"Price",
+		"Teacher"
+	];
+	svcHeaderRow.eachCell((cell) => {
+		cell.font = {
+			name: FONT_FAMILY,
+			size: 10,
+			bold: true
+		};
+		cell.fill = SUBHEADER_FILL;
+		cell.border = BORDER_STYLE;
+	});
+	row += 1;
+	for (const s of services) {
+		worksheet.getRow(row).values = [
+			s.service,
+			s.unit,
+			s.price,
+			s.teacher_name || (isAr ? "بدون معلم" : "No teacher")
+		];
+		row += 1;
+	}
+	if (services.length === 0) {
+		worksheet.getCell(`A${row}`).value = isAr ? "لا توجد خدمات مسجلة." : "No services enrolled.";
+		worksheet.getCell(`A${row}`).font = {
+			name: FONT_FAMILY,
+			size: 10,
+			italic: true,
+			color: { argb: "FF94A3B8" }
+		};
+		row += 1;
+	}
+	row += 1;
+	sectionTitle(isAr ? "📅 سجل الحضور" : "📅 Attendance History");
+	const attendanceRows = db.prepare(`
+    SELECT
+      ss.session_date as attendance_date,
+      e.name as teacher_name,
+      ar.teacher_status,
+      ar.status as child_status
+    FROM attendance_records ar
+    JOIN scheduled_sessions ss ON ss.id = ar.session_id
+    LEFT JOIN employees e ON e.id = ar.attended_teacher_id
+    WHERE ar.child_id = ?
+    ORDER BY ss.session_date DESC
+  `).all(childId);
+	const attendedCount = attendanceRows.filter((r) => r.child_status === "attended").length;
+	const attendancePct = attendanceRows.length > 0 ? Math.round(attendedCount / attendanceRows.length * 100) : null;
+	kv(isAr ? "نسبة الحضور" : "Attendance Percentage", attendancePct != null ? `${attendancePct}%` : isAr ? "غير متاح" : "N/A");
+	const attHeaderRow = worksheet.getRow(row);
+	attHeaderRow.values = isAr ? [
+		"التاريخ",
+		"المعلم",
+		"حالة المعلم",
+		"حالة الطفل"
+	] : [
+		"Date",
+		"Teacher",
+		"Teacher Status",
+		"Child Status"
+	];
+	attHeaderRow.eachCell((cell) => {
+		cell.font = {
+			name: FONT_FAMILY,
+			size: 10,
+			bold: true
+		};
+		cell.fill = SUBHEADER_FILL;
+		cell.border = BORDER_STYLE;
+	});
+	row += 1;
+	for (const a of attendanceRows) {
+		worksheet.getRow(row).values = [
+			a.attendance_date,
+			a.teacher_name || "",
+			a.teacher_status || "",
+			a.child_status
+		];
+		row += 1;
+	}
+	if (attendanceRows.length === 0) {
+		worksheet.getCell(`A${row}`).value = isAr ? "لا يوجد سجل حضور بعد." : "No attendance history yet.";
+		worksheet.getCell(`A${row}`).font = {
+			name: FONT_FAMILY,
+			size: 10,
+			italic: true,
+			color: { argb: "FF94A3B8" }
+		};
+		row += 1;
+	}
+	row += 1;
+	sectionTitle(isAr ? "💰 السجل المالي" : "💰 Payment History");
+	const statement = getChildStatement(child, db.prepare("SELECT month, year, service, unit, quantity, price, total, paid, balance, status, notes FROM payments WHERE child_id = ?").all(childId), /* @__PURE__ */ new Date());
+	const payHeaderRow = worksheet.getRow(row);
+	payHeaderRow.values = isAr ? [
+		"الشهر",
+		"السنة",
+		"الخدمة",
+		"الإجمالي",
+		"المدفوع",
+		"الرصيد",
+		"الحالة"
+	] : [
+		"Month",
+		"Year",
+		"Service",
+		"Total",
+		"Paid",
+		"Balance",
+		"Status"
+	];
+	payHeaderRow.eachCell((cell) => {
+		cell.font = {
+			name: FONT_FAMILY,
+			size: 10,
+			bold: true
+		};
+		cell.fill = SUBHEADER_FILL;
+		cell.border = BORDER_STYLE;
+	});
+	row += 1;
+	for (const p of statement.rows) {
+		worksheet.getRow(row).values = [
+			translateMonthName(p.month, lang),
+			p.year,
+			p.service,
+			p.total,
+			p.paid,
+			p.balance,
+			p.status
+		];
+		row += 1;
+	}
+	if (statement.rows.length === 0) {
+		worksheet.getCell(`A${row}`).value = isAr ? "لا توجد معاملات مالية مسجلة." : "No financial transactions recorded.";
+		worksheet.getCell(`A${row}`).font = {
+			name: FONT_FAMILY,
+			size: 10,
+			italic: true,
+			color: { argb: "FF94A3B8" }
+		};
+		row += 1;
+	}
+	row += 1;
+	sectionTitle(isAr ? "📝 ملاحظات" : "📝 Notes");
+	worksheet.getCell(`A${row}`).value = child.notes || (isAr ? "لا توجد ملاحظات." : "No notes.");
+	worksheet.getCell(`A${row}`).font = {
+		name: FONT_FAMILY,
+		size: 10
+	};
+	worksheet.mergeCells(`A${row}:F${row}`);
+	autofitColumns(worksheet);
+}
 function generateChildStatementSheet(worksheet, workbook, brand, childId, lang) {
 	const db = getDb();
 	const child = db.prepare("SELECT * FROM children WHERE id = ?").get(childId);
@@ -24559,7 +24773,8 @@ async function buildExcelFile(type, params, savePath) {
 			month: Number(params.month),
 			year: Number(params.year)
 		}, lang);
-	} else if (type === "child") generateChildStatementSheet(workbook.addWorksheet(lang === "ar" ? "كشف الحساب" : "Statement"), workbook, brand, Number(childId), lang);
+	} else if (type === "childReport") generateChildReportSheet(workbook.addWorksheet(lang === "ar" ? "تقرير الطفل" : "Child Report"), workbook, brand, Number(childId), lang);
+	else if (type === "child") generateChildStatementSheet(workbook.addWorksheet(lang === "ar" ? "كشف الحساب" : "Statement"), workbook, brand, Number(childId), lang);
 	else if (type === "salaries") {
 		const sheetName = lang === "ar" ? "الرواتب" : "Salaries";
 		generateSalariesSheet(workbook.addWorksheet(sheetName), workbook, brand, month, year, lang);
@@ -25944,6 +26159,179 @@ function buildPdfFile(type, params, savePath) {
 						vLineColor: () => "#cbd5e1"
 					}
 				});
+			} else if (type === "childReport") {
+				const child = db.prepare("SELECT * FROM children WHERE id = ?").get(childId);
+				if (!child) throw new Error("Child not found");
+				const title = isAr ? `تقرير الطفل الشامل: ${child.name}` : `Full Child Report: ${child.name}`;
+				docDefinition.content.push(...getPdfHeader(brand, lang, title));
+				const sectionHeader = (text) => ({
+					text: shapeText(text),
+					fontSize: 12,
+					bold: true,
+					color: "#ffffff",
+					fillColor: brand.primaryColor,
+					margin: [
+						4,
+						4,
+						4,
+						4
+					]
+				});
+				const kvTable = (pairs) => ({
+					margin: [
+						0,
+						6,
+						0,
+						10
+					],
+					table: {
+						widths: ["auto", "*"],
+						body: pairs.map(([k, v]) => [{
+							text: shapeText(k),
+							bold: true,
+							color: "#64748b"
+						}, { text: shapeText(v ?? "") }])
+					},
+					layout: "noBorders"
+				});
+				const simpleTable = (headers, rows, emptyMsg) => {
+					if (rows.length === 0) return {
+						text: shapeText(emptyMsg),
+						italics: true,
+						color: "#94a3b8",
+						margin: [
+							0,
+							0,
+							0,
+							10
+						]
+					};
+					const body = [headers.map((h) => ({
+						text: shapeText(h),
+						bold: true,
+						fillColor: "#f1f5f9",
+						alignment: "center"
+					})), ...rows.map((r) => r.map((c) => ({
+						text: shapeText(c ?? ""),
+						alignment: isAr ? "right" : "left"
+					})))];
+					return {
+						margin: [
+							0,
+							0,
+							0,
+							10
+						],
+						table: {
+							headerRows: 1,
+							widths: headers.map(() => "*"),
+							body
+						},
+						layout: {
+							hLineWidth: () => .5,
+							vLineWidth: () => .5,
+							hLineColor: () => "#cbd5e1",
+							vLineColor: () => "#cbd5e1"
+						}
+					};
+				};
+				docDefinition.content.push(sectionHeader(isAr ? "📋 البيانات الشخصية" : "📋 Personal Information"));
+				docDefinition.content.push(kvTable([
+					[isAr ? "الاسم" : "Name", child.name],
+					[isAr ? "ولي الأمر" : "Guardian", child.guardian],
+					[isAr ? "هاتف ولي الأمر" : "Guardian Phone", child.guardian_phone],
+					[isAr ? "تاريخ التسجيل" : "Registration Date", child.reg_date],
+					[isAr ? "الحالة" : "Status", child.is_active ? isAr ? "نشط" : "Active" : isAr ? "غير نشط" : "Inactive"]
+				]));
+				docDefinition.content.push(sectionHeader(isAr ? "🏷️ الخدمات والمعلمون" : "🏷️ Services & Teachers"));
+				const services = db.prepare(`
+          SELECT cs.service, cs.unit, cs.price, e.name as teacher_name
+          FROM child_services cs LEFT JOIN employees e ON e.id = cs.teacher_id
+          WHERE cs.child_id = ?
+        `).all(childId);
+				docDefinition.content.push(simpleTable(isAr ? [
+					"الخدمة",
+					"الوحدة",
+					"السعر",
+					"المعلم"
+				] : [
+					"Service",
+					"Unit",
+					"Price",
+					"Teacher"
+				], services.map((s) => [
+					s.service,
+					s.unit,
+					formatCurrency(s.price, lang),
+					s.teacher_name || (isAr ? "بدون معلم" : "No teacher")
+				]), isAr ? "لا توجد خدمات مسجلة." : "No services enrolled."));
+				const attendanceRows = db.prepare(`
+          SELECT ss.session_date as attendance_date, e.name as teacher_name, ar.teacher_status, ar.status as child_status
+          FROM attendance_records ar
+          JOIN scheduled_sessions ss ON ss.id = ar.session_id
+          LEFT JOIN employees e ON e.id = ar.attended_teacher_id
+          WHERE ar.child_id = ?
+          ORDER BY ss.session_date DESC
+        `).all(childId);
+				const attended = attendanceRows.filter((r) => r.child_status === "attended").length;
+				const pct = attendanceRows.length > 0 ? Math.round(attended / attendanceRows.length * 100) : null;
+				docDefinition.content.push(sectionHeader(isAr ? `📅 سجل الحضور — نسبة الحضور: ${pct != null ? pct + "%" : "غير متاح"}` : `📅 Attendance History — Attendance %: ${pct != null ? pct + "%" : "N/A"}`));
+				docDefinition.content.push(simpleTable(isAr ? [
+					"التاريخ",
+					"المعلم",
+					"حالة المعلم",
+					"حالة الطفل"
+				] : [
+					"Date",
+					"Teacher",
+					"Teacher Status",
+					"Child Status"
+				], attendanceRows.map((a) => [
+					a.attendance_date,
+					a.teacher_name || "",
+					a.teacher_status || "",
+					a.child_status
+				]), isAr ? "لا يوجد سجل حضور بعد." : "No attendance history yet."));
+				docDefinition.content.push(sectionHeader(isAr ? "💰 السجل المالي" : "💰 Payment History"));
+				const statementForReport = getChildStatement(child, db.prepare("SELECT month, year, service, unit, quantity, price, total, paid, balance, status FROM payments WHERE child_id = ?").all(childId), /* @__PURE__ */ new Date());
+				docDefinition.content.push(simpleTable(isAr ? [
+					"الشهر",
+					"السنة",
+					"الخدمة",
+					"الإجمالي",
+					"المدفوع",
+					"الرصيد",
+					"الحالة"
+				] : [
+					"Month",
+					"Year",
+					"Service",
+					"Total",
+					"Paid",
+					"Balance",
+					"Status"
+				], statementForReport.rows.map((p) => {
+					const mIdx = arabicMonths$3.indexOf(p.month);
+					return [
+						isAr ? p.month : mIdx !== -1 ? englishMonths$2[mIdx] : p.month,
+						p.year,
+						p.service,
+						formatCurrency(p.total, lang),
+						formatCurrency(p.paid, lang),
+						formatCurrency(p.balance, lang),
+						p.status
+					];
+				}), isAr ? "لا توجد معاملات مالية مسجلة." : "No financial transactions recorded."));
+				docDefinition.content.push(sectionHeader(isAr ? "📝 ملاحظات" : "📝 Notes"));
+				docDefinition.content.push({
+					text: shapeText(child.notes || (isAr ? "لا توجد ملاحظات." : "No notes.")),
+					margin: [
+						0,
+						6,
+						0,
+						0
+					]
+				});
 			} else if (type === "child") {
 				const child = db.prepare("SELECT * FROM children WHERE id = ?").get(childId);
 				if (!child) throw new Error("Child not found");
@@ -26976,6 +27364,111 @@ async function buildCsvFile(type, params, savePath) {
 	const { lang = "ar" } = params;
 	const isAr = lang === "ar";
 	let lines = [];
+	if (type === "childReport") {
+		const db = getDb();
+		const childId = Number(params.childId);
+		const child = db.prepare("SELECT * FROM children WHERE id = ?").get(childId);
+		if (!child) throw new Error(`Child not found with ID: ${childId}`);
+		lines = buildHeaderLines(isAr ? `تقرير الطفل الشامل: ${child.name}` : `Full Child Report: ${child.name}`, isAr ? `الطفل: ${child.name}` : `Child: ${child.name}`);
+		lines.push(toCsvLine([isAr ? "📋 البيانات الشخصية" : "📋 Personal Information"]));
+		lines.push(toCsvLine([isAr ? "الاسم" : "Name", child.name]));
+		lines.push(toCsvLine([isAr ? "ولي الأمر" : "Guardian", child.guardian]));
+		lines.push(toCsvLine([isAr ? "هاتف ولي الأمر" : "Guardian Phone", child.guardian_phone]));
+		lines.push(toCsvLine([isAr ? "تاريخ التسجيل" : "Registration Date", child.reg_date]));
+		lines.push(toCsvLine([isAr ? "الحالة" : "Status", child.is_active ? isAr ? "نشط" : "Active" : isAr ? "غير نشط" : "Inactive"]));
+		lines.push("");
+		lines.push(toCsvLine([isAr ? "🏷️ الخدمات والمعلمون" : "🏷️ Services & Teachers"]));
+		lines.push(toCsvLine(isAr ? [
+			"الخدمة",
+			"الوحدة",
+			"السعر",
+			"المعلم"
+		] : [
+			"Service",
+			"Unit",
+			"Price",
+			"Teacher"
+		]));
+		const services = db.prepare(`
+      SELECT cs.service, cs.unit, cs.price, e.name as teacher_name
+      FROM child_services cs LEFT JOIN employees e ON e.id = cs.teacher_id
+      WHERE cs.child_id = ?
+    `).all(childId);
+		if (services.length === 0) lines.push(toCsvLine([isAr ? "لا توجد خدمات مسجلة." : "No services enrolled."]));
+		for (const s of services) lines.push(toCsvLine([
+			s.service,
+			s.unit,
+			s.price,
+			s.teacher_name || (isAr ? "بدون معلم" : "No teacher")
+		]));
+		lines.push("");
+		const attendanceRows = db.prepare(`
+      SELECT ss.session_date as attendance_date, e.name as teacher_name, ar.teacher_status, ar.status as child_status
+      FROM attendance_records ar
+      JOIN scheduled_sessions ss ON ss.id = ar.session_id
+      LEFT JOIN employees e ON e.id = ar.attended_teacher_id
+      WHERE ar.child_id = ?
+      ORDER BY ss.session_date DESC
+    `).all(childId);
+		const attended = attendanceRows.filter((r) => r.child_status === "attended").length;
+		const pct = attendanceRows.length > 0 ? Math.round(attended / attendanceRows.length * 100) : null;
+		lines.push(toCsvLine([isAr ? "📅 سجل الحضور" : "📅 Attendance History"]));
+		lines.push(toCsvLine([isAr ? "نسبة الحضور" : "Attendance Percentage", pct != null ? `${pct}%` : isAr ? "غير متاح" : "N/A"]));
+		lines.push(toCsvLine(isAr ? [
+			"التاريخ",
+			"المعلم",
+			"حالة المعلم",
+			"حالة الطفل"
+		] : [
+			"Date",
+			"Teacher",
+			"Teacher Status",
+			"Child Status"
+		]));
+		if (attendanceRows.length === 0) lines.push(toCsvLine([isAr ? "لا يوجد سجل حضور بعد." : "No attendance history yet."]));
+		for (const a of attendanceRows) lines.push(toCsvLine([
+			a.attendance_date,
+			a.teacher_name || "",
+			a.teacher_status || "",
+			a.child_status
+		]));
+		lines.push("");
+		lines.push(toCsvLine([isAr ? "💰 السجل المالي" : "💰 Payment History"]));
+		lines.push(toCsvLine(isAr ? [
+			"الشهر",
+			"السنة",
+			"الخدمة",
+			"الإجمالي",
+			"المدفوع",
+			"الرصيد",
+			"الحالة"
+		] : [
+			"Month",
+			"Year",
+			"Service",
+			"Total",
+			"Paid",
+			"Balance",
+			"Status"
+		]));
+		const statementForReport = getChildStatement(child, db.prepare("SELECT month, year, service, unit, quantity, price, total, paid, balance, status FROM payments WHERE child_id = ?").all(childId), /* @__PURE__ */ new Date());
+		if (statementForReport.rows.length === 0) lines.push(toCsvLine([isAr ? "لا توجد معاملات مالية مسجلة." : "No financial transactions recorded."]));
+		for (const p of statementForReport.rows) {
+			const monthLabel = isAr ? p.month : arabicMonths$2.includes(p.month) ? englishMonths$1[arabicMonths$2.indexOf(p.month)] : p.month;
+			lines.push(toCsvLine([
+				monthLabel,
+				p.year,
+				p.service,
+				p.total,
+				p.paid,
+				p.balance,
+				p.status
+			]));
+		}
+		lines.push("");
+		lines.push(toCsvLine([isAr ? "📝 ملاحظات" : "📝 Notes"]));
+		lines.push(toCsvLine([child.notes || (isAr ? "لا توجد ملاحظات." : "No notes.")]));
+	}
 	if (type === "child") {
 		const db = getDb();
 		const childId = Number(params.childId);
@@ -27297,6 +27790,58 @@ function buildPrintPreviewHtml(reportType, params) {
       </table>
     `;
 	}
+	if (reportType === "childReport") {
+		const db = getDb();
+		const childId = Number(params.childId);
+		const child = db.prepare("SELECT * FROM children WHERE id = ?").get(childId);
+		if (!child) throw new Error(`Child not found with ID: ${childId}`);
+		title = isAr ? `تقرير الطفل الشامل: ${child.name}` : `Full Child Report: ${child.name}`;
+		filterSummary = isAr ? `الطفل: ${child.name}` : `Child: ${child.name}`;
+		const section = (heading, inner) => `<h2>${escapeHtml(heading)}</h2>${inner}`;
+		const personalInfo = `
+      <table><tbody>
+        <tr><td class="label">${escapeHtml(isAr ? "الاسم" : "Name")}</td><td>${escapeHtml(child.name)}</td></tr>
+        <tr><td class="label">${escapeHtml(isAr ? "ولي الأمر" : "Guardian")}</td><td>${escapeHtml(child.guardian)}</td></tr>
+        <tr><td class="label">${escapeHtml(isAr ? "هاتف ولي الأمر" : "Guardian Phone")}</td><td>${escapeHtml(child.guardian_phone)}</td></tr>
+        <tr><td class="label">${escapeHtml(isAr ? "تاريخ التسجيل" : "Registration Date")}</td><td>${escapeHtml(child.reg_date)}</td></tr>
+        <tr><td class="label">${escapeHtml(isAr ? "الحالة" : "Status")}</td><td>${escapeHtml(child.is_active ? isAr ? "نشط" : "Active" : isAr ? "غير نشط" : "Inactive")}</td></tr>
+      </tbody></table>`;
+		const services = db.prepare(`
+      SELECT cs.service, cs.unit, cs.price, e.name as teacher_name
+      FROM child_services cs LEFT JOIN employees e ON e.id = cs.teacher_id
+      WHERE cs.child_id = ?
+    `).all(childId);
+		const servicesHtml = services.length === 0 ? `<p class="empty">${escapeHtml(isAr ? "لا توجد خدمات مسجلة." : "No services enrolled.")}</p>` : `<table><thead><tr><th>${escapeHtml(isAr ? "الخدمة" : "Service")}</th><th>${escapeHtml(isAr ? "الوحدة" : "Unit")}</th><th>${escapeHtml(isAr ? "السعر" : "Price")}</th><th>${escapeHtml(isAr ? "المعلم" : "Teacher")}</th></tr></thead>
+        <tbody>${services.map((s) => `<tr><td>${escapeHtml(s.service)}</td><td>${escapeHtml(s.unit)}</td><td>${escapeHtml(s.price)}</td><td>${escapeHtml(s.teacher_name || (isAr ? "بدون معلم" : "No teacher"))}</td></tr>`).join("")}</tbody></table>`;
+		const attendanceRows = db.prepare(`
+      SELECT ss.session_date as attendance_date, e.name as teacher_name, ar.teacher_status, ar.status as child_status
+      FROM attendance_records ar
+      JOIN scheduled_sessions ss ON ss.id = ar.session_id
+      LEFT JOIN employees e ON e.id = ar.attended_teacher_id
+      WHERE ar.child_id = ?
+      ORDER BY ss.session_date DESC
+    `).all(childId);
+		const attended = attendanceRows.filter((r) => r.child_status === "attended").length;
+		const pct = attendanceRows.length > 0 ? Math.round(attended / attendanceRows.length * 100) : null;
+		const attendanceHtml = `
+      <p><strong>${escapeHtml(isAr ? "نسبة الحضور" : "Attendance Percentage")}:</strong> ${escapeHtml(pct != null ? `${pct}%` : isAr ? "غير متاح" : "N/A")}</p>
+      ${attendanceRows.length === 0 ? `<p class="empty">${escapeHtml(isAr ? "لا يوجد سجل حضور بعد." : "No attendance history yet.")}</p>` : `<table><thead><tr><th>${escapeHtml(isAr ? "التاريخ" : "Date")}</th><th>${escapeHtml(isAr ? "المعلم" : "Teacher")}</th><th>${escapeHtml(isAr ? "حالة المعلم" : "Teacher Status")}</th><th>${escapeHtml(isAr ? "حالة الطفل" : "Child Status")}</th></tr></thead>
+          <tbody>${attendanceRows.map((a) => `<tr><td>${escapeHtml(a.attendance_date)}</td><td>${escapeHtml(a.teacher_name || "")}</td><td>${escapeHtml(a.teacher_status || "")}</td><td>${escapeHtml(a.child_status)}</td></tr>`).join("")}</tbody></table>`}
+    `;
+		const statementForReport = getChildStatement(child, db.prepare("SELECT month, year, service, unit, quantity, price, total, paid, balance, status FROM payments WHERE child_id = ?").all(childId), /* @__PURE__ */ new Date());
+		const paymentsHtml = statementForReport.rows.length === 0 ? `<p class="empty">${escapeHtml(isAr ? "لا توجد معاملات مالية مسجلة." : "No financial transactions recorded.")}</p>` : `<table><thead><tr><th>${escapeHtml(isAr ? "الشهر" : "Month")}</th><th>${escapeHtml(isAr ? "السنة" : "Year")}</th><th>${escapeHtml(isAr ? "الخدمة" : "Service")}</th><th>${escapeHtml(isAr ? "الإجمالي" : "Total")}</th><th>${escapeHtml(isAr ? "المدفوع" : "Paid")}</th><th>${escapeHtml(isAr ? "الرصيد" : "Balance")}</th><th>${escapeHtml(isAr ? "الحالة" : "Status")}</th></tr></thead>
+        <tbody>${statementForReport.rows.map((p) => {
+			return `<tr><td>${escapeHtml(isAr ? p.month : arabicMonths$1.includes(p.month) ? englishMonths[arabicMonths$1.indexOf(p.month)] : p.month)}</td><td>${escapeHtml(p.year)}</td><td>${escapeHtml(p.service)}</td><td>${escapeHtml(p.total)}</td><td>${escapeHtml(p.paid)}</td><td>${escapeHtml(p.balance)}</td><td>${escapeHtml(p.status)}</td></tr>`;
+		}).join("")}</tbody></table>`;
+		const notesHtml = `<p>${escapeHtml(child.notes || (isAr ? "لا توجد ملاحظات." : "No notes."))}</p>`;
+		tableHtml = [
+			section(isAr ? "📋 البيانات الشخصية" : "📋 Personal Information", personalInfo),
+			section(isAr ? "🏷️ الخدمات والمعلمون" : "🏷️ Services & Teachers", servicesHtml),
+			section(isAr ? "📅 سجل الحضور" : "📅 Attendance History", attendanceHtml),
+			section(isAr ? "💰 السجل المالي" : "💰 Payment History", paymentsHtml),
+			section(isAr ? "📝 ملاحظات" : "📝 Notes", notesHtml)
+		].join("");
+	}
 	return `<!doctype html>
 <html dir="${dir}" lang="${params.lang}">
 <head>
@@ -27307,6 +27852,8 @@ function buildPrintPreviewHtml(reportType, params) {
   .meta { color: #64748b; font-size: 12px; margin-bottom: 16px; }
   table { width: 100%; border-collapse: collapse; margin-top: 12px; }
   th, td { border: 1px solid #cbd5e1; padding: 6px 10px; font-size: 13px; text-align: ${isAr ? "right" : "left"}; }
+  h2 { color: #fff; background: ${brand.primaryColor}; font-size: 13px; padding: 6px 10px; margin-top: 18px; }
+  td.label { color: #64748b; font-weight: bold; width: 160px; }
   th { background: ${brand.primaryColor}; color: #fff; }
   tr.totals { font-weight: bold; background: #f1f5f9; }
   .empty { color: #94a3b8; font-style: italic; text-align: center; }
@@ -27392,6 +27939,20 @@ ipcMain.handle("export:child", async (_event, { childId, format, lang }) => {
 	} catch (error) {
 		console.error("Failed to run child statement export:", error);
 		throw new Error(error.message || "Failed to export child statement");
+	}
+});
+ipcMain.handle("export:childReport", async (_event, { childId, format, lang }) => {
+	try {
+		checkAuth$2();
+		const filename = lang === "ar" ? `تقرير_طفل_شامل_${childId}.${format}` : `child_report_${childId}.${format}`;
+		return await executeExport("childReport", {
+			childId,
+			format,
+			lang
+		}, filename);
+	} catch (error) {
+		console.error("Failed to run child report export:", error);
+		throw new Error(error.message || "Failed to export child report");
 	}
 });
 ipcMain.handle("export:salaries", async (_event, { month, year, format, lang }) => {

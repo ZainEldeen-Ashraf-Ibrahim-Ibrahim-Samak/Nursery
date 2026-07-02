@@ -252,22 +252,22 @@ appear in each output format — independent of every other story.
 
 ### Tests for User Story 3
 
-- [ ] T047 [P] [US3] Unit test attendance-percentage computation and the no-attendance-yet edge case
+- [X] T047 [P] [US3] Unit test attendance-percentage computation and the no-attendance-yet edge case
       (renders empty/0%, not an error) in `tests/unit/exportReportShapes.test.ts`
 
 ### Implementation for User Story 3
 
-- [ ] T048 [US3] Add `generateChildReportSheet` (multi-section: personal info, attendance history,
+- [X] T048 [US3] Add `generateChildReportSheet` (multi-section: personal info, attendance history,
       teacher(s), services, attendance %, payment history, notes — per FR-007) to
       `electron/services/exportService.ts`
-- [ ] T049 [US3] Add a multi-section Child Report PDF document-definition builder to
+- [X] T049 [US3] Add a multi-section Child Report PDF document-definition builder to
       `electron/services/pdfService.ts`
-- [ ] T050 [US3] Add a Child Report CSV builder (one labeled block per section) to
+- [X] T050 [US3] Add a Child Report CSV builder (one labeled block per section) to
       `electron/services/csvService.ts` (depends on T048 for section shapes)
-- [ ] T051 [US3] Add `export:childReport` handler to `electron/ipc/exportIPC.ts` (depends on T048, T049,
+- [X] T051 [US3] Add `export:childReport` handler to `electron/ipc/exportIPC.ts` (depends on T048, T049,
       T050)
-- [ ] T052 [US3] Add `print:preview` support for `reportType: 'childReport'` (depends on T049)
-- [ ] T053 [US3] Add a "Print Child Report" / Export PDF/Excel/CSV toolbar to
+- [X] T052 [US3] Add `print:preview` support for `reportType: 'childReport'` (depends on T049)
+- [X] T053 [US3] Add a "Print Child Report" / Export PDF/Excel/CSV toolbar to
       `src/pages/Children/ChildStatement.tsx` (depends on T004, T051, T052)
 
 **Checkpoint**: US1, US5, US6, US2, US3 all independently functional.
@@ -305,10 +305,10 @@ outstanding balance appear — independent of every other story.
 
 **Purpose**: Quality/consistency pass across all stories
 
-- [ ] T060 [P] Verify Arabic (RTL) / English (LTR) rendering across every new export/print output (FR-010)
-- [ ] T061 [P] Verify the empty-report ("zero matching rows") path renders a clearly-labeled document, not
+- [X] T060 [P] Verify Arabic (RTL) / English (LTR) rendering across every new export/print output (FR-010)
+- [X] T061 [P] Verify the empty-report ("zero matching rows") path renders a clearly-labeled document, not
       an error, across all four export types (FR-009)
-- [ ] T062 [P] Verify graceful handling when no company logo is configured (Edge Cases) across all
+- [X] T062 [P] Verify graceful handling when no company logo is configured (Edge Cases) across all
       export/print outputs
 - [ ] T063 Confirm `ReportActions.tsx` (T004) is the single component used by all four report screens,
       with no per-page duplicate button markup

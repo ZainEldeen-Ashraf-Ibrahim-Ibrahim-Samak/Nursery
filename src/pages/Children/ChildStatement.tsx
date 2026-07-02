@@ -316,59 +316,23 @@ export default function ChildStatement() {
             <span className="text-xs text-slate-400 self-center">
               {i18n.language === 'ar' ? 'كشف الحساب:' : 'Statement:'}
             </span>
-            <Button
-              variant="outline"
-              onClick={handlePrint}
-              isLoading={isPrinting}
-              disabled={isExportingExcel || isExportingPdf || isExportingCsv}
-              className="flex-1 md:flex-initial"
-            >
-              🖨️ {i18n.language === 'ar' ? 'طباعة' : 'Print'}
-            </Button>
-            <Button
-              variant="outline"
-              onClick={() => handleExport('xlsx')}
-              isLoading={isExportingExcel}
-              disabled={isExportingPdf || isExportingCsv}
-              className="flex-1 md:flex-initial"
-            >
-              📊 {i18n.language === 'ar' ? 'إكسل' : 'Excel'}
-            </Button>
-            <Button
-              variant="outline"
-              onClick={() => handleExport('pdf')}
-              isLoading={isExportingPdf}
-              disabled={isExportingExcel || isExportingCsv}
-              className="flex-1 md:flex-initial"
-            >
-              📕 PDF
-            </Button>
-            <Button
-              variant="outline"
-              onClick={() => handleExport('csv')}
-              isLoading={isExportingCsv}
-              disabled={isExportingExcel || isExportingPdf}
-              className="flex-1 md:flex-initial"
-            >
-              📃 CSV
-            </Button>
+            <ReportActions
+              onPrint={handlePrint}
+              onExportPdf={() => handleExport('pdf')}
+              onExportExcel={() => handleExport('xlsx')}
+              onExportCsv={() => handleExport('csv')}
+            />
           </div>
           <div className="flex items-center gap-2 w-full md:w-auto flex-wrap justify-end">
             <span className="text-xs text-slate-400 self-center">
               {i18n.language === 'ar' ? 'تقرير الطفل الشامل:' : 'Full Child Report:'}
             </span>
-            <Button variant="primary" size="sm" onClick={handleChildReportPrint} isLoading={isChildReportBusy === 'print'} disabled={!!isChildReportBusy && isChildReportBusy !== 'print'}>
-              🖨️ {i18n.language === 'ar' ? 'طباعة التقرير' : 'Print Report'}
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => handleChildReportExport('xlsx')} isLoading={isChildReportBusy === 'xlsx'} disabled={!!isChildReportBusy && isChildReportBusy !== 'xlsx'}>
-              📊 {i18n.language === 'ar' ? 'إكسل' : 'Excel'}
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => handleChildReportExport('pdf')} isLoading={isChildReportBusy === 'pdf'} disabled={!!isChildReportBusy && isChildReportBusy !== 'pdf'}>
-              📕 PDF
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => handleChildReportExport('csv')} isLoading={isChildReportBusy === 'csv'} disabled={!!isChildReportBusy && isChildReportBusy !== 'csv'}>
-              📃 CSV
-            </Button>
+            <ReportActions
+              onPrint={handleChildReportPrint}
+              onExportPdf={() => handleChildReportExport('pdf')}
+              onExportExcel={() => handleChildReportExport('xlsx')}
+              onExportCsv={() => handleChildReportExport('csv')}
+            />
           </div>
         </div>
       </div>

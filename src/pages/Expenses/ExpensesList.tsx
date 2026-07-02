@@ -11,6 +11,7 @@ import { Select } from '../../components/ui/Select.js'
 import { Modal } from '../../components/ui/Modal.js'
 import { useExport } from '../../hooks/useExport.js'
 import type { Expense } from '../../types/index.js'
+import { ReportActions } from '../../components/reports/ReportActions.js'
 
 const englishMonths = [
   'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
@@ -42,11 +43,6 @@ export default function ExpensesList() {
 
   // Salaries store for combined total (T070)
   const { salaryPayments, fetchSalaryPayments } = useSalariesStore()
-
-  const [isExportingExcel, setIsExportingExcel] = useState(false)
-  const [isExportingPdf, setIsExportingPdf] = useState(false)
-  const [isExportingCsv, setIsExportingCsv] = useState(false)
-  const [isPrinting, setIsPrinting] = useState(false)
 
   // Add Item Modal
   const [isAddItemModalOpen, setIsAddItemModalOpen] = useState(false)
@@ -150,33 +146,21 @@ export default function ExpensesList() {
   }
 
   const handleExport = async (format: 'xlsx' | 'pdf' | 'csv') => {
-    if (format === 'xlsx') setIsExportingExcel(true)
-    else if (format === 'pdf') setIsExportingPdf(true)
-    else setIsExportingCsv(true)
     try {
       await exportExpenses(currentYear, format)
     } catch (err) {
       console.error(err)
-    } finally {
-      setIsExportingExcel(false)
-      setIsExportingPdf(false)
-      setIsExportingCsv(false)
     }
   }
 
   const handlePrint = async () => {
-    setIsPrinting(true)
-    try {
-      const { html } = await window.api.print.preview({ reportType: 'expenses', year: currentYear, lang: i18n.language })
-      const win = window.open('', '_blank')
-      if (!win) return
-      win.document.write(html)
-      win.document.close()
-      win.focus()
-      win.print()
-    } finally {
-      setIsPrinting(false)
-    }
+    const { html } = await window.api.print.preview({ reportType: 'expenses', year: currentYear, lang: i18n.language })
+    const win = window.open('', '_blank')
+    if (!win) return
+    win.document.write(html)
+    win.document.close()
+    win.focus()
+    win.print()
   }
 
   return (
@@ -203,40 +187,12 @@ export default function ExpensesList() {
           />
 
           {expenses.length > 0 && (
-            <>
-              <Button
-                variant="outline"
-                onClick={handlePrint}
-                isLoading={isPrinting}
-                disabled={isExportingExcel || isExportingPdf || isExportingCsv}
-              >
-                🖨️ {isAr ? 'طباعة' : 'Print'}
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => handleExport('xlsx')}
-                isLoading={isExportingExcel}
-                disabled={isExportingPdf || isExportingCsv}
-              >
-                📊 {isAr ? 'إكسل' : 'Excel'}
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => handleExport('pdf')}
-                isLoading={isExportingPdf}
-                disabled={isExportingExcel || isExportingCsv}
-              >
-                📕 PDF
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => handleExport('csv')}
-                isLoading={isExportingCsv}
-                disabled={isExportingExcel || isExportingPdf}
-              >
-                📃 CSV
-              </Button>
-            </>
+            <ReportActions
+              onPrint={handlePrint}
+              onExportPdf={() => handleExport('pdf')}
+              onExportExcel={() => handleExport('xlsx')}
+              onExportCsv={() => handleExport('csv')}
+            />
           )}
 
           <Button variant="primary" onClick={() => {
