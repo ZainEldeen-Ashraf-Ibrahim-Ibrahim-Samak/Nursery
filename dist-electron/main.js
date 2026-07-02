@@ -30163,12 +30163,12 @@ app.whenReady().then(async () => {
           VALUES ('sync_mongo_uri', ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), 0)
         `).run(envMongoUri);
 				console.log("[startup] Seeded MONGO_URI from env into settings.");
-			} else if (!existingUri.value) {
+			} else if (existingUri.value !== envMongoUri) {
 				db.prepare(`
           UPDATE settings SET value = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), synced = 0
           WHERE key = 'sync_mongo_uri'
         `).run(envMongoUri);
-				console.log("[startup] Updated empty sync_mongo_uri from env.");
+				console.log("[startup] Updated sync_mongo_uri from env to match MONGO_URI.");
 			}
 		}
 		const mongoUri = getMongoUri();
