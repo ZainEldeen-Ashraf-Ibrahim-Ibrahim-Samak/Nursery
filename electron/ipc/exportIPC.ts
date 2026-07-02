@@ -16,7 +16,7 @@ function checkAuth() {
 
 // Utility to handle export build logic depending on format
 async function executeExport(
-  type: 'full' | 'month' | 'child' | 'salaries' | 'expenses' | 'employees' | 'payrollReport',
+  type: 'full' | 'month' | 'child' | 'childReport' | 'salaries' | 'expenses' | 'employees' | 'payrollReport',
   params: any,
   defaultFilename: string
 ) {
@@ -42,7 +42,7 @@ async function executeExport(
   if (params.format === 'xlsx') {
     await buildExcelFile(type, params, savePath)
   } else if (params.format === 'csv') {
-    await buildCsvFile(type as 'payrollReport' | 'expenses', params, savePath)
+    await buildCsvFile(type as 'payrollReport' | 'expenses' | 'childReport', params, savePath)
   } else {
     await buildPdfFile(type, params, savePath)
   }
@@ -89,6 +89,20 @@ ipcMain.handle('export:child', async (_event, { childId, format, lang }) => {
   } catch (error: any) {
     console.error('Failed to run child statement export:', error)
     throw new Error(error.message || 'Failed to export child statement')
+  }
+})
+
+// 3b. Full Child Report export — feature 007, FR-007 (All authenticated users, matches export:child access)
+ipcMain.handle('export:childReport', async (_event, { childId, format, lang }) => {
+  try {
+    checkAuth()
+    const filename = lang === 'ar'
+      ? `تقرير_طفل_شامل_${childId}.${format}`
+      : `child_report_${childId}.${format}`
+    return await executeExport('childReport', { childId, format, lang }, filename)
+  } catch (error: any) {
+    console.error('Failed to run child report export:', error)
+    throw new Error(error.message || 'Failed to export child report')
   }
 })
 

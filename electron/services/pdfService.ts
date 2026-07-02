@@ -137,7 +137,7 @@ function getStatusColor(status: string): string {
 }
 
 export function buildPdfFile(
-  type: 'full' | 'month' | 'child' | 'salaries' | 'expenses' | 'employees' | 'payrollReport',
+  type: 'full' | 'month' | 'child' | 'childReport' | 'salaries' | 'expenses' | 'employees' | 'payrollReport',
   params: any,
   savePath: string
 ): Promise<void> {
@@ -263,6 +263,107 @@ export function buildPdfFile(
         })
       } 
       
+      else if (type === 'childReport') {
+        const child = db.prepare('SELECT * FROM children WHERE id = ?').get(childId) as any
+        if (!child) throw new Error('Child not found')
+
+        const title = isAr ? `تقرير الطفل الشامل: ${child.name}` : `Full Child Report: ${child.name}`
+        docDefinition.content.push(...getPdfHeader(brand, lang, title))
+
+        const sectionHeader = (text: string) => ({
+          text: shapeText(text), fontSize: 12, bold: true, color: '#ffffff',
+          fillColor: brand.primaryColor, margin: [4, 4, 4, 4] as [number, number, number, number]
+        })
+        const kvTable = (pairs: [string, any][]) => ({
+          margin: [0, 6, 0, 10] as [number, number, number, number],
+          table: {
+            widths: ['auto', '*'],
+            body: pairs.map(([k, v]) => [
+              { text: shapeText(k), bold: true, color: '#64748b' },
+              { text: shapeText(v ?? ''), }
+            ])
+          },
+          layout: 'noBorders'
+        })
+        const simpleTable = (headers: string[], rows: any[][], emptyMsg: string) => {
+          if (rows.length === 0) {
+            return { text: shapeText(emptyMsg), italics: true, color: '#94a3b8', margin: [0, 0, 0, 10] as [number, number, number, number] }
+          }
+          const body = [
+            headers.map((h) => ({ text: shapeText(h), bold: true, fillColor: '#f1f5f9', alignment: 'center' })),
+            ...rows.map((r) => r.map((c) => ({ text: shapeText(c ?? ''), alignment: isAr ? 'right' : 'left' })))
+          ]
+          return {
+            margin: [0, 0, 0, 10] as [number, number, number, number],
+            table: { headerRows: 1, widths: headers.map(() => '*'), body },
+            layout: { hLineWidth: () => 0.5, vLineWidth: () => 0.5, hLineColor: () => '#cbd5e1', vLineColor: () => '#cbd5e1' }
+          }
+        }
+
+        // Personal Information
+        docDefinition.content.push(sectionHeader(isAr ? '📋 البيانات الشخصية' : '📋 Personal Information'))
+        docDefinition.content.push(kvTable([
+          [isAr ? 'الاسم' : 'Name', child.name],
+          [isAr ? 'ولي الأمر' : 'Guardian', child.guardian],
+          [isAr ? 'هاتف ولي الأمر' : 'Guardian Phone', child.guardian_phone],
+          [isAr ? 'تاريخ التسجيل' : 'Registration Date', child.reg_date],
+          [isAr ? 'الحالة' : 'Status', child.is_active ? (isAr ? 'نشط' : 'Active') : (isAr ? 'غير نشط' : 'Inactive')]
+        ]))
+
+        // Enrolled Services & Teachers
+        docDefinition.content.push(sectionHeader(isAr ? '🏷️ الخدمات والمعلمون' : '🏷️ Services & Teachers'))
+        const services = db.prepare(`
+          SELECT cs.service, cs.unit, cs.price, e.name as teacher_name
+          FROM child_services cs LEFT JOIN employees e ON e.id = cs.teacher_id
+          WHERE cs.child_id = ?
+        `).all(childId) as any[]
+        docDefinition.content.push(simpleTable(
+          isAr ? ['الخدمة', 'الوحدة', 'السعر', 'المعلم'] : ['Service', 'Unit', 'Price', 'Teacher'],
+          services.map((s) => [s.service, s.unit, formatCurrency(s.price, lang), s.teacher_name || (isAr ? 'بدون معلم' : 'No teacher')]),
+          isAr ? 'لا توجد خدمات مسجلة.' : 'No services enrolled.'
+        ))
+
+        // Attendance History + Percentage
+        const attendanceRows = db.prepare(`
+          SELECT ss.session_date as attendance_date, e.name as teacher_name, ar.teacher_status, ar.status as child_status
+          FROM attendance_records ar
+          JOIN scheduled_sessions ss ON ss.id = ar.session_id
+          LEFT JOIN employees e ON e.id = ar.attended_teacher_id
+          WHERE ar.child_id = ?
+          ORDER BY ss.session_date DESC
+        `).all(childId) as any[]
+        const attended = attendanceRows.filter((r) => r.child_status === 'attended').length
+        const pct = attendanceRows.length > 0 ? Math.round((attended / attendanceRows.length) * 100) : null
+        docDefinition.content.push(sectionHeader(
+          isAr ? `📅 سجل الحضور — نسبة الحضور: ${pct != null ? pct + '%' : 'غير متاح'}` : `📅 Attendance History — Attendance %: ${pct != null ? pct + '%' : 'N/A'}`
+        ))
+        docDefinition.content.push(simpleTable(
+          isAr ? ['التاريخ', 'المعلم', 'حالة المعلم', 'حالة الطفل'] : ['Date', 'Teacher', 'Teacher Status', 'Child Status'],
+          attendanceRows.map((a) => [a.attendance_date, a.teacher_name || '', a.teacher_status || '', a.child_status]),
+          isAr ? 'لا يوجد سجل حضور بعد.' : 'No attendance history yet.'
+        ))
+
+        // Payment History
+        docDefinition.content.push(sectionHeader(isAr ? '💰 السجل المالي' : '💰 Payment History'))
+        const existingPaymentsForReport = db.prepare(
+          'SELECT month, year, service, unit, quantity, price, total, paid, balance, status FROM payments WHERE child_id = ?'
+        ).all(childId) as any[]
+        const statementForReport = getChildStatement(child, existingPaymentsForReport, new Date())
+        docDefinition.content.push(simpleTable(
+          isAr ? ['الشهر', 'السنة', 'الخدمة', 'الإجمالي', 'المدفوع', 'الرصيد', 'الحالة'] : ['Month', 'Year', 'Service', 'Total', 'Paid', 'Balance', 'Status'],
+          statementForReport.rows.map((p: any) => {
+            const mIdx = arabicMonths.indexOf(p.month)
+            const mStr = isAr ? p.month : (mIdx !== -1 ? englishMonths[mIdx] : p.month)
+            return [mStr, p.year, p.service, formatCurrency(p.total, lang), formatCurrency(p.paid, lang), formatCurrency(p.balance, lang), p.status]
+          }),
+          isAr ? 'لا توجد معاملات مالية مسجلة.' : 'No financial transactions recorded.'
+        ))
+
+        // Notes
+        docDefinition.content.push(sectionHeader(isAr ? '📝 ملاحظات' : '📝 Notes'))
+        docDefinition.content.push({ text: shapeText(child.notes || (isAr ? 'لا توجد ملاحظات.' : 'No notes.')), margin: [0, 6, 0, 0] })
+      }
+
       else if (type === 'child') {
         const child = db.prepare('SELECT * FROM children WHERE id = ?').get(childId) as any
         if (!child) throw new Error('Child not found')

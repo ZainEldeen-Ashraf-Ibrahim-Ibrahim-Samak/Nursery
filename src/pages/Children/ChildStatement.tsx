@@ -37,6 +37,11 @@ export default function ChildStatement() {
   const [isExportingCsv, setIsExportingCsv] = useState(false)
   const [isPrinting, setIsPrinting] = useState(false)
 
+  // Full Child Report (feature 007, US3/FR-007) — personal info + attendance + teachers +
+  // services + attendance % + payments + notes, distinct from the financial-only statement
+  // export above.
+  const [isChildReportBusy, setIsChildReportBusy] = useState<'pdf' | 'xlsx' | 'csv' | 'print' | null>(null)
+
   // Attendance history (FR-019) — admin-only, per the access-control clarification.
   const { user } = useAuthStore()
   const isAdmin = user?.role === 'admin'
@@ -116,6 +121,32 @@ export default function ChildStatement() {
       win.print()
     } finally {
       setIsPrinting(false)
+    }
+  }
+
+  const handleChildReportExport = async (format: 'pdf' | 'xlsx' | 'csv') => {
+    if (!id) return
+    setIsChildReportBusy(format)
+    try {
+      await window.api.export.childReport({ childId: Number(id), format, lang: i18n.language })
+    } finally {
+      setIsChildReportBusy(null)
+    }
+  }
+
+  const handleChildReportPrint = async () => {
+    if (!id) return
+    setIsChildReportBusy('print')
+    try {
+      const { html } = await window.api.print.preview({ reportType: 'childReport', childId: Number(id), lang: i18n.language })
+      const win = window.open('', '_blank')
+      if (!win) return
+      win.document.write(html)
+      win.document.close()
+      win.focus()
+      win.print()
+    } finally {
+      setIsChildReportBusy(null)
     }
   }
 
@@ -280,43 +311,65 @@ export default function ChildStatement() {
         </div>
 
         {/* Export Buttons */}
-        <div className="flex items-center gap-2 w-full md:w-auto flex-wrap">
-          <Button
-            variant="outline"
-            onClick={handlePrint}
-            isLoading={isPrinting}
-            disabled={isExportingExcel || isExportingPdf || isExportingCsv}
-            className="flex-1 md:flex-initial"
-          >
-            🖨️ {i18n.language === 'ar' ? 'طباعة' : 'Print'}
-          </Button>
-          <Button
-            variant="outline"
-            onClick={() => handleExport('xlsx')}
-            isLoading={isExportingExcel}
-            disabled={isExportingPdf || isExportingCsv}
-            className="flex-1 md:flex-initial"
-          >
-            📊 {i18n.language === 'ar' ? 'تصدير إكسل' : 'Excel Export'}
-          </Button>
-          <Button
-            variant="outline"
-            onClick={() => handleExport('pdf')}
-            isLoading={isExportingPdf}
-            disabled={isExportingExcel || isExportingCsv}
-            className="flex-1 md:flex-initial"
-          >
-            📕 {i18n.language === 'ar' ? 'تصدير PDF' : 'PDF Export'}
-          </Button>
-          <Button
-            variant="outline"
-            onClick={() => handleExport('csv')}
-            isLoading={isExportingCsv}
-            disabled={isExportingExcel || isExportingPdf}
-            className="flex-1 md:flex-initial"
-          >
-            📃 CSV
-          </Button>
+        <div className="flex flex-col items-end gap-2 w-full md:w-auto">
+          <div className="flex items-center gap-2 w-full md:w-auto flex-wrap justify-end">
+            <span className="text-xs text-slate-400 self-center">
+              {i18n.language === 'ar' ? 'كشف الحساب:' : 'Statement:'}
+            </span>
+            <Button
+              variant="outline"
+              onClick={handlePrint}
+              isLoading={isPrinting}
+              disabled={isExportingExcel || isExportingPdf || isExportingCsv}
+              className="flex-1 md:flex-initial"
+            >
+              🖨️ {i18n.language === 'ar' ? 'طباعة' : 'Print'}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => handleExport('xlsx')}
+              isLoading={isExportingExcel}
+              disabled={isExportingPdf || isExportingCsv}
+              className="flex-1 md:flex-initial"
+            >
+              📊 {i18n.language === 'ar' ? 'إكسل' : 'Excel'}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => handleExport('pdf')}
+              isLoading={isExportingPdf}
+              disabled={isExportingExcel || isExportingCsv}
+              className="flex-1 md:flex-initial"
+            >
+              📕 PDF
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => handleExport('csv')}
+              isLoading={isExportingCsv}
+              disabled={isExportingExcel || isExportingPdf}
+              className="flex-1 md:flex-initial"
+            >
+              📃 CSV
+            </Button>
+          </div>
+          <div className="flex items-center gap-2 w-full md:w-auto flex-wrap justify-end">
+            <span className="text-xs text-slate-400 self-center">
+              {i18n.language === 'ar' ? 'تقرير الطفل الشامل:' : 'Full Child Report:'}
+            </span>
+            <Button variant="primary" size="sm" onClick={handleChildReportPrint} isLoading={isChildReportBusy === 'print'} disabled={!!isChildReportBusy && isChildReportBusy !== 'print'}>
+              🖨️ {i18n.language === 'ar' ? 'طباعة التقرير' : 'Print Report'}
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => handleChildReportExport('xlsx')} isLoading={isChildReportBusy === 'xlsx'} disabled={!!isChildReportBusy && isChildReportBusy !== 'xlsx'}>
+              📊 {i18n.language === 'ar' ? 'إكسل' : 'Excel'}
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => handleChildReportExport('pdf')} isLoading={isChildReportBusy === 'pdf'} disabled={!!isChildReportBusy && isChildReportBusy !== 'pdf'}>
+              📕 PDF
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => handleChildReportExport('csv')} isLoading={isChildReportBusy === 'csv'} disabled={!!isChildReportBusy && isChildReportBusy !== 'csv'}>
+              📃 CSV
+            </Button>
+          </div>
         </div>
       </div>
 

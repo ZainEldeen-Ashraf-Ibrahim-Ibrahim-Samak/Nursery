@@ -25,7 +25,7 @@ function escapeHtml(value: unknown): string {
  * exact same query as the equivalent export:* handler so Print and Export PDF/Excel can never
  * disagree on what data they show (FR-003).
  */
-export function buildPrintPreviewHtml(reportType: 'payroll' | 'expenses' | 'child', params: any): string {
+export function buildPrintPreviewHtml(reportType: 'payroll' | 'expenses' | 'child' | 'childReport', params: any): string {
   const brand = getExportHeader()
   const isAr = params.lang === 'ar'
   const dir = isAr ? 'rtl' : 'ltr'
@@ -157,6 +157,77 @@ export function buildPrintPreviewHtml(reportType: 'payroll' | 'expenses' | 'chil
     `
   }
 
+  if (reportType === 'childReport') {
+    const db = getDb()
+    const childId = Number(params.childId)
+    const child = db.prepare('SELECT * FROM children WHERE id = ?').get(childId) as any
+    if (!child) throw new Error(`Child not found with ID: ${childId}`)
+
+    title = isAr ? `تقرير الطفل الشامل: ${child.name}` : `Full Child Report: ${child.name}`
+    filterSummary = isAr ? `الطفل: ${child.name}` : `Child: ${child.name}`
+
+    const section = (heading: string, inner: string) => `<h2>${escapeHtml(heading)}</h2>${inner}`
+
+    const personalInfo = `
+      <table><tbody>
+        <tr><td class="label">${escapeHtml(isAr ? 'الاسم' : 'Name')}</td><td>${escapeHtml(child.name)}</td></tr>
+        <tr><td class="label">${escapeHtml(isAr ? 'ولي الأمر' : 'Guardian')}</td><td>${escapeHtml(child.guardian)}</td></tr>
+        <tr><td class="label">${escapeHtml(isAr ? 'هاتف ولي الأمر' : 'Guardian Phone')}</td><td>${escapeHtml(child.guardian_phone)}</td></tr>
+        <tr><td class="label">${escapeHtml(isAr ? 'تاريخ التسجيل' : 'Registration Date')}</td><td>${escapeHtml(child.reg_date)}</td></tr>
+        <tr><td class="label">${escapeHtml(isAr ? 'الحالة' : 'Status')}</td><td>${escapeHtml(child.is_active ? (isAr ? 'نشط' : 'Active') : (isAr ? 'غير نشط' : 'Inactive'))}</td></tr>
+      </tbody></table>`
+
+    const services = db.prepare(`
+      SELECT cs.service, cs.unit, cs.price, e.name as teacher_name
+      FROM child_services cs LEFT JOIN employees e ON e.id = cs.teacher_id
+      WHERE cs.child_id = ?
+    `).all(childId) as any[]
+    const servicesHtml = services.length === 0
+      ? `<p class="empty">${escapeHtml(isAr ? 'لا توجد خدمات مسجلة.' : 'No services enrolled.')}</p>`
+      : `<table><thead><tr><th>${escapeHtml(isAr ? 'الخدمة' : 'Service')}</th><th>${escapeHtml(isAr ? 'الوحدة' : 'Unit')}</th><th>${escapeHtml(isAr ? 'السعر' : 'Price')}</th><th>${escapeHtml(isAr ? 'المعلم' : 'Teacher')}</th></tr></thead>
+        <tbody>${services.map((s) => `<tr><td>${escapeHtml(s.service)}</td><td>${escapeHtml(s.unit)}</td><td>${escapeHtml(s.price)}</td><td>${escapeHtml(s.teacher_name || (isAr ? 'بدون معلم' : 'No teacher'))}</td></tr>`).join('')}</tbody></table>`
+
+    const attendanceRows = db.prepare(`
+      SELECT ss.session_date as attendance_date, e.name as teacher_name, ar.teacher_status, ar.status as child_status
+      FROM attendance_records ar
+      JOIN scheduled_sessions ss ON ss.id = ar.session_id
+      LEFT JOIN employees e ON e.id = ar.attended_teacher_id
+      WHERE ar.child_id = ?
+      ORDER BY ss.session_date DESC
+    `).all(childId) as any[]
+    const attended = attendanceRows.filter((r) => r.child_status === 'attended').length
+    const pct = attendanceRows.length > 0 ? Math.round((attended / attendanceRows.length) * 100) : null
+    const attendanceHtml = `
+      <p><strong>${escapeHtml(isAr ? 'نسبة الحضور' : 'Attendance Percentage')}:</strong> ${escapeHtml(pct != null ? `${pct}%` : (isAr ? 'غير متاح' : 'N/A'))}</p>
+      ${attendanceRows.length === 0
+        ? `<p class="empty">${escapeHtml(isAr ? 'لا يوجد سجل حضور بعد.' : 'No attendance history yet.')}</p>`
+        : `<table><thead><tr><th>${escapeHtml(isAr ? 'التاريخ' : 'Date')}</th><th>${escapeHtml(isAr ? 'المعلم' : 'Teacher')}</th><th>${escapeHtml(isAr ? 'حالة المعلم' : 'Teacher Status')}</th><th>${escapeHtml(isAr ? 'حالة الطفل' : 'Child Status')}</th></tr></thead>
+          <tbody>${attendanceRows.map((a) => `<tr><td>${escapeHtml(a.attendance_date)}</td><td>${escapeHtml(a.teacher_name || '')}</td><td>${escapeHtml(a.teacher_status || '')}</td><td>${escapeHtml(a.child_status)}</td></tr>`).join('')}</tbody></table>`}
+    `
+
+    const existingPaymentsForReport = db.prepare(
+      'SELECT month, year, service, unit, quantity, price, total, paid, balance, status FROM payments WHERE child_id = ?'
+    ).all(childId) as any[]
+    const statementForReport = getChildStatement(child, existingPaymentsForReport, new Date())
+    const paymentsHtml = statementForReport.rows.length === 0
+      ? `<p class="empty">${escapeHtml(isAr ? 'لا توجد معاملات مالية مسجلة.' : 'No financial transactions recorded.')}</p>`
+      : `<table><thead><tr><th>${escapeHtml(isAr ? 'الشهر' : 'Month')}</th><th>${escapeHtml(isAr ? 'السنة' : 'Year')}</th><th>${escapeHtml(isAr ? 'الخدمة' : 'Service')}</th><th>${escapeHtml(isAr ? 'الإجمالي' : 'Total')}</th><th>${escapeHtml(isAr ? 'المدفوع' : 'Paid')}</th><th>${escapeHtml(isAr ? 'الرصيد' : 'Balance')}</th><th>${escapeHtml(isAr ? 'الحالة' : 'Status')}</th></tr></thead>
+        <tbody>${statementForReport.rows.map((p: any) => {
+          const monthLabel = isAr ? p.month : (arabicMonths.includes(p.month) ? englishMonths[arabicMonths.indexOf(p.month)] : p.month)
+          return `<tr><td>${escapeHtml(monthLabel)}</td><td>${escapeHtml(p.year)}</td><td>${escapeHtml(p.service)}</td><td>${escapeHtml(p.total)}</td><td>${escapeHtml(p.paid)}</td><td>${escapeHtml(p.balance)}</td><td>${escapeHtml(p.status)}</td></tr>`
+        }).join('')}</tbody></table>`
+
+    const notesHtml = `<p>${escapeHtml(child.notes || (isAr ? 'لا توجد ملاحظات.' : 'No notes.'))}</p>`
+
+    tableHtml = [
+      section(isAr ? '📋 البيانات الشخصية' : '📋 Personal Information', personalInfo),
+      section(isAr ? '🏷️ الخدمات والمعلمون' : '🏷️ Services & Teachers', servicesHtml),
+      section(isAr ? '📅 سجل الحضور' : '📅 Attendance History', attendanceHtml),
+      section(isAr ? '💰 السجل المالي' : '💰 Payment History', paymentsHtml),
+      section(isAr ? '📝 ملاحظات' : '📝 Notes', notesHtml)
+    ].join('')
+  }
+
   return `<!doctype html>
 <html dir="${dir}" lang="${params.lang}">
 <head>
@@ -167,6 +238,8 @@ export function buildPrintPreviewHtml(reportType: 'payroll' | 'expenses' | 'chil
   .meta { color: #64748b; font-size: 12px; margin-bottom: 16px; }
   table { width: 100%; border-collapse: collapse; margin-top: 12px; }
   th, td { border: 1px solid #cbd5e1; padding: 6px 10px; font-size: 13px; text-align: ${isAr ? 'right' : 'left'}; }
+  h2 { color: #fff; background: ${brand.primaryColor}; font-size: 13px; padding: 6px 10px; margin-top: 18px; }
+  td.label { color: #64748b; font-weight: bold; width: 160px; }
   th { background: ${brand.primaryColor}; color: #fff; }
   tr.totals { font-weight: bold; background: #f1f5f9; }
   .empty { color: #94a3b8; font-style: italic; text-align: center; }

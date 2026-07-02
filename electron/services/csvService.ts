@@ -44,13 +44,78 @@ function buildHeaderLines(title: string, filterSummary: string): string[] {
 }
 
 export async function buildCsvFile(
-  type: 'payrollReport' | 'expenses' | 'child',
+  type: 'payrollReport' | 'expenses' | 'child' | 'childReport',
   params: any,
   savePath: string
 ): Promise<void> {
   const { lang = 'ar' } = params
   const isAr = lang === 'ar'
   let lines: string[] = []
+
+  // Full Child Report (feature 007, US3/FR-007) — personal info, services & teachers, attendance
+  // history + percentage, payment history, and notes, each as its own labeled block.
+  if (type === 'childReport') {
+    const db = getDb()
+    const childId = Number(params.childId)
+    const child = db.prepare('SELECT * FROM children WHERE id = ?').get(childId) as any
+    if (!child) throw new Error(`Child not found with ID: ${childId}`)
+
+    const title = isAr ? `تقرير الطفل الشامل: ${child.name}` : `Full Child Report: ${child.name}`
+    const filterSummary = isAr ? `الطفل: ${child.name}` : `Child: ${child.name}`
+    lines = buildHeaderLines(title, filterSummary)
+
+    lines.push(toCsvLine([isAr ? '📋 البيانات الشخصية' : '📋 Personal Information']))
+    lines.push(toCsvLine([isAr ? 'الاسم' : 'Name', child.name]))
+    lines.push(toCsvLine([isAr ? 'ولي الأمر' : 'Guardian', child.guardian]))
+    lines.push(toCsvLine([isAr ? 'هاتف ولي الأمر' : 'Guardian Phone', child.guardian_phone]))
+    lines.push(toCsvLine([isAr ? 'تاريخ التسجيل' : 'Registration Date', child.reg_date]))
+    lines.push(toCsvLine([isAr ? 'الحالة' : 'Status', child.is_active ? (isAr ? 'نشط' : 'Active') : (isAr ? 'غير نشط' : 'Inactive')]))
+    lines.push('')
+
+    lines.push(toCsvLine([isAr ? '🏷️ الخدمات والمعلمون' : '🏷️ Services & Teachers']))
+    lines.push(toCsvLine(isAr ? ['الخدمة', 'الوحدة', 'السعر', 'المعلم'] : ['Service', 'Unit', 'Price', 'Teacher']))
+    const services = db.prepare(`
+      SELECT cs.service, cs.unit, cs.price, e.name as teacher_name
+      FROM child_services cs LEFT JOIN employees e ON e.id = cs.teacher_id
+      WHERE cs.child_id = ?
+    `).all(childId) as any[]
+    if (services.length === 0) lines.push(toCsvLine([isAr ? 'لا توجد خدمات مسجلة.' : 'No services enrolled.']))
+    for (const s of services) lines.push(toCsvLine([s.service, s.unit, s.price, s.teacher_name || (isAr ? 'بدون معلم' : 'No teacher')]))
+    lines.push('')
+
+    const attendanceRows = db.prepare(`
+      SELECT ss.session_date as attendance_date, e.name as teacher_name, ar.teacher_status, ar.status as child_status
+      FROM attendance_records ar
+      JOIN scheduled_sessions ss ON ss.id = ar.session_id
+      LEFT JOIN employees e ON e.id = ar.attended_teacher_id
+      WHERE ar.child_id = ?
+      ORDER BY ss.session_date DESC
+    `).all(childId) as any[]
+    const attended = attendanceRows.filter((r) => r.child_status === 'attended').length
+    const pct = attendanceRows.length > 0 ? Math.round((attended / attendanceRows.length) * 100) : null
+    lines.push(toCsvLine([isAr ? '📅 سجل الحضور' : '📅 Attendance History']))
+    lines.push(toCsvLine([isAr ? 'نسبة الحضور' : 'Attendance Percentage', pct != null ? `${pct}%` : (isAr ? 'غير متاح' : 'N/A')]))
+    lines.push(toCsvLine(isAr ? ['التاريخ', 'المعلم', 'حالة المعلم', 'حالة الطفل'] : ['Date', 'Teacher', 'Teacher Status', 'Child Status']))
+    if (attendanceRows.length === 0) lines.push(toCsvLine([isAr ? 'لا يوجد سجل حضور بعد.' : 'No attendance history yet.']))
+    for (const a of attendanceRows) lines.push(toCsvLine([a.attendance_date, a.teacher_name || '', a.teacher_status || '', a.child_status]))
+    lines.push('')
+
+    lines.push(toCsvLine([isAr ? '💰 السجل المالي' : '💰 Payment History']))
+    lines.push(toCsvLine(isAr ? ['الشهر', 'السنة', 'الخدمة', 'الإجمالي', 'المدفوع', 'الرصيد', 'الحالة'] : ['Month', 'Year', 'Service', 'Total', 'Paid', 'Balance', 'Status']))
+    const existingPaymentsForReport = db.prepare(
+      'SELECT month, year, service, unit, quantity, price, total, paid, balance, status FROM payments WHERE child_id = ?'
+    ).all(childId) as any[]
+    const statementForReport = getChildStatement(child, existingPaymentsForReport, new Date())
+    if (statementForReport.rows.length === 0) lines.push(toCsvLine([isAr ? 'لا توجد معاملات مالية مسجلة.' : 'No financial transactions recorded.']))
+    for (const p of statementForReport.rows) {
+      const monthLabel = isAr ? p.month : (arabicMonths.includes(p.month) ? englishMonths[arabicMonths.indexOf(p.month)] : p.month)
+      lines.push(toCsvLine([monthLabel, p.year, p.service, p.total, p.paid, p.balance, p.status]))
+    }
+    lines.push('')
+
+    lines.push(toCsvLine([isAr ? '📝 ملاحظات' : '📝 Notes']))
+    lines.push(toCsvLine([child.notes || (isAr ? 'لا توجد ملاحظات.' : 'No notes.')]))
+  }
 
   // Financial Transactions Report (feature 007, US4/FR-008) — every recorded payment for the
   // child plus the resulting outstanding balance, sourced from the same statement engine as the

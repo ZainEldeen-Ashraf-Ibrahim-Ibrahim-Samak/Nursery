@@ -713,7 +713,7 @@ function generateChildReportSheet(
     worksheet.mergeCells(`A${row}:F${row}`)
     row += 1
   }
-  const kv = (label: string, value: unknown) => {
+  const kv = (label: string, value: any) => {
     worksheet.getCell(`A${row}`).value = label
     worksheet.getCell(`A${row}`).font = { name: FONT_FAMILY, size: 10, bold: true, color: { argb: 'FF64748B' } }
     worksheet.getCell(`B${row}`).value = value ?? ''
