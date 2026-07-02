@@ -525,6 +525,72 @@ const teacherPaymentSchema = new Schema({
 export const TeacherPaymentModel: Model<any> = mongoose.models['sync_teacher_payments'] ||
   mongoose.model('sync_teacher_payments', teacherPaymentSchema)
 
+// ── Attendance Edit Requests ───────────────────────────────────────────────────
+
+const attendanceEditRequestSchema = new Schema({
+  id: { type: Number, required: true, unique: true },
+  attendance_record_id: Number,
+  child_id: Number,
+  teacher_id: Number,
+  attendance_date: String,
+  original_status: String,
+  original_excuse_notes: String,
+  original_teacher_status: String,
+  requested_status: String,
+  requested_excuse_notes: String,
+  requested_teacher_status: String,
+  reason: String,
+  requested_by: Number,
+  requested_at: String,
+  status: String,
+  decided_by: Number,
+  decided_at: String,
+  decision_notes: String,
+  synced: Number
+}, sharedOptions)
+
+export const AttendanceEditRequestModel: Model<any> = mongoose.models['sync_attendance_edit_requests'] ||
+  mongoose.model('sync_attendance_edit_requests', attendanceEditRequestSchema)
+
+// ── Attendance Audit Log ───────────────────────────────────────────────────────
+
+const attendanceAuditLogSchema = new Schema({
+  id: { type: Number, required: true, unique: true },
+  attendance_record_id: Number,
+  edit_request_id: Number,
+  old_status: String,
+  old_excuse_notes: String,
+  old_teacher_status: String,
+  new_status: String,
+  new_excuse_notes: String,
+  new_teacher_status: String,
+  changed_by: Number,
+  approved_by: Number,
+  reason: String,
+  changed_at: String,
+  synced: Number
+}, sharedOptions)
+
+export const AttendanceAuditLogModel: Model<any> = mongoose.models['sync_attendance_audit_log'] ||
+  mongoose.model('sync_attendance_audit_log', attendanceAuditLogSchema)
+
+// ── Notifications ───────────────────────────────────────────────────────────────
+
+const notificationSchema = new Schema({
+  id: { type: Number, required: true, unique: true },
+  user_id: Number,
+  type: String,
+  related_id: Number,
+  message_ar: String,
+  message_en: String,
+  read_at: String,
+  created_at: String,
+  synced: Number
+}, sharedOptions)
+
+export const NotificationModel: Model<any> = mongoose.models['sync_notifications'] ||
+  mongoose.model('sync_notifications', notificationSchema)
+
 // ── Entity registry ───────────────────────────────────────────────────────────
 
 export const SYNC_ENTITIES: {
@@ -554,4 +620,7 @@ export const SYNC_ENTITIES: {
   { name: 'payment_transactions', model: PaymentTransactionModel, table: 'payment_transactions' },
   { name: 'service_teachers', model: ServiceTeacherModel, table: 'service_teachers' },
   { name: 'teacher_payments', model: TeacherPaymentModel, table: 'teacher_payments' },
+  { name: 'attendance_edit_requests', model: AttendanceEditRequestModel, table: 'attendance_edit_requests' },
+  { name: 'attendance_audit_log', model: AttendanceAuditLogModel, table: 'attendance_audit_log' },
+  { name: 'notifications', model: NotificationModel, table: 'notifications' },
 ]

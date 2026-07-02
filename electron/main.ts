@@ -147,37 +147,26 @@ app.whenReady().then(async () => {
     if (!currentIcon || !currentIcon.value) {
       db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('brand_icon_path', 'branding/icon.png')").run()
     }
-    // Seed MONGO_URI from env into settings DB if the admin hasn't set one yet.
-    // This lets the admin see and change the URI in the Settings UI without
-    // having to retype it. Admin-configured values are never overwritten.
-    const envMongoUri = process.env.MONGO_URI?.trim()
-    if (envMongoUri) {
-      const existingUri = db.prepare("SELECT value FROM settings WHERE key = 'sync_mongo_uri'").get() as { value: string } | undefined
-      if (!existingUri) {
-        // Row doesn't exist yet — insert it
-        db.prepare(`
-          INSERT INTO settings (key, value, updated_at, synced)
-          VALUES ('sync_mongo_uri', ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), 0)
-        `).run(envMongoUri)
-        console.log('[startup] Seeded MONGO_URI from env into settings.')
-      } else if (existingUri.value !== envMongoUri) {
-        // Row exists but value is different — update it to match env
-        db.prepare(`
-          UPDATE settings SET value = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), synced = 0
-          WHERE key = 'sync_mongo_uri'
-        `).run(envMongoUri)
-        console.log('[startup] Updated sync_mongo_uri from env to match MONGO_URI.')
-      }
+    // Seed sync_mongo_uri into settings if the admin hasn't set one yet, so it shows up (and is
+    // editable) in the Settings UI. Priority: an admin-configured DB value is never overwritten;
+    // otherwise MONGO_URI from .env; otherwise the hardcoded default URI baked into getMongoUri()
+    // — this guarantees the app is never left with "no URI configured at all".
+    const resolvedMongoUri = getMongoUri()
+    const existingUri = db.prepare("SELECT value FROM settings WHERE key = 'sync_mongo_uri'").get() as { value: string } | undefined
+    if (!existingUri) {
+      db.prepare(`
+        INSERT INTO settings (key, value, updated_at, synced)
+        VALUES ('sync_mongo_uri', ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), 0)
+      `).run(resolvedMongoUri)
+      console.log('[startup] Seeded sync_mongo_uri into settings:', resolvedMongoUri)
     }
 
-    // Connect to MongoDB on startup if URI is configured
-    const mongoUri = getMongoUri()
-    if (mongoUri) {
-      console.log('Connecting to MongoDB on startup...')
-      connectMongo(mongoUri)
-        .then(() => console.log('Successfully connected to MongoDB on startup.'))
-        .catch((err) => console.error('Failed to connect to MongoDB on startup:', err.message))
-    }
+    // Always connect on startup — getMongoUri() now guarantees a URI (DB → .env → hardcoded
+    // default), so this never silently skips due to "no URI configured".
+    console.log('Connecting to MongoDB on startup...')
+    connectMongo(resolvedMongoUri)
+      .then(() => console.log('Successfully connected to MongoDB on startup.'))
+      .catch((err) => console.error('Failed to connect to MongoDB on startup:', err.message))
 
     // Resume auto-sync if a saved interval exists (T090)
     const autoIntervalRow = db.prepare("SELECT value FROM settings WHERE key = 'sync_auto_interval'").get() as { value: string } | undefined

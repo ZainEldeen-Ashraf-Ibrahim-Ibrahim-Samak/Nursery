@@ -1,5 +1,5 @@
 import { n as getDb, r as initDb, t as closeDb } from "./connection-DNiMlhbf.js";
-import { E as getConnectionStatus, T as disconnectMongo, p as SYNC_ENTITIES, w as connectMongo } from "./mongoSync-DDS5f2Dk.js";
+import { D as connectMongo, O as disconnectMongo, g as SYNC_ENTITIES, k as getConnectionStatus } from "./mongoSync-BBtdWLDq.js";
 import { createRequire } from "node:module";
 import path from "node:path";
 import nodeCrypto from "crypto";
@@ -28329,7 +28329,7 @@ ipcMain.handle("storage:clear", async (_event, { confirm }) => {
 			const { getMongoUri } = await Promise.resolve().then(() => syncIPC_exports);
 			const mongoUri = getMongoUri();
 			if (mongoUri && process.env.NODE_ENV !== "test") {
-				const { getConnectionStatus, connectMongo, disconnectMongo, SYNC_ENTITIES } = await import("./mongoSync-B7p0d34q.js");
+				const { getConnectionStatus, connectMongo, disconnectMongo, SYNC_ENTITIES } = await import("./mongoSync-BQkG228l.js");
 				const status = getConnectionStatus();
 				let tempConnected = false;
 				if (!status.connected) {
@@ -28432,11 +28432,12 @@ function logSync(action, entityType, recordId, status, error = null) {
     `).run(action, entityType, String(recordId), status, error, (/* @__PURE__ */ new Date()).toISOString());
 	} catch {}
 }
+var DEFAULT_MONGO_URI = process.env.MONGO_URI || "mongodb+srv://nursery:nursery@cluster0.ile4s29.mongodb.net/?appName=Cluster0";
 function getMongoUri() {
 	try {
-		return getDb().prepare("SELECT value FROM settings WHERE key = 'sync_mongo_uri'").get()?.value || process.env.MONGO_URI || null;
+		return getDb().prepare("SELECT value FROM settings WHERE key = 'sync_mongo_uri'").get()?.value || process.env.MONGO_URI || DEFAULT_MONGO_URI;
 	} catch {
-		return process.env.MONGO_URI || null;
+		return process.env.MONGO_URI || DEFAULT_MONGO_URI;
 	}
 }
 /**
@@ -30154,28 +30155,16 @@ app.whenReady().then(async () => {
 		if (!currentLogo || !currentLogo.value) db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('brand_logo_path', 'branding/logo.png')").run();
 		const currentIcon = db.prepare("SELECT value FROM settings WHERE key = 'brand_icon_path'").get();
 		if (!currentIcon || !currentIcon.value) db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('brand_icon_path', 'branding/icon.png')").run();
-		const envMongoUri = process.env.MONGO_URI?.trim();
-		if (envMongoUri) {
-			const existingUri = db.prepare("SELECT value FROM settings WHERE key = 'sync_mongo_uri'").get();
-			if (!existingUri) {
-				db.prepare(`
-          INSERT INTO settings (key, value, updated_at, synced)
-          VALUES ('sync_mongo_uri', ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), 0)
-        `).run(envMongoUri);
-				console.log("[startup] Seeded MONGO_URI from env into settings.");
-			} else if (existingUri.value !== envMongoUri) {
-				db.prepare(`
-          UPDATE settings SET value = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), synced = 0
-          WHERE key = 'sync_mongo_uri'
-        `).run(envMongoUri);
-				console.log("[startup] Updated sync_mongo_uri from env to match MONGO_URI.");
-			}
+		const resolvedMongoUri = getMongoUri();
+		if (!db.prepare("SELECT value FROM settings WHERE key = 'sync_mongo_uri'").get()) {
+			db.prepare(`
+        INSERT INTO settings (key, value, updated_at, synced)
+        VALUES ('sync_mongo_uri', ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), 0)
+      `).run(resolvedMongoUri);
+			console.log("[startup] Seeded sync_mongo_uri into settings:", resolvedMongoUri);
 		}
-		const mongoUri = getMongoUri();
-		if (mongoUri) {
-			console.log("Connecting to MongoDB on startup...");
-			connectMongo(mongoUri).then(() => console.log("Successfully connected to MongoDB on startup.")).catch((err) => console.error("Failed to connect to MongoDB on startup:", err.message));
-		}
+		console.log("Connecting to MongoDB on startup...");
+		connectMongo(resolvedMongoUri).then(() => console.log("Successfully connected to MongoDB on startup.")).catch((err) => console.error("Failed to connect to MongoDB on startup:", err.message));
 		const autoIntervalRow = db.prepare("SELECT value FROM settings WHERE key = 'sync_auto_interval'").get();
 		const savedInterval = Number(autoIntervalRow?.value ?? 0);
 		if (savedInterval > 0) startAutoSync(savedInterval * 60 * 1e3);

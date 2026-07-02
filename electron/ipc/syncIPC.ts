@@ -66,13 +66,18 @@ function logSync(action: string, entityType: string, recordId: string | number, 
   }
 }
 
-export function getMongoUri(): string | null {
+// Guaranteed fallback so the app is never left with "no URI configured" — an admin-set value in
+// the settings table always wins, then MONGO_URI from .env, and only if neither exists does this
+// hardcoded default get used, so sync always has somewhere to connect to.
+const DEFAULT_MONGO_URI = process.env.MONGO_URI || 'mongodb+srv://nursery:nursery@cluster0.ile4s29.mongodb.net/?appName=Cluster0'
+
+export function getMongoUri(): string {
   try {
     const db = getDb()
     const uriRow = db.prepare("SELECT value FROM settings WHERE key = 'sync_mongo_uri'").get() as any
-    return uriRow?.value || process.env.MONGO_URI || null
+    return uriRow?.value || process.env.MONGO_URI || DEFAULT_MONGO_URI
   } catch {
-    return process.env.MONGO_URI || null
+    return process.env.MONGO_URI || DEFAULT_MONGO_URI
   }
 }
 
