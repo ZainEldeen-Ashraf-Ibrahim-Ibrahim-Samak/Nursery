@@ -550,13 +550,24 @@ export async function importFromWorkbook(
           if (!label) return
           const hourly = toNum(cellAt(row, 3))
           const monthly = toNum(cellAt(row, 5))
-          // The sheet repeats the service labels in a second, formula-driven block
-          // whose cells have no cached result (resolve to 0). Only write positive
-          // values so those resultless rows never clobber the real input prices.
-          if (label.includes('حضانة')) { if (monthly > 0) setServicePrice('حضانة', 'price_monthly', monthly) }
-          else if (label.includes('استضافة')) { if (monthly > 0) setServicePrice('استضافة', 'price_monthly', monthly) }
-          else if (label.includes('جلسة')) { if (hourly > 0) setServicePrice('جلسة', 'price_hourly', hourly) }
-          else if (label.includes('نسبة الربح')) { if (hourly > 0) setSetting('target_profit_pct', hourly) }
+          if (label.includes('حضانة')) {
+            if (monthly > 0) {
+              setServicePrice('حضانة', 'price_monthly', monthly)
+              setSetting('nursery_monthly', monthly)
+            }
+          } else if (label.includes('استضافة')) {
+            if (monthly > 0) {
+              setServicePrice('استضافة', 'price_monthly', monthly)
+              setSetting('hosting_monthly', monthly)
+            }
+          } else if (label.includes('جلسة')) {
+            if (hourly > 0) {
+              setServicePrice('جلسة', 'price_hourly', hourly)
+              setSetting('session_hourly', hourly)
+            }
+          } else if (label.includes('نسبة الربح')) {
+            if (hourly > 0) setSetting('target_profit_pct', hourly)
+          }
         } catch (err) {
           recordRowError(settingsSheet.name, r, '', err)
         }

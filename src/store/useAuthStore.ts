@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { User } from '../types/index.js'
+import { friendlyError } from '../utils/errors.js'
 
 const TOKEN_STORAGE_KEY = 'nursery_auth_token'
 

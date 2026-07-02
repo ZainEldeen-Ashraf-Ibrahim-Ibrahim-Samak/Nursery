@@ -26949,7 +26949,7 @@ ipcMain.handle("storage:import", async (event, args) => {
 			if (result.canceled || result.filePaths.length === 0) throw new Error("Import cancelled");
 			filePath = result.filePaths[0];
 		}
-		const { importFromWorkbook } = await import("./importService-RFu9XWou.js");
+		const { importFromWorkbook } = await import("./importService-Dkj_OKsM.js");
 		return { imported: await importFromWorkbook(filePath, progressReporter(event, "import")) };
 	} catch (error) {
 		console.error("storage:import error:", error);
