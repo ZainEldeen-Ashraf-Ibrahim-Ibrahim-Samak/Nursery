@@ -1,5 +1,5 @@
 import { n as getDb, r as initDb, t as closeDb } from "./connection-DNiMlhbf.js";
-import { E as getConnectionStatus, T as disconnectMongo, p as SYNC_ENTITIES, w as connectMongo } from "./mongoSync-BQ9Up_YA.js";
+import { E as getConnectionStatus, T as disconnectMongo, p as SYNC_ENTITIES, w as connectMongo } from "./mongoSync-DDS5f2Dk.js";
 import { createRequire } from "node:module";
 import path from "node:path";
 import nodeCrypto from "crypto";
@@ -28329,7 +28329,7 @@ ipcMain.handle("storage:clear", async (_event, { confirm }) => {
 			const { getMongoUri } = await Promise.resolve().then(() => syncIPC_exports);
 			const mongoUri = getMongoUri();
 			if (mongoUri && process.env.NODE_ENV !== "test") {
-				const { getConnectionStatus, connectMongo, disconnectMongo, SYNC_ENTITIES } = await import("./mongoSync-BoUHKGTi.js");
+				const { getConnectionStatus, connectMongo, disconnectMongo, SYNC_ENTITIES } = await import("./mongoSync-B7p0d34q.js");
 				const status = getConnectionStatus();
 				let tempConnected = false;
 				if (!status.connected) {

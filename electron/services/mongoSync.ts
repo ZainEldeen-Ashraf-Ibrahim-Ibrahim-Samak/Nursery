@@ -56,6 +56,50 @@ async function convertSrvToStandardUri(uri: string): Promise<string> {
   }
 }
 
+/**
+ * The MongoDB driver's server-selection timeout always says "check your IP whitelist" —
+ * that text is hardcoded regardless of the actual cause. Dig into the per-server errors the
+ * driver actually collected (auth failure, TLS handshake failure, DNS/connection refused, etc.)
+ * so a failed connect() tells the user something they can actually act on.
+ */
+function describeConnectFailure(err: any): string {
+  const genericMsg: string = err?.message || 'Failed to connect to MongoDB'
+
+  // MongoServerSelectionError carries `.reason`, a TopologyDescription with a `servers` Map of
+  // address -> ServerDescription, each with the real per-node error the generic message hides.
+  const servers: Map<string, any> | undefined = err?.reason?.servers
+  if (servers && servers.size > 0) {
+    const perServer = [...servers.entries()]
+      .map(([address, desc]: [string, any]) => {
+        const nodeErr = desc?.error
+        if (!nodeErr) return null
+        const nodeMsg: string = nodeErr.message || String(nodeErr)
+        return `${address}: ${nodeMsg}`
+      })
+      .filter(Boolean) as string[]
+
+    if (perServer.length > 0) {
+      const details = perServer.join(' | ')
+      // Classify the most common real causes so the message is actionable, not just raw.
+      if (/bad auth|authentication failed/i.test(details)) {
+        return `MongoDB authentication failed — check the username/password in your connection string (and that any special characters like @ : / % are percent-encoded). Details: ${details}`
+      }
+      if (/certificate|ssl|tls/i.test(details)) {
+        return `MongoDB TLS/SSL handshake failed — often a system clock that's wrong, or a corporate proxy/antivirus intercepting HTTPS/TLS traffic. Details: ${details}`
+      }
+      if (/ENOTFOUND|getaddrinfo|EAI_AGAIN/i.test(details)) {
+        return `Could not resolve the MongoDB Atlas hostname (DNS failure) — check your internet connection or try a different DNS/network. Details: ${details}`
+      }
+      if (/ECONNREFUSED|ETIMEDOUT|ENETUNREACH/i.test(details)) {
+        return `Could not reach MongoDB Atlas over the network — this really is a connectivity/firewall issue (a corporate network or antivirus may be blocking outbound port 27017), separate from the IP whitelist. Details: ${details}`
+      }
+      return `${genericMsg} — per-server details: ${details}`
+    }
+  }
+
+  return genericMsg
+}
+
 export async function connectMongo(uri: string): Promise<void> {
   if (isConnected) return
 
@@ -73,7 +117,8 @@ export async function connectMongo(uri: string): Promise<void> {
     })
   } catch (err: any) {
     isConnected = false
-    connectionError = err.message || 'Failed to connect to MongoDB'
+    connectionError = describeConnectFailure(err)
+    console.error('[mongoSync] connect failed — raw error:', err)
     throw new Error(connectionError || 'Failed to connect to MongoDB')
   }
 }
