@@ -127,7 +127,7 @@ const api = {
 
   // Print (feature 007) — branded HTML print preview, handed to window.print()
   print: {
-    preview: (args: { reportType: 'payroll' | 'expenses' | 'child' | 'childReport'; [key: string]: any }) => ipcRenderer.invoke('print:preview', args) as Promise<{ html: string }>,
+    preview: (args: { reportType: 'payroll' | 'expenses' | 'child' | 'childReport' | 'month'; [key: string]: any }) => ipcRenderer.invoke('print:preview', args) as Promise<{ html: string }>,
   },
 
   // Storage

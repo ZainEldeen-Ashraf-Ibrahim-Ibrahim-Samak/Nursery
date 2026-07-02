@@ -13,6 +13,7 @@ import { Button } from '../../components/ui/Button.js'
 import { Select } from '../../components/ui/Select.js'
 import { Alert } from '../../components/ui/Alert.js'
 import { Modal } from '../../components/ui/Modal.js'
+import { ReportActions } from '../../components/reports/ReportActions.js'
 import * as React from 'react'
 
 const arabicMonths = [
@@ -86,8 +87,6 @@ export default function MonthlyPayments() {
   // Selection state
   const [selectedIds, setSelectedIds] = useState<number[]>([])
   const [bulkMethodId, setBulkMethodId] = useState<number | ''>('')
-  const [isExportingExcel, setIsExportingExcel] = useState(false)
-  const [isExportingPdf, setIsExportingPdf] = useState(false)
   const [installmentsFor, setInstallmentsFor] = useState<Payment | null>(null)
 
   // Fetch payments on mount
@@ -221,12 +220,6 @@ export default function MonthlyPayments() {
 
   // Export handlers
   const handleExport = async (format: 'xlsx' | 'pdf') => {
-    if (format === 'xlsx') {
-      setIsExportingExcel(true)
-    } else {
-      setIsExportingPdf(true)
-    }
-
     try {
       const result = await exportMonth(currentMonth, currentYear, format)
       if (result && result.filePath) {
@@ -234,10 +227,17 @@ export default function MonthlyPayments() {
       }
     } catch (err) {
       console.error('Export failed:', err)
-    } finally {
-      setIsExportingExcel(false)
-      setIsExportingPdf(false)
     }
+  }
+
+  const handlePrint = async () => {
+    const { html } = await window.api.print.preview({ reportType: 'month', month: currentMonth, year: currentYear, lang: i18n.language })
+    const win = window.open('', '_blank')
+    if (!win) return
+    win.document.write(html)
+    win.document.close()
+    win.focus()
+    win.print()
   }
 
   return (
@@ -256,24 +256,11 @@ export default function MonthlyPayments() {
         {/* Action Buttons */}
         <div className="flex items-center gap-2">
           {payments.length > 0 && (
-            <>
-              <Button
-                variant="outline"
-                onClick={() => handleExport('xlsx')}
-                isLoading={isExportingExcel}
-                disabled={isExportingPdf}
-              >
-                📊 {i18n.language === 'ar' ? 'تصدير إكسل' : 'Excel Export'}
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => handleExport('pdf')}
-                isLoading={isExportingPdf}
-                disabled={isExportingExcel}
-              >
-                📕 {i18n.language === 'ar' ? 'تصدير PDF' : 'PDF Export'}
-              </Button>
-            </>
+            <ReportActions
+              onPrint={handlePrint}
+              onExportPdf={() => handleExport('pdf')}
+              onExportExcel={() => handleExport('xlsx')}
+            />
           )}
           <Button variant="primary" onClick={handleGenerate} isLoading={isGenerating}>
             ⚡ {t('generate_payments')}

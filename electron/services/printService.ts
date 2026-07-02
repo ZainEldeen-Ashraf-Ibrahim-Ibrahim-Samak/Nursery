@@ -25,7 +25,7 @@ function escapeHtml(value: unknown): string {
  * exact same query as the equivalent export:* handler so Print and Export PDF/Excel can never
  * disagree on what data they show (FR-003).
  */
-export function buildPrintPreviewHtml(reportType: 'payroll' | 'expenses' | 'child' | 'childReport', params: any): string {
+export function buildPrintPreviewHtml(reportType: 'payroll' | 'expenses' | 'child' | 'childReport' | 'month', params: any): string {
   const brand = getExportHeader()
   const isAr = params.lang === 'ar'
   const dir = isAr ? 'rtl' : 'ltr'
@@ -34,6 +34,42 @@ export function buildPrintPreviewHtml(reportType: 'payroll' | 'expenses' | 'chil
   let title = ''
   let filterSummary = ''
   let tableHtml = ''
+
+  if (reportType === 'month') {
+    const db = getDb()
+    const month = params.month
+    const year = Number(params.year)
+    title = isAr ? `مطالبات واشتراكات شهر ${month} لسنة ${year}` : `Billing Sheet: ${month} ${year}`
+    filterSummary = isAr ? `الفترة: ${month} ${year}` : `Period: ${month} ${year}`
+
+    const payments = db.prepare(`
+      SELECT c.name as child_name, c.guardian, c.guardian_phone, p.service, p.unit, p.quantity, p.price, p.total, p.paid, p.balance, p.status
+      FROM payments p
+      JOIN children c ON p.child_id = c.id
+      WHERE p.month = ? AND p.year = ?
+    `).all(month, year) as any[]
+
+    const headers = isAr
+      ? ['اسم الطفل', 'ولي الأمر', 'الهاتف', 'الخدمة', 'الوحدة', 'الكمية', 'السعر', 'الإجمالي', 'المدفوع', 'المتأخرات', 'الحالة']
+      : ['Child Name', 'Guardian', 'Phone', 'Service', 'Unit', 'Qty', 'Price', 'Total', 'Paid', 'Arrears', 'Status']
+
+    let totalInvoiced = 0, totalCollected = 0, arrears = 0
+    const bodyRows = payments.map((p) => {
+      totalInvoiced += p.total; totalCollected += p.paid; arrears += p.balance
+      return `<tr><td>${escapeHtml(p.child_name)}</td><td>${escapeHtml(p.guardian)}</td><td>${escapeHtml(p.guardian_phone)}</td><td>${escapeHtml(p.service)}</td><td>${escapeHtml(p.unit)}</td><td>${escapeHtml(p.quantity)}</td><td>${escapeHtml(p.price)}</td><td>${escapeHtml(p.total)}</td><td>${escapeHtml(p.paid)}</td><td>${escapeHtml(p.balance)}</td><td>${escapeHtml(p.status)}</td></tr>`
+    }).join('')
+
+    const footerRow = payments.length > 0
+      ? `<tr class="totals"><td>${isAr ? 'الإجمالي' : 'Total'}</td><td></td><td></td><td></td><td></td><td></td><td></td><td>${escapeHtml(totalInvoiced)}</td><td>${escapeHtml(totalCollected)}</td><td>${escapeHtml(arrears)}</td><td></td></tr>`
+      : `<tr><td colspan="11" class="empty">${isAr ? 'لا توجد مطالبات مسجلة لهذا الشهر.' : 'No billing records for this month.'}</td></tr>`
+
+    tableHtml = `
+      <table>
+        <thead><tr>${headers.map((h) => `<th>${escapeHtml(h)}</th>`).join('')}</tr></thead>
+        <tbody>${bodyRows}${footerRow}</tbody>
+      </table>
+    `
+  }
 
   if (reportType === 'payroll') {
     const db = getDb()

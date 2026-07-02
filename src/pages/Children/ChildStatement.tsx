@@ -10,6 +10,7 @@ import { Badge } from '../../components/ui/Badge.js'
 import { Alert } from '../../components/ui/Alert.js'
 import { LoadingSpinner } from '../../components/ui/LoadingSpinner.js'
 import { useAuthStore } from '../../store/useAuthStore.js'
+import { ReportActions } from '../../components/reports/ReportActions.js'
 import type { ChildStatement as ChildStatementType, ChildStatementRow, AttendanceHistoryRow } from '../../types/index.js'
 
 const arabicMonths = [
@@ -32,15 +33,6 @@ export default function ChildStatement() {
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   
-  const [isExportingExcel, setIsExportingExcel] = useState(false)
-  const [isExportingPdf, setIsExportingPdf] = useState(false)
-  const [isExportingCsv, setIsExportingCsv] = useState(false)
-  const [isPrinting, setIsPrinting] = useState(false)
-
-  // Full Child Report (feature 007, US3/FR-007) — personal info + attendance + teachers +
-  // services + attendance % + payments + notes, distinct from the financial-only statement
-  // export above.
-  const [isChildReportBusy, setIsChildReportBusy] = useState<'pdf' | 'xlsx' | 'csv' | 'print' | null>(null)
 
   // Attendance history (FR-019) — admin-only, per the access-control clarification.
   const { user } = useAuthStore()
@@ -90,10 +82,6 @@ export default function ChildStatement() {
   // Handle statement exports
   const handleExport = async (format: 'xlsx' | 'pdf' | 'csv') => {
     if (!id) return
-    if (format === 'xlsx') setIsExportingExcel(true)
-    else if (format === 'pdf') setIsExportingPdf(true)
-    else setIsExportingCsv(true)
-
     try {
       const result = await exportChild(Number(id), format)
       if (result && result.filePath) {
@@ -101,53 +89,34 @@ export default function ChildStatement() {
       }
     } catch (err: any) {
       console.error('Statement export failed:', err)
-    } finally {
-      setIsExportingExcel(false)
-      setIsExportingPdf(false)
-      setIsExportingCsv(false)
     }
   }
 
   const handlePrint = async () => {
     if (!id) return
-    setIsPrinting(true)
-    try {
-      const { html } = await window.api.print.preview({ reportType: 'child', childId: Number(id), lang: i18n.language })
-      const win = window.open('', '_blank')
-      if (!win) return
-      win.document.write(html)
-      win.document.close()
-      win.focus()
-      win.print()
-    } finally {
-      setIsPrinting(false)
-    }
+    const { html } = await window.api.print.preview({ reportType: 'child', childId: Number(id), lang: i18n.language })
+    const win = window.open('', '_blank')
+    if (!win) return
+    win.document.write(html)
+    win.document.close()
+    win.focus()
+    win.print()
   }
 
   const handleChildReportExport = async (format: 'pdf' | 'xlsx' | 'csv') => {
     if (!id) return
-    setIsChildReportBusy(format)
-    try {
-      await window.api.export.childReport({ childId: Number(id), format, lang: i18n.language })
-    } finally {
-      setIsChildReportBusy(null)
-    }
+    await window.api.export.childReport({ childId: Number(id), format, lang: i18n.language })
   }
 
   const handleChildReportPrint = async () => {
     if (!id) return
-    setIsChildReportBusy('print')
-    try {
-      const { html } = await window.api.print.preview({ reportType: 'childReport', childId: Number(id), lang: i18n.language })
-      const win = window.open('', '_blank')
-      if (!win) return
-      win.document.write(html)
-      win.document.close()
-      win.focus()
-      win.print()
-    } finally {
-      setIsChildReportBusy(null)
-    }
+    const { html } = await window.api.print.preview({ reportType: 'childReport', childId: Number(id), lang: i18n.language })
+    const win = window.open('', '_blank')
+    if (!win) return
+    win.document.write(html)
+    win.document.close()
+    win.focus()
+    win.print()
   }
 
   // Table columns definition
