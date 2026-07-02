@@ -27,6 +27,7 @@ import SyncManager from './pages/Sync/SyncManager.js'
 import Settings from './pages/Settings/Settings.js'
 import UsersList from './pages/Users/UsersList.js'
 import SessionsList from './pages/Sessions/SessionsList.js'
+import EditRequestsInbox from './pages/Attendance/EditRequestsInbox.js'
 
 // Layout component wrapping protected routes
 const AppLayout: React.FC = () => {
@@ -181,6 +182,16 @@ export default function App() {
 
           {/* Sessions & Attendance - admin and employee */}
           <Route path="sessions" element={<SessionsList />} />
+
+          {/* Attendance Edit Requests inbox - admin only (feature 007) */}
+          <Route
+            path="attendance/edit-requests"
+            element={
+              <RoleGuard allowedRoles={['admin']}>
+                <EditRequestsInbox />
+              </RoleGuard>
+            }
+          />
 
           {/* Fallback to Dashboard */}
           <Route path="*" element={<Navigate to="/" replace />} />

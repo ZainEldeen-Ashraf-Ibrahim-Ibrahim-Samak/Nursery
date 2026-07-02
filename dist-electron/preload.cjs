@@ -172,7 +172,15 @@ electron.contextBridge.exposeInMainWorld("api", {
 			month,
 			year
 		}),
-		getChildHistory: (child_id) => electron.ipcRenderer.invoke("attendance:getChildHistory", { child_id })
+		getChildHistory: (child_id) => electron.ipcRenderer.invoke("attendance:getChildHistory", { child_id }),
+		requestEdit: (args) => electron.ipcRenderer.invoke("attendance:requestEdit", args),
+		listEditRequests: (args) => electron.ipcRenderer.invoke("attendance:listEditRequests", args ?? {}),
+		decideEditRequest: (args) => electron.ipcRenderer.invoke("attendance:decideEditRequest", args),
+		getAuditLog: (attendance_record_id) => electron.ipcRenderer.invoke("attendance:getAuditLog", { attendance_record_id })
+	},
+	notifications: {
+		list: (args) => electron.ipcRenderer.invoke("notifications:list", args ?? {}),
+		markRead: (args) => electron.ipcRenderer.invoke("notifications:markRead", args)
 	},
 	deductions: {
 		list: (args) => electron.ipcRenderer.invoke("deductions:list", args),

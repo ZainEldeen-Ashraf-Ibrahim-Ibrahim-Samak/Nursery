@@ -2,6 +2,7 @@ import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '../../store/useAuthStore.js'
 import { LanguageSwitcher } from './LanguageSwitcher.js'
+import { NotificationsBell } from './NotificationsBell.js'
 import { Button } from '../ui/Button.js'
 
 export const Header: React.FC = () => {
@@ -22,6 +23,9 @@ export const Header: React.FC = () => {
 
       {/* Actions */}
       <div className="flex items-center gap-4">
+        {/* Notifications */}
+        <NotificationsBell />
+
         {/* Language Switcher */}
         <LanguageSwitcher />
 

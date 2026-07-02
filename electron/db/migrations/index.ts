@@ -797,6 +797,89 @@ const migrations: Migration[] = [
         db.exec(`CREATE INDEX IF NOT EXISTS idx_attendance_records_child ON attendance_records(child_id);`)
       } catch { /* ignore */ }
     }
+  },
+  {
+    // Feature 007 — Attendance Edit Approval Workflow. "Locked" is a derived state (a row
+    // already exists) — no locked column needed. See specs/007-.../research.md #4.
+    name: '031_attendance_edit_requests',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS attendance_edit_requests (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          attendance_record_id INTEGER NOT NULL REFERENCES attendance_records(id) ON DELETE CASCADE,
+          child_id INTEGER NOT NULL REFERENCES children(id) ON DELETE CASCADE,
+          teacher_id INTEGER REFERENCES employees(id),
+          attendance_date TEXT NOT NULL,
+          original_status TEXT NOT NULL,
+          original_excuse_notes TEXT,
+          original_teacher_status TEXT,
+          requested_status TEXT NOT NULL CHECK(requested_status IN ('attended','absent_excused','absent_unexcused')),
+          requested_excuse_notes TEXT,
+          requested_teacher_status TEXT CHECK(requested_teacher_status IN ('present','absent')),
+          reason TEXT NOT NULL,
+          requested_by INTEGER NOT NULL REFERENCES users(id),
+          requested_at TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','approved','rejected')),
+          decided_by INTEGER REFERENCES users(id),
+          decided_at TEXT,
+          decision_notes TEXT,
+          synced INTEGER DEFAULT 0
+        );
+      `)
+      try {
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_edit_requests_record ON attendance_edit_requests(attendance_record_id);`)
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_edit_requests_status ON attendance_edit_requests(status);`)
+        // Enforce "at most one pending request per attendance record" at the DB level too.
+        db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_edit_requests_one_pending ON attendance_edit_requests(attendance_record_id) WHERE status = 'pending';`)
+      } catch { /* ignore */ }
+    }
+  },
+  {
+    name: '032_attendance_audit_log',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS attendance_audit_log (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          attendance_record_id INTEGER NOT NULL REFERENCES attendance_records(id) ON DELETE CASCADE,
+          edit_request_id INTEGER REFERENCES attendance_edit_requests(id),
+          old_status TEXT,
+          old_excuse_notes TEXT,
+          old_teacher_status TEXT,
+          new_status TEXT NOT NULL,
+          new_excuse_notes TEXT,
+          new_teacher_status TEXT,
+          changed_by INTEGER NOT NULL REFERENCES users(id),
+          approved_by INTEGER REFERENCES users(id),
+          reason TEXT,
+          changed_at TEXT NOT NULL,
+          synced INTEGER DEFAULT 0
+        );
+      `)
+      try {
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_audit_log_record ON attendance_audit_log(attendance_record_id);`)
+      } catch { /* ignore */ }
+    }
+  },
+  {
+    name: '033_notifications',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS notifications (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          type TEXT NOT NULL CHECK(type IN ('edit_request_submitted','edit_request_approved','edit_request_rejected')),
+          related_id INTEGER,
+          message_ar TEXT NOT NULL,
+          message_en TEXT NOT NULL,
+          read_at TEXT,
+          created_at TEXT NOT NULL,
+          synced INTEGER DEFAULT 0
+        );
+      `)
+      try {
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, read_at);`)
+      } catch { /* ignore */ }
+    }
   }
 ]
 

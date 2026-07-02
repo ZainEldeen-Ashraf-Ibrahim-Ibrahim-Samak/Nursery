@@ -36,7 +36,7 @@ Single-repo Electron desktop app (per plan.md): `electron/` (main process), `src
 **Purpose**: Shared scaffolding needed before foundational work — no new dependencies (ExcelJS/pdfmake
 already present per research.md #1–#3).
 
-- [ ] T001 [P] Add `AttendanceEditRequest`, `AttendanceAuditLogEntry`, `Notification` types (per
+- [X] T001 [P] Add `AttendanceEditRequest`, `AttendanceAuditLogEntry`, `Notification` types (per
       data-model.md) to `src/types/index.ts`
 - [ ] T002 [P] Create `electron/services/csvService.ts` with an RFC-4180 escaping helper and a
       `buildCsvFile(rows: string[][], header: { filters, generatedAt, totalsRow? }, savePath: string)`
@@ -56,31 +56,31 @@ already present per research.md #1–#3).
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete
 
-- [ ] T005 Add migration `031_attendance_edit_requests` (table per data-model.md, including the
+- [X] T005 Add migration `031_attendance_edit_requests` (table per data-model.md, including the
       partial-unique/application check groundwork for "at most one pending per attendance_record_id") in
       `electron/db/migrations/index.ts`
-- [ ] T006 Add migration `032_attendance_audit_log` (append-only table per data-model.md) in
+- [X] T006 Add migration `032_attendance_audit_log` (append-only table per data-model.md) in
       `electron/db/migrations/index.ts`
-- [ ] T007 Add migration `033_notifications` (table per data-model.md) in
+- [X] T007 Add migration `033_notifications` (table per data-model.md) in
       `electron/db/migrations/index.ts`
-- [ ] T008 Extract the existing inline payment-eligibility/void/regenerate logic inside
+- [X] T008 Extract the existing inline payment-eligibility/void/regenerate logic inside
       `attendance:record` (feature 006, uses `isPaymentEligible()`) into a reusable
       `recalculateAttendancePayment(db, { child_id, teacher_id, session_id, status, teacher_status })`
       function in `electron/ipc/attendanceIPC.ts`, and call it from the existing direct-write path so
       behavior is unchanged (per research.md #5 — this is what both the admin-direct-edit path and the
       edit-request approval path will call)
-- [ ] T009 Create `electron/ipc/notificationsIPC.ts` with `notifications:list`, `notifications:markRead`
+- [X] T009 Create `electron/ipc/notificationsIPC.ts` with `notifications:list`, `notifications:markRead`
       handlers, and an exported `insertNotification(db, { user_id, type, related_id, message_ar,
       message_en })` helper for other IPC modules to call
-- [ ] T010 Register `notificationsIPC.ts` for side-effect import in `electron/main.ts` alongside the
+- [X] T010 Register `notificationsIPC.ts` for side-effect import in `electron/main.ts` alongside the
       existing IPC module registrations
-- [ ] T011 Add `window.api.notifications.*`
+- [X] T011 Add `window.api.notifications.*`
       (`list`, `markRead`), `window.api.attendance.requestEdit/listEditRequests/decideEditRequest/
       getAuditLog`, `window.api.export.payrollReport/childReport/financialTransactions`, and
       `window.api.print.preview` bridge entries in `electron/preload.ts`
-- [ ] T012 [P] Create `src/store/useNotificationsStore.ts` (list, markRead, unread count) in
+- [X] T012 [P] Create `src/store/useNotificationsStore.ts` (list, markRead, unread count) in
       `src/store/useNotificationsStore.ts`
-- [ ] T013 [P] Create `src/store/useAttendanceEditRequestsStore.ts` (list, requestEdit, decide) in
+- [X] T013 [P] Create `src/store/useAttendanceEditRequestsStore.ts` (list, requestEdit, decide) in
       `src/store/useAttendanceEditRequestsStore.ts`
 
 **Checkpoint**: Foundation ready — user story implementation can now begin.
@@ -134,24 +134,24 @@ as admin (allowed + audit-logged) — independent of export/print and of the edi
 
 ### Tests for User Story 5
 
-- [ ] T021 [P] [US5] Unit test for the lock allow/block matrix (employee vs admin, existing vs new row)
+- [X] T021 [P] [US5] Unit test for the lock allow/block matrix (employee vs admin, existing vs new row)
       in `tests/unit/attendanceLock.test.ts`
 
 ### Implementation for User Story 5
 
-- [ ] T022 [US5] Create `writeAuditLog(db, entry)` helper (inserts one `attendance_audit_log` row per
+- [X] T022 [US5] Create `writeAuditLog(db, entry)` helper (inserts one `attendance_audit_log` row per
       data-model.md) in `electron/services/attendanceAuditService.ts` (depends on T006)
-- [ ] T023 [US5] Add the lock check to `attendance:record` in `electron/ipc/attendanceIPC.ts`: before
+- [X] T023 [US5] Add the lock check to `attendance:record` in `electron/ipc/attendanceIPC.ts`: before
       upserting, look up an existing row for `(session_id, child_id, teacher_id)`; if found and the caller
       is not admin, skip the write and return a per-row `{ locked: true }` marker instead of overwriting
       (FR-011) (depends on T005/T006 tables existing is not required here, but T022 is)
-- [ ] T024 [US5] For admin callers writing to an existing row, call `recalculateAttendancePayment` (T008)
+- [X] T024 [US5] For admin callers writing to an existing row, call `recalculateAttendancePayment` (T008)
       as already wired, and additionally call `writeAuditLog` (T022) with `edit_request_id: null`,
       `changed_by = approved_by = <admin user>` (FR-012, FR-021) in `electron/ipc/attendanceIPC.ts`
       (depends on T008, T022, T023)
-- [ ] T025 [US5] Add a computed `locked: boolean` (row exists) to each row returned by
+- [X] T025 [US5] Add a computed `locked: boolean` (row exists) to each row returned by
       `attendance:getSheet` in `electron/ipc/attendanceIPC.ts`
-- [ ] T026 [US5] Update the attendance sheet UI in `src/pages/Sessions/SessionsList.tsx`: for non-admin
+- [X] T026 [US5] Update the attendance sheet UI in `src/pages/Sessions/SessionsList.tsx`: for non-admin
       users, disable direct status controls on `locked` rows and show a lock indicator in place of them
       (depends on T025)
 
@@ -170,45 +170,45 @@ outcomes and notifications — independent of export/print.
 
 ### Tests for User Story 6
 
-- [ ] T027 [P] [US6] Unit test edit-request lifecycle (submit → pending → approve/reject) and duplicate
+- [X] T027 [P] [US6] Unit test edit-request lifecycle (submit → pending → approve/reject) and duplicate
       concurrent-pending rejection (FR-015) in `tests/unit/attendanceEditRequests.test.ts`
-- [ ] T028 [P] [US6] Unit test payment void/regenerate on approval, reusing feature 006's eligibility
+- [X] T028 [P] [US6] Unit test payment void/regenerate on approval, reusing feature 006's eligibility
       rules via `recalculateAttendancePayment` (T008), in `tests/unit/attendanceEditRequests.test.ts`
-- [ ] T029 [P] [US6] Unit test the concurrent-decision race guard (`UPDATE ... WHERE status = 'pending'` —
+- [X] T029 [P] [US6] Unit test the concurrent-decision race guard (`UPDATE ... WHERE status = 'pending'` —
       second decision on an already-decided request is a no-op) in
       `tests/unit/attendanceEditRequests.test.ts`
-- [ ] T030 [P] [US6] Unit test audit log entry shape for both the admin-direct path (US5) and the
+- [X] T030 [P] [US6] Unit test audit log entry shape for both the admin-direct path (US5) and the
       approved-request path, in `tests/unit/attendanceAuditLog.test.ts`
-- [ ] T031 [P] [US6] Unit test notification creation: admin(s) notified on submit, requester notified on
+- [X] T031 [P] [US6] Unit test notification creation: admin(s) notified on submit, requester notified on
       approve/reject, in `tests/unit/notifications.test.ts`
 
 ### Implementation for User Story 6
 
-- [ ] T032 [US6] Implement `attendance:requestEdit` in `electron/ipc/attendanceIPC.ts`: reject if caller
+- [X] T032 [US6] Implement `attendance:requestEdit` in `electron/ipc/attendanceIPC.ts`: reject if caller
       is admin (admins use direct edit) or if a pending request already exists for that
       `attendance_record_id` (returning the existing request per Edge Cases), else insert a new `pending`
       row and call `insertNotification` (T009) for every admin user (depends on T005, T009)
-- [ ] T033 [US6] Implement `attendance:listEditRequests` in `electron/ipc/attendanceIPC.ts` — admin sees
+- [X] T033 [US6] Implement `attendance:listEditRequests` in `electron/ipc/attendanceIPC.ts` — admin sees
       all matching rows, employee sees only rows where `requested_by` is themselves (depends on T005)
-- [ ] T034 [US6] Implement `attendance:decideEditRequest` in `electron/ipc/attendanceIPC.ts`: approve path
+- [X] T034 [US6] Implement `attendance:decideEditRequest` in `electron/ipc/attendanceIPC.ts`: approve path
       runs in one transaction — apply requested values to `attendance_records`, call
       `recalculateAttendancePayment` (T008), call `writeAuditLog` (T022) with the request's id, flip the
       request to `approved` via `UPDATE ... WHERE status = 'pending'`, then `insertNotification` to the
       requester; reject path flips to `rejected` (same guard) and notifies the requester with no other
       writes (depends on T005, T008, T009, T022)
-- [ ] T035 [US6] Implement `attendance:getAuditLog` (admin-only, chronological by `attendance_record_id`)
+- [X] T035 [US6] Implement `attendance:getAuditLog` (admin-only, chronological by `attendance_record_id`)
       in `electron/ipc/attendanceIPC.ts` (depends on T006)
-- [ ] T036 [P] [US6] Create `src/pages/Attendance/EditRequestsInbox.tsx` (admin-only): list
+- [X] T036 [P] [US6] Create `src/pages/Attendance/EditRequestsInbox.tsx` (admin-only): list
       pending/approved/rejected requests with approve/reject actions and an optional decision note
       (depends on T013)
-- [ ] T037 [US6] Add a "Request Edit" action on locked rows in `src/pages/Sessions/SessionsList.tsx` for
+- [X] T037 [US6] Add a "Request Edit" action on locked rows in `src/pages/Sessions/SessionsList.tsx` for
       non-admin users — modal capturing requested values + reason, calling
       `useAttendanceEditRequestsStore.requestEdit` (depends on T013, T026, T032)
-- [ ] T038 [US6] Add an audit-log viewer (per attendance record, admin-only) reachable from both
+- [X] T038 [US6] Add an audit-log viewer (per attendance record, admin-only) reachable from both
       `SessionsList.tsx` and `EditRequestsInbox.tsx` (depends on T035, T036)
-- [ ] T039 [US6] Wire a notifications indicator (badge/panel using `useNotificationsStore`, T012) into the
+- [X] T039 [US6] Wire a notifications indicator (badge/panel using `useNotificationsStore`, T012) into the
       main app layout in `src/App.tsx` (or its nav component) (depends on T012)
-- [ ] T040 [US6] Add a route + nav entry for `EditRequestsInbox` (admin-only) in `src/App.tsx` (depends on
+- [X] T040 [US6] Add a route + nav entry for `EditRequestsInbox` (admin-only) in `src/App.tsx` (depends on
       T036)
 
 **Checkpoint**: All three P1 stories (US1, US5, US6) are complete — this is the recommended MVP cut-line

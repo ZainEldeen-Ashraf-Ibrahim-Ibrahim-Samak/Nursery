@@ -168,6 +168,8 @@ export type AttendanceStatus = 'attended' | 'absent_excused' | 'absent_unexcused
 
 export interface AttendanceRecord {
   id: number
+  attendance_id?: number | null
+  locked?: boolean
   session_id: number
   child_id: number
   child_name?: string
@@ -186,6 +188,65 @@ export interface AttendanceRecord {
   attended_teacher_id?: number | null
   teacher_status?: 'present' | 'absent' | null
   payment?: { generated: boolean; amount: number | null; status: TeacherPaymentStatus | null }
+}
+
+export type EditRequestStatus = 'pending' | 'approved' | 'rejected'
+
+export interface AttendanceEditRequest {
+  id: number
+  attendance_record_id: number
+  child_id: number
+  child_name?: string
+  teacher_id: number | null
+  teacher_name?: string | null
+  attendance_date: string
+  original_status: AttendanceStatus
+  original_excuse_notes: string | null
+  original_teacher_status: 'present' | 'absent' | null
+  requested_status: AttendanceStatus
+  requested_excuse_notes: string | null
+  requested_teacher_status: 'present' | 'absent' | null
+  reason: string
+  requested_by: number
+  requested_by_name?: string | null
+  requested_at: string
+  status: EditRequestStatus
+  decided_by: number | null
+  decided_by_name?: string | null
+  decided_at: string | null
+  decision_notes: string | null
+  synced?: number
+}
+
+export interface AttendanceAuditLogEntry {
+  id: number
+  attendance_record_id: number
+  edit_request_id: number | null
+  old_status: AttendanceStatus | null
+  old_excuse_notes: string | null
+  old_teacher_status: 'present' | 'absent' | null
+  new_status: AttendanceStatus
+  new_excuse_notes: string | null
+  new_teacher_status: 'present' | 'absent' | null
+  changed_by: number
+  changed_by_name?: string | null
+  approved_by: number | null
+  approved_by_name?: string | null
+  reason: string | null
+  changed_at: string
+}
+
+export type NotificationType = 'edit_request_submitted' | 'edit_request_approved' | 'edit_request_rejected'
+
+export interface Notification {
+  id: number
+  user_id: number
+  type: NotificationType
+  related_id: number | null
+  message_ar: string
+  message_en: string
+  read_at: string | null
+  created_at: string
 }
 
 export interface AttendanceConflict {

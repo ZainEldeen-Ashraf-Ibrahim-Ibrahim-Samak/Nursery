@@ -3,6 +3,8 @@ import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import { useSessionsStore } from '../../store/useSessionsStore.js'
 import { useAttendanceStore } from '../../store/useAttendanceStore.js'
+import { useAuthStore } from '../../store/useAuthStore.js'
+import { useAttendanceEditRequestsStore } from '../../store/useAttendanceEditRequestsStore.js'
 import { Button } from '../../components/ui/Button.js'
 import { Modal } from '../../components/ui/Modal.js'
 import { Input } from '../../components/ui/Input.js'
@@ -16,6 +18,16 @@ export default function SessionsList() {
   const navigate = useNavigate()
   const { sessions, isLoading, error, fetchSessions, addSession, updateSession, deleteSession, clearError } = useSessionsStore()
   const { sheet, isLoading: sheetLoading, error: sheetError, fetchSheet, recordBulk, clearError: clearSheetError } = useAttendanceStore()
+  const currentUser = useAuthStore((s) => s.user)
+  const isAdmin = currentUser?.role === 'admin'
+  const { requestEdit: submitEditRequest, isLoading: isSubmittingEditRequest } = useAttendanceEditRequestsStore()
+
+  // "Request Edit" modal (feature 007) — non-admins propose a change to a locked record instead
+  // of editing it directly.
+  const [editRequestTarget, setEditRequestTarget] = useState<AttendanceRecord | null>(null)
+  const [editRequestStatus, setEditRequestStatus] = useState<AttendanceStatus>('attended')
+  const [editRequestReason, setEditRequestReason] = useState('')
+  const [editRequestError, setEditRequestError] = useState('')
 
   // Filter state
   const [fromDate, setFromDate] = useState(() => {
@@ -515,6 +527,10 @@ export default function SessionsList() {
               filteredSheet.map((rec) => {
                 const edit = getEdit(rec)
                 const key = editKey(rec)
+                // Locked (feature 007, FR-011): the row already exists, and the current user
+                // isn't an admin — direct edits are blocked; only a "Request Edit" is offered.
+                const isLockedForMe = !!rec.locked && !isAdmin
+                const controlsDisabled = viewingClosed || isLockedForMe
                 return (
                   <div key={key} className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-2 p-3 border border-slate-100 rounded-lg">
                     <button
@@ -548,11 +564,11 @@ export default function SessionsList() {
                           <button
                             key={ts}
                             type="button"
-                            disabled={viewingClosed}
-                            onClick={() => !viewingClosed && setTeacherStatus(key, ts)}
+                            disabled={controlsDisabled}
+                            onClick={() => !controlsDisabled && setTeacherStatus(key, ts)}
                             className={[
                               'px-2 py-1 rounded text-xs font-medium border transition-all',
-                              viewingClosed ? 'cursor-default opacity-70' : '',
+                              controlsDisabled ? 'cursor-default opacity-70' : '',
                               edit.teacher_status === ts
                                 ? ts === 'present' ? 'bg-sky-100 border-sky-400 text-sky-700' : 'bg-red-100 border-red-400 text-red-700'
                                 : 'bg-white border-slate-200 text-slate-400 hover:border-slate-400'
@@ -572,11 +588,11 @@ export default function SessionsList() {
                           <button
                             key={status}
                             type="button"
-                            disabled={viewingClosed}
-                            onClick={() => !viewingClosed && toggleStatus(key, status, edit.status)}
+                            disabled={controlsDisabled}
+                            onClick={() => !controlsDisabled && toggleStatus(key, status, edit.status)}
                             className={[
                               'px-2 py-1 rounded text-xs font-medium border transition-all',
-                              viewingClosed ? 'cursor-default opacity-70' : '',
+                              controlsDisabled ? 'cursor-default opacity-70' : '',
                               edit.status === status
                                 ? status === 'attended' ? 'bg-emerald-100 border-emerald-400 text-emerald-700' : status === 'absent_excused' ? 'bg-amber-100 border-amber-400 text-amber-700' : 'bg-red-100 border-red-400 text-red-700'
                                 : 'bg-white border-slate-200 text-slate-400 hover:border-slate-400'
@@ -590,9 +606,9 @@ export default function SessionsList() {
                     {edit.status === 'absent_excused' && (
                       <input
                         type="text"
-                        disabled={viewingClosed}
+                        disabled={controlsDisabled}
                         value={edit.excuse_notes}
-                        onChange={(e) => !viewingClosed && setEdit(key, 'excuse_notes', e.target.value)}
+                        onChange={(e) => !controlsDisabled && setEdit(key, 'excuse_notes', e.target.value)}
                         placeholder={isAr ? 'سبب الغياب بعذر...' : 'Reason...'}
                         className="flex-1 text-xs border border-slate-200 rounded px-2 py-1 disabled:bg-slate-50 disabled:cursor-default"
                       />
@@ -601,6 +617,23 @@ export default function SessionsList() {
                       <span className="text-xs font-semibold px-2 py-1 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 whitespace-nowrap">
                         {isAr ? `💰 دفعة: ${rec.payment.amount ?? 0} ج.م` : `💰 Payment: ${rec.payment.amount ?? 0} EGP`}
                       </span>
+                    )}
+                    {isLockedForMe && (
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs text-slate-400">🔒 {isAr ? 'مقفل' : 'Locked'}</span>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setEditRequestTarget(rec)
+                            setEditRequestStatus((rec.status as AttendanceStatus) ?? 'attended')
+                            setEditRequestReason('')
+                            setEditRequestError('')
+                          }}
+                        >
+                          {isAr ? 'طلب تعديل' : 'Request Edit'}
+                        </Button>
+                      </div>
                     )}
                   </div>
                 )
@@ -611,6 +644,77 @@ export default function SessionsList() {
       </Modal>
         )
       })()}
+
+      {/* Request Edit modal (feature 007) — employee proposes a change to a locked record */}
+      <Modal
+        isOpen={!!editRequestTarget}
+        onClose={() => setEditRequestTarget(null)}
+        title={isAr ? 'طلب تعديل الحضور' : 'Request Attendance Edit'}
+        footer={
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => setEditRequestTarget(null)}>{isAr ? 'إلغاء' : 'Cancel'}</Button>
+            <Button
+              variant="primary"
+              isLoading={isSubmittingEditRequest}
+              onClick={async () => {
+                if (!editRequestTarget) return
+                if (!editRequestReason.trim()) {
+                  setEditRequestError(isAr ? 'السبب مطلوب' : 'A reason is required')
+                  return
+                }
+                const created = await submitEditRequest({
+                  attendance_record_id: (editRequestTarget.attendance_id ?? editRequestTarget.id) as number,
+                  requested_status: editRequestStatus,
+                  reason: editRequestReason.trim()
+                })
+                if (created) {
+                  setEditRequestTarget(null)
+                  setSuccessMsg(isAr ? 'تم إرسال طلب التعديل.' : 'Edit request submitted.')
+                } else {
+                  setEditRequestError(useAttendanceEditRequestsStore.getState().error || (isAr ? 'فشل إرسال الطلب' : 'Failed to submit request'))
+                }
+              }}
+            >
+              {isAr ? 'إرسال الطلب' : 'Submit Request'}
+            </Button>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          {editRequestError && <Alert variant="danger" onClose={() => setEditRequestError('')}>{editRequestError}</Alert>}
+          <p className="text-sm text-slate-600">
+            {isAr
+              ? `${editRequestTarget?.child_name} — الحالة الحالية: ${editRequestTarget ? statusLabel(editRequestTarget.status) : ''}`
+              : `${editRequestTarget?.child_name} — current status: ${editRequestTarget ? statusLabel(editRequestTarget.status) : ''}`}
+          </p>
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold text-slate-500">{isAr ? 'الحالة المطلوبة' : 'Requested status'}</label>
+            <div className="flex gap-1">
+              {(['attended', 'absent_excused', 'absent_unexcused'] as AttendanceStatus[]).map((status) => (
+                <button
+                  key={status}
+                  type="button"
+                  onClick={() => setEditRequestStatus(status)}
+                  className={[
+                    'px-2 py-1 rounded text-xs font-medium border transition-all',
+                    editRequestStatus === status
+                      ? 'bg-primary/10 border-primary text-primary'
+                      : 'bg-white border-slate-200 text-slate-400 hover:border-slate-400'
+                  ].join(' ')}
+                >
+                  {statusLabel(status)}
+                </button>
+              ))}
+            </div>
+          </div>
+          <Input
+            label={isAr ? 'سبب التعديل' : 'Reason for change'}
+            value={editRequestReason}
+            onChange={(e) => setEditRequestReason(e.target.value)}
+            required
+          />
+        </div>
+      </Modal>
     </div>
   )
 }

@@ -34,6 +34,7 @@ import './ipc/deductionsIPC.js'
 import './ipc/serviceTeachersIPC.js'
 import './ipc/teacherPaymentsIPC.js'
 import './ipc/payrollIPC.js'
+import './ipc/notificationsIPC.js'
 import { startAutoSync, getMongoUri } from './ipc/syncIPC.js'
 import { connectMongo } from './services/mongoSync.js'
 

@@ -191,6 +191,19 @@ const api = {
     resolveConflict: (conflict_id: number, final_status: string) => ipcRenderer.invoke('attendance:resolveConflict', { conflict_id, final_status }),
     getSummary: (employee_id: number, month: string, year: number) => ipcRenderer.invoke('attendance:getSummary', { employee_id, month, year }),
     getChildHistory: (child_id: number) => ipcRenderer.invoke('attendance:getChildHistory', { child_id }),
+    requestEdit: (args: { attendance_record_id: number; requested_status: string; requested_excuse_notes?: string | null; requested_teacher_status?: string | null; reason: string }) =>
+      ipcRenderer.invoke('attendance:requestEdit', args),
+    listEditRequests: (args?: { status?: string; child_id?: number; teacher_id?: number }) =>
+      ipcRenderer.invoke('attendance:listEditRequests', args ?? {}),
+    decideEditRequest: (args: { id: number; decision: 'approve' | 'reject'; decision_notes?: string | null }) =>
+      ipcRenderer.invoke('attendance:decideEditRequest', args),
+    getAuditLog: (attendance_record_id: number) => ipcRenderer.invoke('attendance:getAuditLog', { attendance_record_id }),
+  },
+
+  // Notifications
+  notifications: {
+    list: (args?: { unreadOnly?: boolean }) => ipcRenderer.invoke('notifications:list', args ?? {}),
+    markRead: (args: { id?: number; all?: boolean }) => ipcRenderer.invoke('notifications:markRead', args),
   },
 
   // Employee Deductions
