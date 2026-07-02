@@ -137,7 +137,7 @@ function getStatusColor(status: string): string {
 }
 
 export function buildPdfFile(
-  type: 'full' | 'month' | 'child' | 'salaries' | 'expenses' | 'employees',
+  type: 'full' | 'month' | 'child' | 'salaries' | 'expenses' | 'employees' | 'payrollReport',
   params: any,
   savePath: string
 ): Promise<void> {
@@ -163,7 +163,7 @@ export function buildPdfFile(
 
       // Layout orientation
       let pageOrientation: 'portrait' | 'landscape' = 'portrait'
-      if (['full', 'month', 'salaries', 'expenses', 'employees'].includes(type)) {
+      if (['full', 'month', 'salaries', 'expenses', 'employees', 'payrollReport'].includes(type)) {
         pageOrientation = 'landscape'
       }
 
@@ -472,6 +472,77 @@ export function buildPdfFile(
           table: {
             headerRows: 1,
             widths: ['*', 'auto', 'auto', 'auto', 'auto', 'auto', 'auto'],
+            body
+          },
+          layout: {
+            hLineWidth: () => 0.5,
+            vLineWidth: () => 0.5,
+            hLineColor: () => '#cbd5e1',
+            vLineColor: () => '#cbd5e1'
+          }
+        })
+      }
+
+      else if (type === 'payrollReport') {
+        const monthNum = Number(month)
+        const monthLabel = isAr ? arabicMonths[monthNum - 1] : englishMonths[monthNum - 1]
+        const title = isAr ? `تقرير رواتب المعلمين لشهر ${monthLabel} ${year}` : `Teacher Payroll Report: ${monthLabel} ${year}`
+        docDefinition.content.push(...getPdfHeader(brand, lang, title))
+
+        const mm = String(monthNum).padStart(2, '0')
+        const monthKey = `${year}-${mm}`
+        const rows = db.prepare(`
+          SELECT
+            e.name as teacher_name,
+            e.teacher_session_rate as session_cost,
+            COUNT(tp.id) as sessions_paid,
+            COALESCE(SUM(tp.session_cost), 0) as total_salary
+          FROM employees e
+          JOIN teacher_payments tp ON tp.teacher_id = e.id
+            AND tp.status IN ('pending','paid')
+            AND strftime('%Y-%m', tp.attendance_date) = ?
+          GROUP BY e.id
+          ORDER BY e.name ASC
+        `).all(monthKey) as any[]
+
+        const headers = isAr
+          ? ['اسم المعلم', 'عدد الجلسات المدفوعة', 'تكلفة الجلسة', 'إجمالي الراتب']
+          : ['Teacher Name', 'Sessions Paid', 'Session Rate', 'Total Salary']
+
+        const body: any[][] = [
+          headers.map(h => ({ text: shapeText(h), bold: true, fillColor: brand.primaryColor, color: '#ffffff', alignment: 'center' }))
+        ]
+
+        let sumTotal = 0
+        for (const r of rows) {
+          sumTotal += r.total_salary
+          body.push([
+            { text: shapeText(r.teacher_name), alignment: isAr ? 'right' : 'left' },
+            { text: shapeText(r.sessions_paid), alignment: 'center' },
+            { text: shapeText(formatCurrency(r.session_cost || 0, lang)), alignment: 'right' },
+            { text: shapeText(formatCurrency(r.total_salary, lang)), bold: true, alignment: 'right' }
+          ])
+        }
+
+        if (rows.length > 0) {
+          body.push([
+            { text: shapeText(isAr ? 'إجمالي الرواتب' : 'Total Payroll'), bold: true, fillColor: '#f1f5f9', alignment: isAr ? 'right' : 'left' },
+            { text: '', fillColor: '#f1f5f9' },
+            { text: '', fillColor: '#f1f5f9' },
+            { text: shapeText(formatCurrency(sumTotal, lang)), bold: true, fillColor: '#f1f5f9', alignment: 'right' }
+          ])
+        } else {
+          // FR-009: a valid, clearly-labeled empty report rather than an error.
+          body.push([
+            { text: shapeText(isAr ? 'لا توجد جلسات مدفوعة لهذا الشهر.' : 'No paid sessions for this month.'), italic: true, color: '#94a3b8', colSpan: 4 },
+            {}, {}, {}
+          ])
+        }
+
+        docDefinition.content.push({
+          table: {
+            headerRows: 1,
+            widths: ['*', 'auto', 'auto', 'auto'],
             body
           },
           layout: {

@@ -45,6 +45,8 @@ export default function ExpensesList() {
 
   const [isExportingExcel, setIsExportingExcel] = useState(false)
   const [isExportingPdf, setIsExportingPdf] = useState(false)
+  const [isExportingCsv, setIsExportingCsv] = useState(false)
+  const [isPrinting, setIsPrinting] = useState(false)
 
   // Add Item Modal
   const [isAddItemModalOpen, setIsAddItemModalOpen] = useState(false)
@@ -147,9 +149,10 @@ export default function ExpensesList() {
     setRemovingItem(null)
   }
 
-  const handleExport = async (format: 'xlsx' | 'pdf') => {
+  const handleExport = async (format: 'xlsx' | 'pdf' | 'csv') => {
     if (format === 'xlsx') setIsExportingExcel(true)
-    else setIsExportingPdf(true)
+    else if (format === 'pdf') setIsExportingPdf(true)
+    else setIsExportingCsv(true)
     try {
       await exportExpenses(currentYear, format)
     } catch (err) {
@@ -157,6 +160,22 @@ export default function ExpensesList() {
     } finally {
       setIsExportingExcel(false)
       setIsExportingPdf(false)
+      setIsExportingCsv(false)
+    }
+  }
+
+  const handlePrint = async () => {
+    setIsPrinting(true)
+    try {
+      const { html } = await window.api.print.preview({ reportType: 'expenses', year: currentYear, lang: i18n.language })
+      const win = window.open('', '_blank')
+      if (!win) return
+      win.document.write(html)
+      win.document.close()
+      win.focus()
+      win.print()
+    } finally {
+      setIsPrinting(false)
     }
   }
 
@@ -187,9 +206,17 @@ export default function ExpensesList() {
             <>
               <Button
                 variant="outline"
+                onClick={handlePrint}
+                isLoading={isPrinting}
+                disabled={isExportingExcel || isExportingPdf || isExportingCsv}
+              >
+                🖨️ {isAr ? 'طباعة' : 'Print'}
+              </Button>
+              <Button
+                variant="outline"
                 onClick={() => handleExport('xlsx')}
                 isLoading={isExportingExcel}
-                disabled={isExportingPdf}
+                disabled={isExportingPdf || isExportingCsv}
               >
                 📊 {isAr ? 'إكسل' : 'Excel'}
               </Button>
@@ -197,9 +224,17 @@ export default function ExpensesList() {
                 variant="outline"
                 onClick={() => handleExport('pdf')}
                 isLoading={isExportingPdf}
-                disabled={isExportingExcel}
+                disabled={isExportingExcel || isExportingCsv}
               >
                 📕 PDF
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => handleExport('csv')}
+                isLoading={isExportingCsv}
+                disabled={isExportingExcel || isExportingPdf}
+              >
+                📃 CSV
               </Button>
             </>
           )}

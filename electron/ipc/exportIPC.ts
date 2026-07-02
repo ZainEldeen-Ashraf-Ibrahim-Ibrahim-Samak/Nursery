@@ -3,6 +3,8 @@ import { requireAdmin } from './_guard.js'
 import { getCurrentUser } from './authIPC.js'
 import { buildExcelFile } from '../services/exportService.js'
 import { buildPdfFile } from '../services/pdfService.js'
+import { buildCsvFile } from '../services/csvService.js'
+import { buildPrintPreviewHtml } from '../services/printService.js'
 
 function checkAuth() {
   const user = getCurrentUser()
@@ -14,14 +16,16 @@ function checkAuth() {
 
 // Utility to handle export build logic depending on format
 async function executeExport(
-  type: 'full' | 'month' | 'child' | 'salaries' | 'expenses' | 'employees',
+  type: 'full' | 'month' | 'child' | 'salaries' | 'expenses' | 'employees' | 'payrollReport',
   params: any,
   defaultFilename: string
 ) {
   const isAr = params.lang === 'ar'
   const filters = params.format === 'xlsx'
     ? [{ name: 'Excel Workbook (*.xlsx)', extensions: ['xlsx'] }]
-    : [{ name: 'PDF Document (*.pdf)', extensions: ['pdf'] }]
+    : params.format === 'csv'
+      ? [{ name: 'CSV (*.csv)', extensions: ['csv'] }]
+      : [{ name: 'PDF Document (*.pdf)', extensions: ['pdf'] }]
 
   const result = await dialog.showSaveDialog({
     title: isAr ? 'حفظ ملف التصدير' : 'Save Exported File',
@@ -37,6 +41,8 @@ async function executeExport(
 
   if (params.format === 'xlsx') {
     await buildExcelFile(type, params, savePath)
+  } else if (params.format === 'csv') {
+    await buildCsvFile(type as 'payrollReport' | 'expenses', params, savePath)
   } else {
     await buildPdfFile(type, params, savePath)
   }
@@ -100,6 +106,20 @@ ipcMain.handle('export:salaries', async (_event, { month, year, format, lang }) 
   }
 })
 
+// 7. Payroll (attendance-based) report export — feature 007, FR-005 (Admin only)
+ipcMain.handle('export:payrollReport', async (_event, { month, year, format, lang }) => {
+  try {
+    requireAdmin()
+    const filename = lang === 'ar'
+      ? `تقرير_رواتب_المعلمين_${month}_${year}.${format}`
+      : `teacher_payroll_report_${month}_${year}.${format}`
+    return await executeExport('payrollReport', { month, year, format, lang }, filename)
+  } catch (error: any) {
+    console.error('Failed to run payroll report export:', error)
+    throw new Error(error.message || 'Failed to export payroll report')
+  }
+})
+
 // 6. Employees roster export (Admin only)
 ipcMain.handle('export:employees', async (_event, { format, lang }) => {
   try {
@@ -125,5 +145,18 @@ ipcMain.handle('export:expenses', async (_event, { year, format, lang }) => {
   } catch (error: any) {
     console.error('Failed to run expenses export:', error)
     throw new Error(error.message || 'Failed to export expenses report')
+  }
+})
+
+// 8. Print preview — feature 007. Renders the SAME query as the equivalent export:* handler so
+// Print can never disagree with Export PDF/Excel (FR-003).
+ipcMain.handle('print:preview', async (_event, args) => {
+  try {
+    if (args.reportType === 'payroll' || args.reportType === 'expenses') requireAdmin()
+    else checkAuth()
+    return { html: buildPrintPreviewHtml(args.reportType, args) }
+  } catch (error: any) {
+    console.error('Failed to build print preview:', error)
+    throw new Error(error.message || 'Failed to build print preview')
   }
 })

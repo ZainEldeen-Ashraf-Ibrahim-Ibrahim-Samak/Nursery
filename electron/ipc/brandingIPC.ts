@@ -28,7 +28,7 @@ ipcMain.handle('branding:save', (_event, brandingData: Record<string, string>) =
   try {
     requireAdmin()
     const db = getDb()
-    
+
     const updateStmt = db.prepare(`
       INSERT OR REPLACE INTO settings (key, value, updated_at, synced)
       VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), 0)
@@ -40,7 +40,7 @@ ipcMain.handle('branding:save', (_event, brandingData: Record<string, string>) =
         }
       }
     })
-    
+
     transaction()
     return { ok: true }
   } catch (error: any) {
@@ -56,23 +56,23 @@ ipcMain.handle('branding:upload-logo', async () => {
       properties: ['openFile'],
       filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'svg'] }],
     })
-    
+
     if (result.canceled || result.filePaths.length === 0) {
       return null
     }
-    
+
     const srcPath = result.filePaths[0]
     const ext = path.extname(srcPath)
     const destName = `logo_${Date.now()}${ext}`
-    
+
     const brandingDir = path.join(app.getPath('userData'), 'branding')
     if (!fs.existsSync(brandingDir)) {
       fs.mkdirSync(brandingDir, { recursive: true })
     }
-    
+
     const destPath = path.join(brandingDir, destName)
     fs.copyFileSync(srcPath, destPath)
-    
+
     // Return path relative to userData (or absolute, our asset protocol handles it)
     return { path: `branding/${destName}` }
   } catch (error: any) {
@@ -88,23 +88,23 @@ ipcMain.handle('branding:upload-icon', async () => {
       properties: ['openFile'],
       filters: [{ name: 'Icons', extensions: ['ico', 'png', 'icns'] }],
     })
-    
+
     if (result.canceled || result.filePaths.length === 0) {
       return null
     }
-    
+
     const srcPath = result.filePaths[0]
     const ext = path.extname(srcPath)
     const destName = `icon_${Date.now()}${ext}`
-    
+
     const brandingDir = path.join(app.getPath('userData'), 'branding')
     if (!fs.existsSync(brandingDir)) {
       fs.mkdirSync(brandingDir, { recursive: true })
     }
-    
+
     const destPath = path.join(brandingDir, destName)
     fs.copyFileSync(srcPath, destPath)
-    
+
     return { path: `branding/${destName}` }
   } catch (error: any) {
     console.error('Failed to upload icon:', error)
@@ -116,11 +116,11 @@ ipcMain.handle('branding:reset', () => {
   try {
     requireAdmin()
     const db = getDb()
-    
+
     // Default branding settings
     const defaultBranding = {
-      brand_app_name: 'أكاديمية زين الدين',
-      brand_org_name: 'مركز زين الدين للتوحد ونمو الطفل',
+      brand_app_name: 'أكاديمية مهند الليثي',
+      brand_org_name: 'مركز مهند الليثي للتوحد ونمو الطفل',
       brand_tagline: 'رعاية متميزة وتنمية مهارات طفلك',
       brand_primary_color: '#0f766e',
       brand_accent_color: '#f59e0b',
@@ -133,7 +133,7 @@ ipcMain.handle('branding:reset', () => {
       brand_logo_path: '',
       brand_icon_path: '',
     }
-    
+
     const updateStmt = db.prepare(`
       INSERT OR REPLACE INTO settings (key, value, updated_at, synced)
       VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), 0)
@@ -143,7 +143,7 @@ ipcMain.handle('branding:reset', () => {
         updateStmt.run(key, value)
       }
     })
-    
+
     transaction()
     return { ok: true }
   } catch (error: any) {

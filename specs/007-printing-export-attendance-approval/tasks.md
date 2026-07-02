@@ -38,13 +38,13 @@ already present per research.md #1–#3).
 
 - [X] T001 [P] Add `AttendanceEditRequest`, `AttendanceAuditLogEntry`, `Notification` types (per
       data-model.md) to `src/types/index.ts`
-- [ ] T002 [P] Create `electron/services/csvService.ts` with an RFC-4180 escaping helper and a
+- [X] T002 [P] Create `electron/services/csvService.ts` with an RFC-4180 escaping helper and a
       `buildCsvFile(rows: string[][], header: { filters, generatedAt, totalsRow? }, savePath: string)`
       scaffold, no report-specific logic yet
-- [ ] T003 [P] Create `electron/services/printService.ts` scaffold exposing
+- [X] T003 [P] Create `electron/services/printService.ts` scaffold exposing
       `buildPrintPreviewHtml(docDefinition): string`, reusing the styling already produced by
       `pdfService.ts` document definitions (per research.md #2)
-- [ ] T004 [P] Create `src/components/reports/ReportActions.tsx` scaffold — a shared button group
+- [X] T004 [P] Create `src/components/reports/ReportActions.tsx` scaffold — a shared button group
       (`Print`, `Export PDF`, `Export Excel`, `Export CSV`) accepting `{ onPrint, onExportPdf,
       onExportExcel, onExportCsv, isBusy }` props, not yet wired to any page
 
@@ -97,25 +97,25 @@ Excel/Export CSV in turn, verify each output matches the filtered on-screen data
 
 ### Tests for User Story 1
 
-- [ ] T014 [P] [US1] Unit test for payroll report row-shaping and totals computation (including the
+- [X] T014 [P] [US1] Unit test for payroll report row-shaping and totals computation (including the
       zero-rows/empty-report case, FR-009) in `tests/unit/exportReportShapes.test.ts`
 
 ### Implementation for User Story 1
 
-- [ ] T015 [P] [US1] Add `generatePayrollReportSheet(ws, workbook, brand, { dateFrom, dateTo, teacherId },
+- [X] T015 [P] [US1] Add `generatePayrollReportSheet(ws, workbook, brand, { dateFrom, dateTo, teacherId },
       lang)` to `electron/services/exportService.ts` — columns per FR-005 (teacher name, sessions paid,
       session rate, total salary, payment status, date range), sourced from `teacher_payments` (matching
       `PayrollReport.tsx`'s existing data shape)
-- [ ] T016 [P] [US1] Add a payroll report PDF document-definition builder (same filters/columns/totals) to
+- [X] T016 [P] [US1] Add a payroll report PDF document-definition builder (same filters/columns/totals) to
       `electron/services/pdfService.ts`
-- [ ] T017 [US1] Add a payroll report CSV builder to `electron/services/csvService.ts` (depends on T015
+- [X] T017 [US1] Add a payroll report CSV builder to `electron/services/csvService.ts` (depends on T015
       for the row shape)
-- [ ] T018 [US1] Add `export:payrollReport` handler (dispatches to xlsx/pdf/csv builders, native save
+- [X] T018 [US1] Add `export:payrollReport` handler (dispatches to xlsx/pdf/csv builders, native save
       dialog, same pattern as existing `export:*` handlers) to `electron/ipc/exportIPC.ts` (depends on
       T015, T016, T017)
-- [ ] T019 [US1] Add `print:preview` support for `reportType: 'payroll'` (depends on T016) in
+- [X] T019 [US1] Add `print:preview` support for `reportType: 'payroll'` (depends on T016) in
       `electron/ipc/exportIPC.ts` / `electron/services/printService.ts`
-- [ ] T020 [US1] Wire `ReportActions` (T004) into `src/pages/Salaries/PayrollReport.tsx`, passing the
+- [X] T020 [US1] Wire `ReportActions` (T004) into `src/pages/Salaries/PayrollReport.tsx`, passing the
       screen's current date range/teacher filter through to `window.api.export.payrollReport` /
       `window.api.print.preview`, and opening a print-preview window that calls `window.print()` (depends
       on T004, T018, T019)
@@ -226,16 +226,16 @@ filtered view — independent of every other story.
 
 ### Implementation for User Story 2
 
-- [ ] T041 [P] [US2] Add `category`/`dateFrom`/`dateTo` filter parameters to `generateExpensesSheet` in
+- [X] T041 [P] [US2] Add `category`/`dateFrom`/`dateTo` filter parameters to `generateExpensesSheet` in
       `electron/services/exportService.ts` (currently year-only)
-- [ ] T042 [P] [US2] Add the matching filter parameters to the Expenses PDF document-definition builder in
+- [X] T042 [P] [US2] Add the matching filter parameters to the Expenses PDF document-definition builder in
       `electron/services/pdfService.ts`
-- [ ] T043 [US2] Add an Expenses Report CSV builder to `electron/services/csvService.ts` (depends on T041
+- [X] T043 [US2] Add an Expenses Report CSV builder to `electron/services/csvService.ts` (depends on T041
       for row shape)
-- [ ] T044 [US2] Extend `export:expenses` in `electron/ipc/exportIPC.ts` to accept
+- [X] T044 [US2] Extend `export:expenses` in `electron/ipc/exportIPC.ts` to accept
       `category`/`dateFrom`/`dateTo` and dispatch a `csv` format branch (depends on T041, T042, T043)
-- [ ] T045 [US2] Add `print:preview` support for `reportType: 'expenses'` (depends on T042)
-- [ ] T046 [US2] Wire `ReportActions` (T004) into `src/pages/Expenses/ExpensesList.tsx`, passing the
+- [X] T045 [US2] Add `print:preview` support for `reportType: 'expenses'` (depends on T042)
+- [X] T046 [US2] Wire `ReportActions` (T004) into `src/pages/Expenses/ExpensesList.tsx`, passing the
       screen's live category/date-range filters (depends on T004, T044, T045)
 
 **Checkpoint**: US1, US5, US6, US2 all independently functional.
@@ -284,17 +284,17 @@ outstanding balance appear — independent of every other story.
 
 ### Implementation for User Story 4
 
-- [ ] T054 [US4] Add `generateFinancialTransactionsSheet` (existing transaction types — currently
+- [X] T054 [US4] Add `generateFinancialTransactionsSheet` (existing transaction types — currently
       payments — plus outstanding balance, per FR-008; structured so a future refund/discount/adjustment
       type slots in without a rewrite) to `electron/services/exportService.ts`
-- [ ] T055 [US4] Add a Financial Transactions PDF document-definition builder to
+- [X] T055 [US4] Add a Financial Transactions PDF document-definition builder to
       `electron/services/pdfService.ts`
-- [ ] T056 [US4] Add a Financial Transactions CSV builder to `electron/services/csvService.ts` (depends on
+- [X] T056 [US4] Add a Financial Transactions CSV builder to `electron/services/csvService.ts` (depends on
       T054 for row shape)
-- [ ] T057 [US4] Add `export:financialTransactions` handler to `electron/ipc/exportIPC.ts` (depends on
+- [X] T057 [US4] Add `export:financialTransactions` handler to `electron/ipc/exportIPC.ts` (depends on
       T054, T055, T056)
-- [ ] T058 [US4] Add `print:preview` support for `reportType: 'financialTransactions'` (depends on T055)
-- [ ] T059 [US4] Add a Financial Transactions Report view/toolbar (in `src/pages/Children/
+- [X] T058 [US4] Add `print:preview` support for `reportType: 'financialTransactions'` (depends on T055)
+- [X] T059 [US4] Add a Financial Transactions Report view/toolbar (in `src/pages/Children/
       ChildStatement.tsx` or a new tab there) wired to Print/Export (depends on T004, T057, T058)
 
 **Checkpoint**: All six user stories independently functional.

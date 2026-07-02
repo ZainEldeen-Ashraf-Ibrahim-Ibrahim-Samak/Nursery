@@ -35,7 +35,7 @@ Applied only when the corresponding `settings` row does not yet exist. Each maps
 | `SEED_MAX_CAPACITY` | `max_capacity` | `50` |
 | `SEED_WORK_DAYS` | `work_days` | `22` |
 | `SEED_WORK_HOURS` | `work_hours` | `8` |
-| `SEED_BRAND_APP_NAME` | `brand_app_name` | `أكاديمية زين الدين` |
+| `SEED_BRAND_APP_NAME` | `brand_app_name` | `أكاديمية مهند الليثي` |
 | `SEED_BRAND_ORG_NAME` | `brand_org_name` | (current default) |
 | `SEED_BRAND_PRIMARY_COLOR` | `brand_primary_color` | `#0f766e` |
 | `SEED_BRAND_ACCENT_COLOR` | `brand_accent_color` | `#f59e0b` |

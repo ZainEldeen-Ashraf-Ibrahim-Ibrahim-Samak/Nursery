@@ -17705,11 +17705,11 @@ async function seedDatabase(db) {
 			},
 			{
 				key: "brand_app_name",
-				value: seedSetting("SEED_BRAND_APP_NAME", "أكاديمية زين الدين")
+				value: seedSetting("SEED_BRAND_APP_NAME", "أكاديمية مهند الليثي")
 			},
 			{
 				key: "brand_org_name",
-				value: seedSetting("SEED_BRAND_ORG_NAME", "مركز زين الدين للتوحد ونمو الطفل")
+				value: seedSetting("SEED_BRAND_ORG_NAME", "مركز مهند الليثي للتوحد ونمو الطفل")
 			},
 			{
 				key: "brand_tagline",
@@ -23165,7 +23165,7 @@ ipcMain.handle("salary:update", async (_event, { employee_id, month, year, bonus
 });
 //#endregion
 //#region electron/ipc/expensesIPC.ts
-var arabicMonths$4 = [
+var arabicMonths$6 = [
 	"يناير",
 	"فبراير",
 	"مارس",
@@ -23196,7 +23196,7 @@ ipcMain.handle("expenses:get", async (_event, { year }) => {
 		const result = [];
 		for (const item of itemNames) {
 			const category = db.prepare("SELECT category FROM expenses WHERE item = ? AND category IS NOT NULL LIMIT 1").get(item)?.category ?? null;
-			for (const month of arabicMonths$4) {
+			for (const month of arabicMonths$6) {
 				const found = rows.find((r) => r.item === item && r.month === month);
 				if (found) result.push(found);
 				else result.push({
@@ -23263,7 +23263,7 @@ ipcMain.handle("expenses:addItem", async (_event, { item, category = null }) => 
 		const now = (/* @__PURE__ */ new Date()).toISOString();
 		const year = (/* @__PURE__ */ new Date()).getFullYear();
 		db.transaction(() => {
-			for (const month of arabicMonths$4) db.prepare(`
+			for (const month of arabicMonths$6) db.prepare(`
           INSERT OR IGNORE INTO expenses (item, month, year, amount, category, notes, created_at, updated_at, synced)
           VALUES (?, ?, ?, 0, ?, NULL, ?, ?, 0)
         `).run(itemName, month, year, category, now, now);
@@ -23293,7 +23293,7 @@ ipcMain.handle("expenses:removeItem", async (_event, { item }) => {
 });
 //#endregion
 //#region electron/ipc/targetIPC.ts
-var arabicMonths$3 = [
+var arabicMonths$5 = [
 	"يناير",
 	"فبراير",
 	"مارس",
@@ -23344,7 +23344,7 @@ ipcMain.handle("target:get", async (_event, { year }) => {
 		const targetProfitRow = db.prepare("SELECT value FROM settings WHERE key = 'target_profit_pct'").get();
 		const targetProfitPct = targetProfitRow ? Number(targetProfitRow.value) : .2;
 		const result = [];
-		for (const month of arabicMonths$3) {
+		for (const month of arabicMonths$5) {
 			const payments = db.prepare("SELECT paid FROM payments WHERE month = ? AND year = ?").all(month, year);
 			const expenses = db.prepare("SELECT amount FROM expenses WHERE month = ? AND year = ?").all(month, year);
 			const salaries = db.prepare("SELECT actual_paid FROM salary_payments WHERE month = ? AND year = ?").all(month, year);
@@ -23611,8 +23611,8 @@ ipcMain.handle("branding:reset", () => {
 		requireAdmin();
 		const db = getDb();
 		const defaultBranding = {
-			brand_app_name: "أكاديمية زين الدين",
-			brand_org_name: "مركز زين الدين للتوحد ونمو الطفل",
+			brand_app_name: "أكاديمية مهند الليثي",
+			brand_org_name: "مركز مهند الليثي للتوحد ونمو الطفل",
 			brand_tagline: "رعاية متميزة وتنمية مهارات طفلك",
 			brand_primary_color: "#0f766e",
 			brand_accent_color: "#f59e0b",
@@ -23647,8 +23647,8 @@ function getExportHeader() {
 	const logoRelPath = settings["brand_logo_path"] || "branding/logo.png";
 	const logoPath = path.isAbsolute(logoRelPath) ? logoRelPath : path.join(app.getPath("userData"), logoRelPath);
 	return {
-		appName: settings["brand_app_name"] || "أكاديمية زين الدين",
-		orgName: settings["brand_org_name"] || "مركز زين الدين للتوحد ونمو الطفل",
+		appName: settings["brand_app_name"] || "أكاديمية مهند الليثي",
+		orgName: settings["brand_org_name"] || "مركز مهند الليثي للتوحد ونمو الطفل",
 		tagline: settings["brand_tagline"] || "رعاية متميزة وتنمية مهارات طفلك",
 		phone: settings["brand_phone"] || "+20 123 456 7890",
 		address: settings["brand_address"] || "القاهرة، مصر",
@@ -23661,7 +23661,7 @@ function getExportHeader() {
 }
 //#endregion
 //#region electron/services/exportService.ts
-var arabicMonths$2 = [
+var arabicMonths$4 = [
 	"يناير",
 	"فبراير",
 	"مارس",
@@ -23675,7 +23675,7 @@ var arabicMonths$2 = [
 	"نوفمبر",
 	"ديسمبر"
 ];
-var englishMonths$1 = [
+var englishMonths$3 = [
 	"January",
 	"February",
 	"March",
@@ -24161,6 +24161,97 @@ function generateSalariesSheet(worksheet, workbook, brand, month, year, lang) {
 	]);
 	autofitColumns(worksheet);
 }
+function generatePayrollReportSheet(worksheet, workbook, brand, params, lang) {
+	const db = getDb();
+	const { month, year } = params;
+	const monthLabel = lang === "ar" ? arabicMonths$4[month - 1] : englishMonths$3[month - 1];
+	const startRow = writeBrandingHeader(worksheet, workbook, brand, lang, lang === "ar" ? `تقرير رواتب المعلمين لشهر ${monthLabel} ${year}` : `Teacher Payroll Report: ${monthLabel} ${year}`);
+	const headers = lang === "ar" ? [
+		"اسم المعلم",
+		"عدد الجلسات المدفوعة",
+		"تكلفة الجلسة",
+		"إجمالي الراتب"
+	] : [
+		"Teacher Name",
+		"Sessions Paid",
+		"Session Rate",
+		"Total Salary"
+	];
+	const headerRow = worksheet.getRow(startRow);
+	headerRow.values = headers;
+	headerRow.height = 24;
+	headerRow.eachCell((cell) => {
+		cell.font = {
+			name: FONT_FAMILY,
+			size: 10,
+			bold: true
+		};
+		cell.fill = HEADER_FILL;
+		cell.border = BORDER_STYLE;
+		cell.alignment = {
+			vertical: "middle",
+			horizontal: "center"
+		};
+	});
+	const monthKey = `${year}-${String(month).padStart(2, "0")}`;
+	const rows = db.prepare(`
+    SELECT
+      e.id as teacher_id,
+      e.name as teacher_name,
+      e.teacher_session_rate as session_cost,
+      COUNT(tp.id) as sessions_paid,
+      COALESCE(SUM(tp.session_cost), 0) as total_salary
+    FROM employees e
+    JOIN teacher_payments tp ON tp.teacher_id = e.id
+      AND tp.status IN ('pending','paid')
+      AND strftime('%Y-%m', tp.attendance_date) = ?
+    GROUP BY e.id
+    ORDER BY e.name ASC
+  `).all(monthKey);
+	let currentRow = startRow + 1;
+	for (const r of rows) {
+		const dataRow = worksheet.getRow(currentRow);
+		dataRow.values = [
+			r.teacher_name,
+			r.sessions_paid,
+			r.session_cost,
+			r.total_salary
+		];
+		dataRow.height = 20;
+		currentRow++;
+	}
+	if (rows.length > 0) {
+		const totalRow = worksheet.getRow(currentRow);
+		totalRow.height = 22;
+		totalRow.getCell(1).value = lang === "ar" ? "إجمالي الرواتب" : "Total Payroll";
+		totalRow.getCell(4).value = { formula: `SUM(D${startRow + 1}:D${currentRow - 1})` };
+		for (let c = 1; c <= 4; c++) {
+			const cell = totalRow.getCell(c);
+			cell.fill = SUBHEADER_FILL;
+			cell.border = BORDER_STYLE;
+			cell.font = {
+				name: FONT_FAMILY,
+				size: 10,
+				bold: true
+			};
+			if (c === 3 || c === 4) {
+				cell.numFmt = "#,##0.00";
+				cell.alignment = { horizontal: "right" };
+			}
+		}
+	} else {
+		const emptyRow = worksheet.getRow(currentRow);
+		emptyRow.getCell(1).value = lang === "ar" ? "لا توجد جلسات مدفوعة لهذا الشهر." : "No paid sessions for this month.";
+		emptyRow.getCell(1).font = {
+			name: FONT_FAMILY,
+			size: 10,
+			italic: true,
+			color: { argb: "FF94A3B8" }
+		};
+	}
+	formatGridData(worksheet, startRow + 1, [3, 4]);
+	autofitColumns(worksheet);
+}
 function generateEmployeesSheet(worksheet, workbook, brand, lang) {
 	const db = getDb();
 	const startRow = writeBrandingHeader(worksheet, workbook, brand, lang, lang === "ar" ? "سجل الموظفين" : "Employees Roster");
@@ -24254,7 +24345,7 @@ function generateExpensesSheet(worksheet, workbook, brand, year, lang) {
 	const headers = [
 		lang === "ar" ? "بند المصاريف" : "Expense Item",
 		lang === "ar" ? "التصنيف" : "Category",
-		...arabicMonths$2.map((m, idx) => lang === "ar" ? m : englishMonths$1[idx]),
+		...arabicMonths$4.map((m, idx) => lang === "ar" ? m : englishMonths$3[idx]),
 		lang === "ar" ? "الإجمالي السنوي" : "Annual Total"
 	];
 	const headerRow = worksheet.getRow(startRow);
@@ -24277,7 +24368,7 @@ function generateExpensesSheet(worksheet, workbook, brand, year, lang) {
 	let currentRow = startRow + 1;
 	for (const it of items) {
 		const rowValues = [it.item, it.category || ""];
-		for (const m of arabicMonths$2) {
+		for (const m of arabicMonths$4) {
 			const expenseRow = db.prepare("SELECT amount FROM expenses WHERE item = ? AND month = ? AND year = ?").get(it.item, m, year);
 			rowValues.push(expenseRow ? expenseRow.amount : 0);
 		}
@@ -24452,8 +24543,8 @@ function generateChildStatementSheet(worksheet, workbook, brand, childId, lang) 
 }
 function translateMonthName(mAr, lang) {
 	if (lang === "ar") return mAr;
-	const idx = arabicMonths$2.indexOf(mAr);
-	return idx !== -1 ? englishMonths$1[idx] : mAr;
+	const idx = arabicMonths$4.indexOf(mAr);
+	return idx !== -1 ? englishMonths$3[idx] : mAr;
 }
 async function buildExcelFile(type, params, savePath) {
 	const { month, year, childId, lang = "ar" } = params;
@@ -24462,6 +24553,12 @@ async function buildExcelFile(type, params, savePath) {
 	if (type === "month") {
 		const sheetName = lang === "ar" ? `${month} ${year}` : `${month}_${year}`;
 		generateMonthSheet(workbook.addWorksheet(sheetName), workbook, brand, month, year, lang);
+	} else if (type === "payrollReport") {
+		const sheetName = lang === "ar" ? "تقرير الرواتب" : "Payroll Report";
+		generatePayrollReportSheet(workbook.addWorksheet(sheetName), workbook, brand, {
+			month: Number(params.month),
+			year: Number(params.year)
+		}, lang);
 	} else if (type === "child") generateChildStatementSheet(workbook.addWorksheet(lang === "ar" ? "كشف الحساب" : "Statement"), workbook, brand, Number(childId), lang);
 	else if (type === "salaries") {
 		const sheetName = lang === "ar" ? "الرواتب" : "Salaries";
@@ -24530,7 +24627,7 @@ async function buildExcelFile(type, params, savePath) {
 		generateChildrenSheet(workbook.addWorksheet(lang === "ar" ? "الأطفال" : "Children"), workbook, brand, lang);
 		generateSalariesSheet(workbook.addWorksheet(lang === "ar" ? "الرواتب" : "Salaries"), workbook, brand, "ديسمبر", year, lang);
 		generateExpensesSheet(workbook.addWorksheet(lang === "ar" ? "المصاريف" : "Expenses"), workbook, brand, year, lang);
-		for (const m of arabicMonths$2) generateMonthSheet(workbook.addWorksheet(m), workbook, brand, m, year, lang);
+		for (const m of arabicMonths$4) generateMonthSheet(workbook.addWorksheet(m), workbook, brand, m, year, lang);
 	}
 	await workbook.xlsx.writeFile(savePath);
 }
@@ -25425,7 +25522,7 @@ var import_arabic_persian_reshaper = /* @__PURE__ */ __toESM((/* @__PURE__ */ __
 		ArabicShaper: require_ArabicShaper()
 	};
 })))(), 1);
-var arabicMonths$1 = [
+var arabicMonths$3 = [
 	"يناير",
 	"فبراير",
 	"مارس",
@@ -25439,7 +25536,7 @@ var arabicMonths$1 = [
 	"نوفمبر",
 	"ديسمبر"
 ];
-var englishMonths = [
+var englishMonths$2 = [
 	"January",
 	"February",
 	"March",
@@ -25583,7 +25680,8 @@ function buildPdfFile(type, params, savePath) {
 				"month",
 				"salaries",
 				"expenses",
-				"employees"
+				"employees",
+				"payrollReport"
 			].includes(type)) pageOrientation = "landscape";
 			const docDefinition = {
 				pageOrientation,
@@ -25911,8 +26009,8 @@ function buildPdfFile(type, params, savePath) {
 					totalInvoiced += p.total;
 					totalCollected += p.paid;
 					totalBalance += p.balance;
-					const mIdx = arabicMonths$1.indexOf(p.month);
-					const mStr = isAr ? p.month : mIdx !== -1 ? englishMonths[mIdx] : p.month;
+					const mIdx = arabicMonths$3.indexOf(p.month);
+					const mStr = isAr ? p.month : mIdx !== -1 ? englishMonths$2[mIdx] : p.month;
 					body.push([
 						{
 							text: shapeText(mStr),
@@ -26357,11 +26455,121 @@ function buildPdfFile(type, params, savePath) {
 						vLineColor: () => "#cbd5e1"
 					}
 				});
+			} else if (type === "payrollReport") {
+				const monthNum = Number(month);
+				const monthLabel = isAr ? arabicMonths$3[monthNum - 1] : englishMonths$2[monthNum - 1];
+				const title = isAr ? `تقرير رواتب المعلمين لشهر ${monthLabel} ${year}` : `Teacher Payroll Report: ${monthLabel} ${year}`;
+				docDefinition.content.push(...getPdfHeader(brand, lang, title));
+				const monthKey = `${year}-${String(monthNum).padStart(2, "0")}`;
+				const rows = db.prepare(`
+          SELECT
+            e.name as teacher_name,
+            e.teacher_session_rate as session_cost,
+            COUNT(tp.id) as sessions_paid,
+            COALESCE(SUM(tp.session_cost), 0) as total_salary
+          FROM employees e
+          JOIN teacher_payments tp ON tp.teacher_id = e.id
+            AND tp.status IN ('pending','paid')
+            AND strftime('%Y-%m', tp.attendance_date) = ?
+          GROUP BY e.id
+          ORDER BY e.name ASC
+        `).all(monthKey);
+				const body = [(isAr ? [
+					"اسم المعلم",
+					"عدد الجلسات المدفوعة",
+					"تكلفة الجلسة",
+					"إجمالي الراتب"
+				] : [
+					"Teacher Name",
+					"Sessions Paid",
+					"Session Rate",
+					"Total Salary"
+				]).map((h) => ({
+					text: shapeText(h),
+					bold: true,
+					fillColor: brand.primaryColor,
+					color: "#ffffff",
+					alignment: "center"
+				}))];
+				let sumTotal = 0;
+				for (const r of rows) {
+					sumTotal += r.total_salary;
+					body.push([
+						{
+							text: shapeText(r.teacher_name),
+							alignment: isAr ? "right" : "left"
+						},
+						{
+							text: shapeText(r.sessions_paid),
+							alignment: "center"
+						},
+						{
+							text: shapeText(formatCurrency(r.session_cost || 0, lang)),
+							alignment: "right"
+						},
+						{
+							text: shapeText(formatCurrency(r.total_salary, lang)),
+							bold: true,
+							alignment: "right"
+						}
+					]);
+				}
+				if (rows.length > 0) body.push([
+					{
+						text: shapeText(isAr ? "إجمالي الرواتب" : "Total Payroll"),
+						bold: true,
+						fillColor: "#f1f5f9",
+						alignment: isAr ? "right" : "left"
+					},
+					{
+						text: "",
+						fillColor: "#f1f5f9"
+					},
+					{
+						text: "",
+						fillColor: "#f1f5f9"
+					},
+					{
+						text: shapeText(formatCurrency(sumTotal, lang)),
+						bold: true,
+						fillColor: "#f1f5f9",
+						alignment: "right"
+					}
+				]);
+				else body.push([
+					{
+						text: shapeText(isAr ? "لا توجد جلسات مدفوعة لهذا الشهر." : "No paid sessions for this month."),
+						italic: true,
+						color: "#94a3b8",
+						colSpan: 4
+					},
+					{},
+					{},
+					{}
+				]);
+				docDefinition.content.push({
+					table: {
+						headerRows: 1,
+						widths: [
+							"*",
+							"auto",
+							"auto",
+							"auto"
+						],
+						body
+					},
+					layout: {
+						hLineWidth: () => .5,
+						vLineWidth: () => .5,
+						hLineColor: () => "#cbd5e1",
+						vLineColor: () => "#cbd5e1"
+					}
+				});
 			} else if (type === "expenses") {
 				const title = isAr ? `تقرير المصاريف التشغيلية السنوية لسنة ${year}` : `Annual Expenses: ${year}`;
 				docDefinition.content.push(...getPdfHeader(brand, lang, title));
 				const items = db.prepare("SELECT DISTINCT item, category FROM expenses WHERE year = ? UNION SELECT DISTINCT item, category FROM expenses").all(year);
-				const monthsHeaders = arabicMonths$1.map((m, idx) => isAr ? m : englishMonths[idx]);
+				const monthsHeaders = arabicMonths$3.map((m, idx) => isAr ? m : englishMonths$2[idx]);
 				const body = [[
 					isAr ? "البند" : "Item",
 					isAr ? "التصنيف" : "Category",
@@ -26386,8 +26594,8 @@ function buildPdfFile(type, params, savePath) {
 						alignment: "center"
 					}];
 					let itemTotal = 0;
-					for (let mIdx = 0; mIdx < arabicMonths$1.length; mIdx++) {
-						const m = arabicMonths$1[mIdx];
+					for (let mIdx = 0; mIdx < arabicMonths$3.length; mIdx++) {
+						const m = arabicMonths$3[mIdx];
 						const exp = db.prepare("SELECT amount FROM expenses WHERE item = ? AND month = ? AND year = ?").get(it.item, m, year);
 						const amount = exp ? exp.amount : 0;
 						row.push({
@@ -26553,9 +26761,9 @@ function buildPdfFile(type, params, savePath) {
 					text: "",
 					pageBreak: "after"
 				});
-				for (let mIdx = 0; mIdx < arabicMonths$1.length; mIdx++) {
-					const m = arabicMonths$1[mIdx];
-					const mTitle = isAr ? `مطالبات شهر ${m} لسنة ${year}` : `Billing Sheet: ${englishMonths[mIdx]} ${year}`;
+				for (let mIdx = 0; mIdx < arabicMonths$3.length; mIdx++) {
+					const m = arabicMonths$3[mIdx];
+					const mTitle = isAr ? `مطالبات شهر ${m} لسنة ${year}` : `Billing Sheet: ${englishMonths$2[mIdx]} ${year}`;
 					docDefinition.content.push(...getPdfHeader(brand, lang, mTitle));
 					const payments = db.prepare(`
             SELECT c.name as child_name, p.service, p.quantity, p.price, p.total, p.paid, p.balance, p.status
@@ -26688,7 +26896,7 @@ function buildPdfFile(type, params, savePath) {
 						],
 						body
 					} });
-					if (mIdx < arabicMonths$1.length - 1) docDefinition.content.push({
+					if (mIdx < arabicMonths$3.length - 1) docDefinition.content.push({
 						text: "",
 						pageBreak: "after"
 					});
@@ -26710,6 +26918,409 @@ function buildPdfFile(type, params, savePath) {
 	});
 }
 //#endregion
+//#region electron/services/csvService.ts
+var arabicMonths$2 = [
+	"يناير",
+	"فبراير",
+	"مارس",
+	"أبريل",
+	"مايو",
+	"يونيو",
+	"يوليو",
+	"أغسطس",
+	"سبتمبر",
+	"أكتوبر",
+	"نوفمبر",
+	"ديسمبر"
+];
+var englishMonths$1 = [
+	"January",
+	"February",
+	"March",
+	"April",
+	"May",
+	"June",
+	"July",
+	"August",
+	"September",
+	"October",
+	"November",
+	"December"
+];
+function escapeCsvField(value) {
+	if (value === null || value === void 0) return "";
+	const str = String(value);
+	if (/[",\n\r]/.test(str)) return `"${str.replace(/"/g, "\"\"")}"`;
+	return str;
+}
+function toCsvLine(fields) {
+	return fields.map(escapeCsvField).join(",");
+}
+/**
+* Builds the branded header lines shared by every report's CSV: org name, applied filters, and
+* the generation timestamp (FR-004) — CSV has no logo image support, so the org name stands in
+* for it in text form.
+*/
+function buildHeaderLines(title, filterSummary) {
+	const brand = getExportHeader();
+	const now = (/* @__PURE__ */ new Date()).toISOString();
+	return [
+		toCsvLine([brand.orgName]),
+		toCsvLine([title]),
+		toCsvLine([filterSummary]),
+		toCsvLine([`Generated: ${now}`]),
+		""
+	];
+}
+async function buildCsvFile(type, params, savePath) {
+	const { lang = "ar" } = params;
+	const isAr = lang === "ar";
+	let lines = [];
+	if (type === "child") {
+		const db = getDb();
+		const childId = Number(params.childId);
+		const child = db.prepare("SELECT * FROM children WHERE id = ?").get(childId);
+		if (!child) throw new Error(`Child not found with ID: ${childId}`);
+		lines = buildHeaderLines(isAr ? `كشف حساب الطفل: ${child.name}` : `Account Statement: ${child.name}`, isAr ? `الطفل: ${child.name}` : `Child: ${child.name}`);
+		lines.push(toCsvLine(isAr ? [
+			"الشهر",
+			"السنة",
+			"الخدمة",
+			"الكمية",
+			"السعر",
+			"الإجمالي",
+			"المدفوع",
+			"الرصيد/المتأخرات",
+			"الحالة",
+			"ملاحظات"
+		] : [
+			"Month",
+			"Year",
+			"Service",
+			"Quantity",
+			"Price",
+			"Total",
+			"Paid",
+			"Balance",
+			"Status",
+			"Notes"
+		]));
+		const statement = getChildStatement(child, db.prepare("SELECT month, year, service, unit, quantity, price, total, paid, balance, status, notes FROM payments WHERE child_id = ?").all(childId), /* @__PURE__ */ new Date());
+		let totalDue = 0, totalPaid = 0, totalBalance = 0;
+		for (const p of statement.rows) {
+			totalDue += p.total;
+			totalPaid += p.paid;
+			totalBalance += p.balance;
+			const monthLabel = isAr ? p.month : arabicMonths$2.includes(p.month) ? englishMonths$1[arabicMonths$2.indexOf(p.month)] : p.month;
+			lines.push(toCsvLine([
+				monthLabel,
+				p.year,
+				p.service,
+				p.quantity,
+				p.price,
+				p.total,
+				p.paid,
+				p.balance,
+				p.status,
+				p.notes || ""
+			]));
+		}
+		if (statement.rows.length === 0) lines.push(toCsvLine([isAr ? "لا توجد معاملات مالية مسجلة." : "No financial transactions recorded."]));
+		else lines.push(toCsvLine([
+			isAr ? "الإجمالي" : "Total",
+			"",
+			"",
+			"",
+			"",
+			totalDue,
+			totalPaid,
+			totalBalance,
+			"",
+			""
+		]));
+	}
+	if (type === "expenses") {
+		const db = getDb();
+		const year = Number(params.year);
+		lines = buildHeaderLines(isAr ? `بيان المصاريف التشغيلية السنوية لسنة ${year}` : `Annual Expenses Sheet: ${year}`, isAr ? `السنة: ${year}` : `Year: ${year}`);
+		const monthHeaders = arabicMonths$2.map((m, idx) => isAr ? m : englishMonths$1[idx]);
+		lines.push(toCsvLine([
+			isAr ? "بند المصاريف" : "Expense Item",
+			isAr ? "التصنيف" : "Category",
+			...monthHeaders,
+			isAr ? "الإجمالي السنوي" : "Annual Total"
+		]));
+		const items = db.prepare("SELECT DISTINCT item, category FROM expenses WHERE year = ? UNION SELECT DISTINCT item, category FROM expenses").all(year);
+		const colTotals = Array(12).fill(0);
+		let grandTotal = 0;
+		for (const it of items) {
+			const monthAmounts = arabicMonths$2.map((m, idx) => {
+				const amt = db.prepare("SELECT amount FROM expenses WHERE item = ? AND month = ? AND year = ?").get(it.item, m, year)?.amount ?? 0;
+				colTotals[idx] += amt;
+				return amt;
+			});
+			const rowTotal = monthAmounts.reduce((s, a) => s + a, 0);
+			grandTotal += rowTotal;
+			lines.push(toCsvLine([
+				it.item,
+				it.category || "",
+				...monthAmounts,
+				rowTotal
+			]));
+		}
+		if (items.length === 0) lines.push(toCsvLine([isAr ? "لا توجد مصاريف مسجلة لهذه السنة." : "No expenses recorded for this year."]));
+		else lines.push(toCsvLine([
+			isAr ? "الإجمالي" : "Total",
+			"",
+			...colTotals,
+			grandTotal
+		]));
+	}
+	if (type === "payrollReport") {
+		const db = getDb();
+		const month = Number(params.month);
+		const year = Number(params.year);
+		const monthLabel = isAr ? arabicMonths$2[month - 1] : englishMonths$1[month - 1];
+		lines = buildHeaderLines(isAr ? `تقرير رواتب المعلمين لشهر ${monthLabel} ${year}` : `Teacher Payroll Report: ${monthLabel} ${year}`, isAr ? `الفترة: ${monthLabel} ${year}` : `Period: ${monthLabel} ${year}`);
+		lines.push(toCsvLine(isAr ? [
+			"اسم المعلم",
+			"عدد الجلسات المدفوعة",
+			"تكلفة الجلسة",
+			"إجمالي الراتب"
+		] : [
+			"Teacher Name",
+			"Sessions Paid",
+			"Session Rate",
+			"Total Salary"
+		]));
+		const monthKey = `${year}-${String(month).padStart(2, "0")}`;
+		const rows = db.prepare(`
+      SELECT
+        e.name as teacher_name,
+        e.teacher_session_rate as session_cost,
+        COUNT(tp.id) as sessions_paid,
+        COALESCE(SUM(tp.session_cost), 0) as total_salary
+      FROM employees e
+      JOIN teacher_payments tp ON tp.teacher_id = e.id
+        AND tp.status IN ('pending','paid')
+        AND strftime('%Y-%m', tp.attendance_date) = ?
+      GROUP BY e.id
+      ORDER BY e.name ASC
+    `).all(monthKey);
+		let total = 0;
+		for (const r of rows) {
+			total += r.total_salary;
+			lines.push(toCsvLine([
+				r.teacher_name,
+				r.sessions_paid,
+				r.session_cost ?? "",
+				r.total_salary
+			]));
+		}
+		if (rows.length === 0) lines.push(toCsvLine([isAr ? "لا توجد جلسات مدفوعة لهذا الشهر." : "No paid sessions for this month."]));
+		else lines.push(toCsvLine([
+			isAr ? "الإجمالي" : "Total",
+			"",
+			"",
+			total
+		]));
+	}
+	fs.writeFileSync(savePath, "﻿" + lines.join("\r\n"), "utf8");
+}
+//#endregion
+//#region electron/services/printService.ts
+var arabicMonths$1 = [
+	"يناير",
+	"فبراير",
+	"مارس",
+	"أبريل",
+	"مايو",
+	"يونيو",
+	"يوليو",
+	"أغسطس",
+	"سبتمبر",
+	"أكتوبر",
+	"نوفمبر",
+	"ديسمبر"
+];
+var englishMonths = [
+	"January",
+	"February",
+	"March",
+	"April",
+	"May",
+	"June",
+	"July",
+	"August",
+	"September",
+	"October",
+	"November",
+	"December"
+];
+function escapeHtml(value) {
+	if (value === null || value === void 0) return "";
+	return String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+/**
+* Builds a self-contained, branded HTML print preview (research.md #2) — the renderer opens this
+* in a print-preview window and hands off to the OS print dialog via window.print(). Reuses the
+* exact same query as the equivalent export:* handler so Print and Export PDF/Excel can never
+* disagree on what data they show (FR-003).
+*/
+function buildPrintPreviewHtml(reportType, params) {
+	const brand = getExportHeader();
+	const isAr = params.lang === "ar";
+	const dir = isAr ? "rtl" : "ltr";
+	const now = (/* @__PURE__ */ new Date()).toISOString();
+	let title = "";
+	let filterSummary = "";
+	let tableHtml = "";
+	if (reportType === "payroll") {
+		const db = getDb();
+		const month = Number(params.month);
+		const year = Number(params.year);
+		const monthLabel = isAr ? arabicMonths$1[month - 1] : englishMonths[month - 1];
+		title = isAr ? `تقرير رواتب المعلمين لشهر ${monthLabel} ${year}` : `Teacher Payroll Report: ${monthLabel} ${year}`;
+		filterSummary = isAr ? `الفترة: ${monthLabel} ${year}` : `Period: ${monthLabel} ${year}`;
+		const monthKey = `${year}-${String(month).padStart(2, "0")}`;
+		const rows = db.prepare(`
+      SELECT
+        e.name as teacher_name,
+        e.teacher_session_rate as session_cost,
+        COUNT(tp.id) as sessions_paid,
+        COALESCE(SUM(tp.session_cost), 0) as total_salary
+      FROM employees e
+      JOIN teacher_payments tp ON tp.teacher_id = e.id
+        AND tp.status IN ('pending','paid')
+        AND strftime('%Y-%m', tp.attendance_date) = ?
+      GROUP BY e.id
+      ORDER BY e.name ASC
+    `).all(monthKey);
+		const headers = isAr ? [
+			"اسم المعلم",
+			"عدد الجلسات المدفوعة",
+			"تكلفة الجلسة",
+			"إجمالي الراتب"
+		] : [
+			"Teacher Name",
+			"Sessions Paid",
+			"Session Rate",
+			"Total Salary"
+		];
+		let total = 0;
+		const bodyRows = rows.map((r) => {
+			total += r.total_salary;
+			return `<tr><td>${escapeHtml(r.teacher_name)}</td><td>${escapeHtml(r.sessions_paid)}</td><td>${escapeHtml(r.session_cost ?? "")}</td><td>${escapeHtml(r.total_salary)}</td></tr>`;
+		}).join("");
+		const footerRow = rows.length > 0 ? `<tr class="totals"><td>${isAr ? "الإجمالي" : "Total"}</td><td></td><td></td><td>${escapeHtml(total)}</td></tr>` : `<tr><td colspan="4" class="empty">${isAr ? "لا توجد جلسات مدفوعة لهذا الشهر." : "No paid sessions for this month."}</td></tr>`;
+		tableHtml = `
+      <table>
+        <thead><tr>${headers.map((h) => `<th>${escapeHtml(h)}</th>`).join("")}</tr></thead>
+        <tbody>${bodyRows}${footerRow}</tbody>
+      </table>
+    `;
+	}
+	if (reportType === "expenses") {
+		const db = getDb();
+		const year = Number(params.year);
+		title = isAr ? `بيان المصاريف التشغيلية السنوية لسنة ${year}` : `Annual Expenses Sheet: ${year}`;
+		filterSummary = isAr ? `السنة: ${year}` : `Year: ${year}`;
+		const monthHeaders = arabicMonths$1.map((m, idx) => isAr ? m : englishMonths[idx]);
+		const headers = [
+			isAr ? "بند المصاريف" : "Expense Item",
+			isAr ? "التصنيف" : "Category",
+			...monthHeaders,
+			isAr ? "الإجمالي" : "Total"
+		];
+		const items = db.prepare("SELECT DISTINCT item, category FROM expenses WHERE year = ? UNION SELECT DISTINCT item, category FROM expenses").all(year);
+		const colTotals = Array(12).fill(0);
+		let grandTotal = 0;
+		const bodyRows = items.map((it) => {
+			const monthAmounts = arabicMonths$1.map((m, idx) => {
+				const amt = db.prepare("SELECT amount FROM expenses WHERE item = ? AND month = ? AND year = ?").get(it.item, m, year)?.amount ?? 0;
+				colTotals[idx] += amt;
+				return amt;
+			});
+			const rowTotal = monthAmounts.reduce((s, a) => s + a, 0);
+			grandTotal += rowTotal;
+			return `<tr><td>${escapeHtml(it.item)}</td><td>${escapeHtml(it.category || "")}</td>${monthAmounts.map((a) => `<td>${escapeHtml(a)}</td>`).join("")}<td>${escapeHtml(rowTotal)}</td></tr>`;
+		}).join("");
+		const footerRow = items.length > 0 ? `<tr class="totals"><td>${isAr ? "الإجمالي" : "Total"}</td><td></td>${colTotals.map((t) => `<td>${escapeHtml(t)}</td>`).join("")}<td>${escapeHtml(grandTotal)}</td></tr>` : `<tr><td colspan="${2 + monthHeaders.length + 1}" class="empty">${isAr ? "لا توجد مصاريف مسجلة لهذه السنة." : "No expenses recorded for this year."}</td></tr>`;
+		tableHtml = `
+      <table>
+        <thead><tr>${headers.map((h) => `<th>${escapeHtml(h)}</th>`).join("")}</tr></thead>
+        <tbody>${bodyRows}${footerRow}</tbody>
+      </table>
+    `;
+	}
+	if (reportType === "child") {
+		const db = getDb();
+		const childId = Number(params.childId);
+		const child = db.prepare("SELECT * FROM children WHERE id = ?").get(childId);
+		if (!child) throw new Error(`Child not found with ID: ${childId}`);
+		title = isAr ? `كشف حساب الطفل: ${child.name}` : `Account Statement: ${child.name}`;
+		filterSummary = isAr ? `الطفل: ${child.name}` : `Child: ${child.name}`;
+		const headers = isAr ? [
+			"الشهر",
+			"السنة",
+			"الخدمة",
+			"الكمية",
+			"السعر",
+			"الإجمالي",
+			"المدفوع",
+			"الرصيد/المتأخرات",
+			"الحالة"
+		] : [
+			"Month",
+			"Year",
+			"Service",
+			"Qty",
+			"Price",
+			"Total",
+			"Paid",
+			"Balance",
+			"Status"
+		];
+		const statement = getChildStatement(child, db.prepare("SELECT month, year, service, unit, quantity, price, total, paid, balance, status, notes FROM payments WHERE child_id = ?").all(childId), /* @__PURE__ */ new Date());
+		let totalDue = 0, totalPaid = 0, totalBalance = 0;
+		const bodyRows = statement.rows.map((p) => {
+			totalDue += p.total;
+			totalPaid += p.paid;
+			totalBalance += p.balance;
+			return `<tr><td>${escapeHtml(isAr ? p.month : arabicMonths$1.includes(p.month) ? englishMonths[arabicMonths$1.indexOf(p.month)] : p.month)}</td><td>${escapeHtml(p.year)}</td><td>${escapeHtml(p.service)}</td><td>${escapeHtml(p.quantity)}</td><td>${escapeHtml(p.price)}</td><td>${escapeHtml(p.total)}</td><td>${escapeHtml(p.paid)}</td><td>${escapeHtml(p.balance)}</td><td>${escapeHtml(p.status)}</td></tr>`;
+		}).join("");
+		const footerRow = statement.rows.length > 0 ? `<tr class="totals"><td>${isAr ? "الإجمالي" : "Total"}</td><td></td><td></td><td></td><td></td><td>${escapeHtml(totalDue)}</td><td>${escapeHtml(totalPaid)}</td><td>${escapeHtml(totalBalance)}</td><td></td></tr>` : `<tr><td colspan="9" class="empty">${isAr ? "لا توجد معاملات مالية مسجلة." : "No financial transactions recorded."}</td></tr>`;
+		tableHtml = `
+      <table>
+        <thead><tr>${headers.map((h) => `<th>${escapeHtml(h)}</th>`).join("")}</tr></thead>
+        <tbody>${bodyRows}${footerRow}</tbody>
+      </table>
+    `;
+	}
+	return `<!doctype html>
+<html dir="${dir}" lang="${params.lang}">
+<head>
+<meta charset="utf-8" />
+<style>
+  body { font-family: sans-serif; color: #1e293b; padding: 24px; }
+  h1 { color: ${brand.primaryColor}; font-size: 18px; }
+  .meta { color: #64748b; font-size: 12px; margin-bottom: 16px; }
+  table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+  th, td { border: 1px solid #cbd5e1; padding: 6px 10px; font-size: 13px; text-align: ${isAr ? "right" : "left"}; }
+  th { background: ${brand.primaryColor}; color: #fff; }
+  tr.totals { font-weight: bold; background: #f1f5f9; }
+  .empty { color: #94a3b8; font-style: italic; text-align: center; }
+  @media print { body { padding: 0; } }
+</style>
+</head>
+<body>
+  <h1>${escapeHtml(brand.orgName)}</h1>
+  <div class="meta">${escapeHtml(title)}<br/>${escapeHtml(filterSummary)}<br/>${isAr ? "تاريخ الإنشاء" : "Generated"}: ${escapeHtml(now)}</div>
+  ${tableHtml}
+</body>
+</html>`;
+}
+//#endregion
 //#region electron/ipc/exportIPC.ts
 function checkAuth$2() {
 	const user = getCurrentUser();
@@ -26721,6 +27332,9 @@ async function executeExport(type, params, defaultFilename) {
 	const filters = params.format === "xlsx" ? [{
 		name: "Excel Workbook (*.xlsx)",
 		extensions: ["xlsx"]
+	}] : params.format === "csv" ? [{
+		name: "CSV (*.csv)",
+		extensions: ["csv"]
 	}] : [{
 		name: "PDF Document (*.pdf)",
 		extensions: ["pdf"]
@@ -26733,6 +27347,7 @@ async function executeExport(type, params, defaultFilename) {
 	if (result.canceled || !result.filePath) return null;
 	const savePath = result.filePath;
 	if (params.format === "xlsx") await buildExcelFile(type, params, savePath);
+	else if (params.format === "csv") await buildCsvFile(type, params, savePath);
 	else await buildPdfFile(type, params, savePath);
 	return { filePath: savePath };
 }
@@ -26794,6 +27409,21 @@ ipcMain.handle("export:salaries", async (_event, { month, year, format, lang }) 
 		throw new Error(error.message || "Failed to export payroll report");
 	}
 });
+ipcMain.handle("export:payrollReport", async (_event, { month, year, format, lang }) => {
+	try {
+		requireAdmin();
+		const filename = lang === "ar" ? `تقرير_رواتب_المعلمين_${month}_${year}.${format}` : `teacher_payroll_report_${month}_${year}.${format}`;
+		return await executeExport("payrollReport", {
+			month,
+			year,
+			format,
+			lang
+		}, filename);
+	} catch (error) {
+		console.error("Failed to run payroll report export:", error);
+		throw new Error(error.message || "Failed to export payroll report");
+	}
+});
 ipcMain.handle("export:employees", async (_event, { format, lang }) => {
 	try {
 		requireAdmin();
@@ -26819,6 +27449,16 @@ ipcMain.handle("export:expenses", async (_event, { year, format, lang }) => {
 	} catch (error) {
 		console.error("Failed to run expenses export:", error);
 		throw new Error(error.message || "Failed to export expenses report");
+	}
+});
+ipcMain.handle("print:preview", async (_event, args) => {
+	try {
+		if (args.reportType === "payroll" || args.reportType === "expenses") requireAdmin();
+		else checkAuth$2();
+		return { html: buildPrintPreviewHtml(args.reportType, args) };
+	} catch (error) {
+		console.error("Failed to build print preview:", error);
+		throw new Error(error.message || "Failed to build print preview");
 	}
 });
 //#endregion

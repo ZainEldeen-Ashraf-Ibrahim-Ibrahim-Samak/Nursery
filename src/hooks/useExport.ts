@@ -52,9 +52,9 @@ export function useExport() {
     error,
     exportFull: (year: number, format: 'xlsx' | 'pdf') => handleExport('full', { year, format }),
     exportMonth: (month: string, year: number, format: 'xlsx' | 'pdf') => handleExport('month', { month, year, format }),
-    exportChild: (childId: number, format: 'xlsx' | 'pdf') => handleExport('child', { childId, format }),
+    exportChild: (childId: number, format: 'xlsx' | 'pdf' | 'csv') => handleExport('child', { childId, format }),
     exportSalaries: (month: string, year: number, format: 'xlsx' | 'pdf') => handleExport('salaries', { month, year, format }),
-    exportExpenses: (year: number, format: 'xlsx' | 'pdf') => handleExport('expenses', { year, format }),
+    exportExpenses: (year: number, format: 'xlsx' | 'pdf' | 'csv') => handleExport('expenses', { year, format }),
     exportEmployees: (format: 'xlsx' | 'pdf') => handleExport('employees', { format }),
     clearError: () => setError(null),
   }

@@ -445,6 +445,89 @@ function generateSalariesSheet(
   autofitColumns(worksheet)
 }
 
+// Feature 007, FR-005 — the attendance-based Payroll Report (teacher_payments ledger, feature
+// 006), distinct from the legacy salary_payments-based "salaries" sheet above.
+export function generatePayrollReportSheet(
+  worksheet: ExcelJS.Worksheet,
+  workbook: ExcelJS.Workbook,
+  brand: ExportHeaderData,
+  params: { month: number; year: number },
+  lang: string
+) {
+  const db = getDb()
+  const { month, year } = params
+  const monthLabel = lang === 'ar' ? arabicMonths[month - 1] : englishMonths[month - 1]
+  const title = lang === 'ar'
+    ? `تقرير رواتب المعلمين لشهر ${monthLabel} ${year}`
+    : `Teacher Payroll Report: ${monthLabel} ${year}`
+
+  const startRow = writeBrandingHeader(worksheet, workbook, brand, lang, title)
+
+  const headers = lang === 'ar'
+    ? ['اسم المعلم', 'عدد الجلسات المدفوعة', 'تكلفة الجلسة', 'إجمالي الراتب']
+    : ['Teacher Name', 'Sessions Paid', 'Session Rate', 'Total Salary']
+
+  const headerRow = worksheet.getRow(startRow)
+  headerRow.values = headers
+  headerRow.height = 24
+  headerRow.eachCell((cell) => {
+    cell.font = { name: FONT_FAMILY, size: 10, bold: true }
+    cell.fill = HEADER_FILL
+    cell.border = BORDER_STYLE
+    cell.alignment = { vertical: 'middle', horizontal: 'center' }
+  })
+
+  const mm = String(month).padStart(2, '0')
+  const monthKey = `${year}-${mm}`
+  const rows = db.prepare(`
+    SELECT
+      e.id as teacher_id,
+      e.name as teacher_name,
+      e.teacher_session_rate as session_cost,
+      COUNT(tp.id) as sessions_paid,
+      COALESCE(SUM(tp.session_cost), 0) as total_salary
+    FROM employees e
+    JOIN teacher_payments tp ON tp.teacher_id = e.id
+      AND tp.status IN ('pending','paid')
+      AND strftime('%Y-%m', tp.attendance_date) = ?
+    GROUP BY e.id
+    ORDER BY e.name ASC
+  `).all(monthKey) as any[]
+
+  let currentRow = startRow + 1
+  for (const r of rows) {
+    const dataRow = worksheet.getRow(currentRow)
+    dataRow.values = [r.teacher_name, r.sessions_paid, r.session_cost, r.total_salary]
+    dataRow.height = 20
+    currentRow++
+  }
+
+  if (rows.length > 0) {
+    const totalRow = worksheet.getRow(currentRow)
+    totalRow.height = 22
+    totalRow.getCell(1).value = lang === 'ar' ? 'إجمالي الرواتب' : 'Total Payroll'
+    totalRow.getCell(4).value = { formula: `SUM(D${startRow + 1}:D${currentRow - 1})` }
+    for (let c = 1; c <= 4; c++) {
+      const cell = totalRow.getCell(c)
+      cell.fill = SUBHEADER_FILL
+      cell.border = BORDER_STYLE
+      cell.font = { name: FONT_FAMILY, size: 10, bold: true }
+      if (c === 3 || c === 4) {
+        cell.numFmt = '#,##0.00'
+        cell.alignment = { horizontal: 'right' }
+      }
+    }
+  } else {
+    // FR-009: a valid, clearly-labeled empty report rather than an error.
+    const emptyRow = worksheet.getRow(currentRow)
+    emptyRow.getCell(1).value = lang === 'ar' ? 'لا توجد جلسات مدفوعة لهذا الشهر.' : 'No paid sessions for this month.'
+    emptyRow.getCell(1).font = { name: FONT_FAMILY, size: 10, italic: true, color: { argb: 'FF94A3B8' } }
+  }
+
+  formatGridData(worksheet, startRow + 1, [3, 4])
+  autofitColumns(worksheet)
+}
+
 // Generate employees roster sheet
 function generateEmployeesSheet(
   worksheet: ExcelJS.Worksheet,
@@ -603,6 +686,154 @@ function generateExpensesSheet(
   autofitColumns(worksheet)
 }
 
+// Feature 007, FR-007 — the full Child Report: personal info, attendance history, assigned
+// teacher(s), enrolled services, computed attendance percentage, payment history, and notes, all
+// in one document (distinct from generateChildStatementSheet below, which covers only the
+// financial/payment ledger for the Financial Transactions Report).
+function generateChildReportSheet(
+  worksheet: ExcelJS.Worksheet,
+  workbook: ExcelJS.Workbook,
+  brand: ExportHeaderData,
+  childId: number,
+  lang: string
+) {
+  const db = getDb()
+  const isAr = lang === 'ar'
+  const child = db.prepare('SELECT * FROM children WHERE id = ?').get(childId) as any
+  if (!child) throw new Error(`Child not found with ID: ${childId}`)
+
+  const title = isAr ? `تقرير الطفل الشامل: ${child.name}` : `Full Child Report: ${child.name}`
+  let row = writeBrandingHeader(worksheet, workbook, brand, lang, title)
+
+  const sectionTitle = (text: string) => {
+    const cell = worksheet.getCell(`A${row}`)
+    cell.value = text
+    cell.font = { name: FONT_FAMILY, size: 12, bold: true, color: { argb: 'FFFFFFFF' } }
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F766E' } }
+    worksheet.mergeCells(`A${row}:F${row}`)
+    row += 1
+  }
+  const kv = (label: string, value: unknown) => {
+    worksheet.getCell(`A${row}`).value = label
+    worksheet.getCell(`A${row}`).font = { name: FONT_FAMILY, size: 10, bold: true, color: { argb: 'FF64748B' } }
+    worksheet.getCell(`B${row}`).value = value ?? ''
+    worksheet.getCell(`B${row}`).font = { name: FONT_FAMILY, size: 10 }
+    row += 1
+  }
+
+  // ── Personal Information ──────────────────────────────────────────────
+  sectionTitle(isAr ? '📋 البيانات الشخصية' : '📋 Personal Information')
+  kv(isAr ? 'الاسم' : 'Name', child.name)
+  kv(isAr ? 'ولي الأمر' : 'Guardian', child.guardian)
+  kv(isAr ? 'هاتف ولي الأمر' : 'Guardian Phone', child.guardian_phone)
+  kv(isAr ? 'تاريخ التسجيل' : 'Registration Date', child.reg_date)
+  kv(isAr ? 'الحالة' : 'Status', child.is_active ? (isAr ? 'نشط' : 'Active') : (isAr ? 'غير نشط' : 'Inactive'))
+  row += 1
+
+  // ── Enrolled Services & Assigned Teacher(s) ─────────────────────────────
+  sectionTitle(isAr ? '🏷️ الخدمات المشترك بها والمعلمون' : '🏷️ Enrolled Services & Assigned Teacher(s)')
+  const services = db.prepare(`
+    SELECT cs.service, cs.unit, cs.price, e.name as teacher_name
+    FROM child_services cs
+    LEFT JOIN employees e ON e.id = cs.teacher_id
+    WHERE cs.child_id = ?
+  `).all(childId) as any[]
+  const svcHeaderRow = worksheet.getRow(row)
+  svcHeaderRow.values = isAr ? ['الخدمة', 'الوحدة', 'السعر', 'المعلم'] : ['Service', 'Unit', 'Price', 'Teacher']
+  svcHeaderRow.eachCell((cell) => {
+    cell.font = { name: FONT_FAMILY, size: 10, bold: true }
+    cell.fill = SUBHEADER_FILL
+    cell.border = BORDER_STYLE
+  })
+  row += 1
+  for (const s of services) {
+    worksheet.getRow(row).values = [s.service, s.unit, s.price, s.teacher_name || (isAr ? 'بدون معلم' : 'No teacher')]
+    row += 1
+  }
+  if (services.length === 0) {
+    worksheet.getCell(`A${row}`).value = isAr ? 'لا توجد خدمات مسجلة.' : 'No services enrolled.'
+    worksheet.getCell(`A${row}`).font = { name: FONT_FAMILY, size: 10, italic: true, color: { argb: 'FF94A3B8' } }
+    row += 1
+  }
+  row += 1
+
+  // ── Attendance History & Percentage ─────────────────────────────────────
+  sectionTitle(isAr ? '📅 سجل الحضور' : '📅 Attendance History')
+  const attendanceRows = db.prepare(`
+    SELECT
+      ss.session_date as attendance_date,
+      e.name as teacher_name,
+      ar.teacher_status,
+      ar.status as child_status
+    FROM attendance_records ar
+    JOIN scheduled_sessions ss ON ss.id = ar.session_id
+    LEFT JOIN employees e ON e.id = ar.attended_teacher_id
+    WHERE ar.child_id = ?
+    ORDER BY ss.session_date DESC
+  `).all(childId) as any[]
+
+  const attendedCount = attendanceRows.filter((r) => r.child_status === 'attended').length
+  const attendancePct = attendanceRows.length > 0 ? Math.round((attendedCount / attendanceRows.length) * 100) : null
+  kv(isAr ? 'نسبة الحضور' : 'Attendance Percentage', attendancePct != null ? `${attendancePct}%` : (isAr ? 'غير متاح' : 'N/A'))
+
+  const attHeaderRow = worksheet.getRow(row)
+  attHeaderRow.values = isAr
+    ? ['التاريخ', 'المعلم', 'حالة المعلم', 'حالة الطفل']
+    : ['Date', 'Teacher', 'Teacher Status', 'Child Status']
+  attHeaderRow.eachCell((cell) => {
+    cell.font = { name: FONT_FAMILY, size: 10, bold: true }
+    cell.fill = SUBHEADER_FILL
+    cell.border = BORDER_STYLE
+  })
+  row += 1
+  for (const a of attendanceRows) {
+    worksheet.getRow(row).values = [a.attendance_date, a.teacher_name || '', a.teacher_status || '', a.child_status]
+    row += 1
+  }
+  if (attendanceRows.length === 0) {
+    worksheet.getCell(`A${row}`).value = isAr ? 'لا يوجد سجل حضور بعد.' : 'No attendance history yet.'
+    worksheet.getCell(`A${row}`).font = { name: FONT_FAMILY, size: 10, italic: true, color: { argb: 'FF94A3B8' } }
+    row += 1
+  }
+  row += 1
+
+  // ── Payment History ──────────────────────────────────────────────────
+  sectionTitle(isAr ? '💰 السجل المالي' : '💰 Payment History')
+  const existingPayments = db.prepare(
+    'SELECT month, year, service, unit, quantity, price, total, paid, balance, status, notes FROM payments WHERE child_id = ?'
+  ).all(childId) as any[]
+  const statement = getChildStatement(child, existingPayments, new Date())
+
+  const payHeaderRow = worksheet.getRow(row)
+  payHeaderRow.values = isAr
+    ? ['الشهر', 'السنة', 'الخدمة', 'الإجمالي', 'المدفوع', 'الرصيد', 'الحالة']
+    : ['Month', 'Year', 'Service', 'Total', 'Paid', 'Balance', 'Status']
+  payHeaderRow.eachCell((cell) => {
+    cell.font = { name: FONT_FAMILY, size: 10, bold: true }
+    cell.fill = SUBHEADER_FILL
+    cell.border = BORDER_STYLE
+  })
+  row += 1
+  for (const p of statement.rows) {
+    worksheet.getRow(row).values = [translateMonthName(p.month, lang), p.year, p.service, p.total, p.paid, p.balance, p.status]
+    row += 1
+  }
+  if (statement.rows.length === 0) {
+    worksheet.getCell(`A${row}`).value = isAr ? 'لا توجد معاملات مالية مسجلة.' : 'No financial transactions recorded.'
+    worksheet.getCell(`A${row}`).font = { name: FONT_FAMILY, size: 10, italic: true, color: { argb: 'FF94A3B8' } }
+    row += 1
+  }
+  row += 1
+
+  // ── Notes ────────────────────────────────────────────────────────────
+  sectionTitle(isAr ? '📝 ملاحظات' : '📝 Notes')
+  worksheet.getCell(`A${row}`).value = child.notes || (isAr ? 'لا توجد ملاحظات.' : 'No notes.')
+  worksheet.getCell(`A${row}`).font = { name: FONT_FAMILY, size: 10 }
+  worksheet.mergeCells(`A${row}:F${row}`)
+
+  autofitColumns(worksheet)
+}
+
 // Generate single child statement sheet
 function generateChildStatementSheet(
   worksheet: ExcelJS.Worksheet,
@@ -719,7 +950,7 @@ function translateMonthName(mAr: string, lang: string): string {
 
 // Main excel builder handler mapping to paths
 export async function buildExcelFile(
-  type: 'full' | 'month' | 'child' | 'salaries' | 'expenses' | 'employees',
+  type: 'full' | 'month' | 'child' | 'childReport' | 'salaries' | 'expenses' | 'employees' | 'payrollReport',
   params: any,
   savePath: string
 ): Promise<void> {
@@ -732,12 +963,23 @@ export async function buildExcelFile(
     const sheetName = lang === 'ar' ? `${month} ${year}` : `${month}_${year}`
     const ws = workbook.addWorksheet(sheetName)
     generateMonthSheet(ws, workbook, brand, month, year, lang)
-  } 
-  
+  }
+
+  else if (type === 'payrollReport') {
+    const sheetName = lang === 'ar' ? 'تقرير الرواتب' : 'Payroll Report'
+    const ws = workbook.addWorksheet(sheetName)
+    generatePayrollReportSheet(ws, workbook, brand, { month: Number(params.month), year: Number(params.year) }, lang)
+  }
+
+  else if (type === 'childReport') {
+    const ws = workbook.addWorksheet(lang === 'ar' ? 'تقرير الطفل' : 'Child Report')
+    generateChildReportSheet(ws, workbook, brand, Number(childId), lang)
+  }
+
   else if (type === 'child') {
     const ws = workbook.addWorksheet(lang === 'ar' ? 'كشف الحساب' : 'Statement')
     generateChildStatementSheet(ws, workbook, brand, Number(childId), lang)
-  } 
+  }
   
   else if (type === 'salaries') {
     const sheetName = lang === 'ar' ? 'الرواتب' : 'Salaries'

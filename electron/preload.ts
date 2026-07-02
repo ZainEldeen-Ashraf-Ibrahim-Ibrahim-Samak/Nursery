@@ -119,6 +119,13 @@ const api = {
     salaries: (args: any) => ipcRenderer.invoke('export:salaries', args),
     expenses: (args: any) => ipcRenderer.invoke('export:expenses', args),
     employees: (args: any) => ipcRenderer.invoke('export:employees', args),
+    payrollReport: (args: { month: number; year: number; format: 'xlsx' | 'pdf' | 'csv'; lang: string }) =>
+      ipcRenderer.invoke('export:payrollReport', args),
+  },
+
+  // Print (feature 007) — branded HTML print preview, handed to window.print()
+  print: {
+    preview: (args: { reportType: 'payroll' | 'expenses' | 'child'; [key: string]: any }) => ipcRenderer.invoke('print:preview', args) as Promise<{ html: string }>,
   },
 
   // Storage

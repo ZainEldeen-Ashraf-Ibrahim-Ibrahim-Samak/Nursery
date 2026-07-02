@@ -11,7 +11,7 @@ vi.mock('electron', () => {
   return {
     ipcMain: {
       handle: (channel: string, callback: Function) => {
-        ;(globalThis as any).__brandingHandlers[channel] = callback
+        ; (globalThis as any).__brandingHandlers[channel] = callback
       }
     },
     app: {
@@ -131,7 +131,7 @@ describe('Branding IPC Contract tests', () => {
       expect(result.ok).toBe(true)
 
       branding = await getHandler(null)
-      expect(branding.brand_app_name).toBe('أكاديمية زين الدين')
+      expect(branding.brand_app_name).toBe('أكاديمية مهند الليثي')
       expect(branding.brand_primary_color).toBe('#0f766e')
     })
   })

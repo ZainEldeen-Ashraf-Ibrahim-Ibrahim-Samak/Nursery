@@ -38,8 +38,8 @@ export async function seedDatabase(db: Db): Promise<void> {
       { key: 'work_hours', value: seedSetting('SEED_WORK_HOURS', '8') },
 
       // Branding Settings
-      { key: 'brand_app_name', value: seedSetting('SEED_BRAND_APP_NAME', 'أكاديمية زين الدين') },
-      { key: 'brand_org_name', value: seedSetting('SEED_BRAND_ORG_NAME', 'مركز زين الدين للتوحد ونمو الطفل') },
+      { key: 'brand_app_name', value: seedSetting('SEED_BRAND_APP_NAME', 'أكاديمية مهند الليثي') },
+      { key: 'brand_org_name', value: seedSetting('SEED_BRAND_ORG_NAME', 'مركز مهند الليثي للتوحد ونمو الطفل') },
       { key: 'brand_tagline', value: 'رعاية متميزة وتنمية مهارات طفلك' },
       { key: 'brand_primary_color', value: seedSetting('SEED_BRAND_PRIMARY_COLOR', '#0f766e') }, // Teal 700
       { key: 'brand_accent_color', value: seedSetting('SEED_BRAND_ACCENT_COLOR', '#f59e0b') },  // Amber 500
@@ -52,18 +52,18 @@ export async function seedDatabase(db: Db): Promise<void> {
       { key: 'brand_logo_path', value: '' },
       { key: 'brand_icon_path', value: '' },
     ]
-    
+
     const insertSetting = db.prepare(`
       INSERT OR IGNORE INTO settings (key, value, updated_at, synced)
       VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), 0)
     `)
-    
+
     const transaction = db.transaction(() => {
       for (const setting of defaultSettings) {
         insertSetting.run(setting.key, setting.value)
       }
     })
-    
+
     transaction()
   }
 

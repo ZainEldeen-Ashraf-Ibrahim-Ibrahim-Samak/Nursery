@@ -34,6 +34,8 @@ export default function ChildStatement() {
   
   const [isExportingExcel, setIsExportingExcel] = useState(false)
   const [isExportingPdf, setIsExportingPdf] = useState(false)
+  const [isExportingCsv, setIsExportingCsv] = useState(false)
+  const [isPrinting, setIsPrinting] = useState(false)
 
   // Attendance history (FR-019) — admin-only, per the access-control clarification.
   const { user } = useAuthStore()
@@ -81,13 +83,11 @@ export default function ChildStatement() {
   }
 
   // Handle statement exports
-  const handleExport = async (format: 'xlsx' | 'pdf') => {
+  const handleExport = async (format: 'xlsx' | 'pdf' | 'csv') => {
     if (!id) return
-    if (format === 'xlsx') {
-      setIsExportingExcel(true)
-    } else {
-      setIsExportingPdf(true)
-    }
+    if (format === 'xlsx') setIsExportingExcel(true)
+    else if (format === 'pdf') setIsExportingPdf(true)
+    else setIsExportingCsv(true)
 
     try {
       const result = await exportChild(Number(id), format)
@@ -99,6 +99,23 @@ export default function ChildStatement() {
     } finally {
       setIsExportingExcel(false)
       setIsExportingPdf(false)
+      setIsExportingCsv(false)
+    }
+  }
+
+  const handlePrint = async () => {
+    if (!id) return
+    setIsPrinting(true)
+    try {
+      const { html } = await window.api.print.preview({ reportType: 'child', childId: Number(id), lang: i18n.language })
+      const win = window.open('', '_blank')
+      if (!win) return
+      win.document.write(html)
+      win.document.close()
+      win.focus()
+      win.print()
+    } finally {
+      setIsPrinting(false)
     }
   }
 
@@ -263,12 +280,21 @@ export default function ChildStatement() {
         </div>
 
         {/* Export Buttons */}
-        <div className="flex items-center gap-2 w-full md:w-auto">
+        <div className="flex items-center gap-2 w-full md:w-auto flex-wrap">
+          <Button
+            variant="outline"
+            onClick={handlePrint}
+            isLoading={isPrinting}
+            disabled={isExportingExcel || isExportingPdf || isExportingCsv}
+            className="flex-1 md:flex-initial"
+          >
+            🖨️ {i18n.language === 'ar' ? 'طباعة' : 'Print'}
+          </Button>
           <Button
             variant="outline"
             onClick={() => handleExport('xlsx')}
             isLoading={isExportingExcel}
-            disabled={isExportingPdf}
+            disabled={isExportingPdf || isExportingCsv}
             className="flex-1 md:flex-initial"
           >
             📊 {i18n.language === 'ar' ? 'تصدير إكسل' : 'Excel Export'}
@@ -277,10 +303,19 @@ export default function ChildStatement() {
             variant="outline"
             onClick={() => handleExport('pdf')}
             isLoading={isExportingPdf}
-            disabled={isExportingExcel}
+            disabled={isExportingExcel || isExportingCsv}
             className="flex-1 md:flex-initial"
           >
             📕 {i18n.language === 'ar' ? 'تصدير PDF' : 'PDF Export'}
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => handleExport('csv')}
+            isLoading={isExportingCsv}
+            disabled={isExportingExcel || isExportingPdf}
+            className="flex-1 md:flex-initial"
+          >
+            📃 CSV
           </Button>
         </div>
       </div>

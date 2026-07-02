@@ -7,6 +7,7 @@ import { Select } from '../../components/ui/Select.js'
 import { Table } from '../../components/ui/Table.js'
 import { Alert } from '../../components/ui/Alert.js'
 import { LoadingSpinner } from '../../components/ui/LoadingSpinner.js'
+import { ReportActions } from '../../components/reports/ReportActions.js'
 import type { PayrollReportRow } from '../../types/index.js'
 
 const arabicMonths = [
@@ -46,11 +47,33 @@ export default function PayrollReport() {
 
   const totalSalary = rows.reduce((sum, r) => sum + r.total_salary, 0)
 
+  const handlePrint = async () => {
+    const { html } = await window.api.print.preview({ reportType: 'payroll', month, year, lang: i18n.language })
+    const win = window.open('', '_blank')
+    if (!win) return
+    win.document.write(html)
+    win.document.close()
+    win.focus()
+    win.print()
+  }
+
+  const handleExport = async (format: 'pdf' | 'xlsx' | 'csv') => {
+    await window.api.export.payrollReport({ month, year, format, lang: i18n.language })
+  }
+
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
+      <div className="flex justify-between items-center flex-wrap gap-3">
         <h2 className="text-xl font-bold text-slate-800">{isAr ? 'تقرير رواتب المعلمين الشهري' : 'Monthly Teacher Payroll Report'}</h2>
-        <Button variant="outline" onClick={() => navigate('/salaries')}>{isAr ? '← عودة للرواتب' : '← Back to Salaries'}</Button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <ReportActions
+            onPrint={handlePrint}
+            onExportPdf={() => handleExport('pdf')}
+            onExportExcel={() => handleExport('xlsx')}
+            onExportCsv={() => handleExport('csv')}
+          />
+          <Button variant="outline" onClick={() => navigate('/salaries')}>{isAr ? '← عودة للرواتب' : '← Back to Salaries'}</Button>
+        </div>
       </div>
 
       <Card className="p-4 flex flex-wrap gap-3 items-end">
