@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { friendlyError } from '../utils/errors.js'
 import type { ScheduledSession } from '../types/index.js'
 
 interface SessionsState {
@@ -23,7 +24,7 @@ export const useSessionsStore = create<SessionsState>((set) => ({
       const rows = await window.api.sessions.list({ from, to })
       set({ sessions: rows, isLoading: false })
     } catch (err: any) {
-      set({ error: err.message || 'Failed to fetch sessions', isLoading: false })
+      set({ error: friendlyError(err, 'Failed to fetch sessions'), isLoading: false })
     }
   },
 
@@ -33,7 +34,7 @@ export const useSessionsStore = create<SessionsState>((set) => ({
       set((s) => ({ sessions: [...s.sessions, result] }))
       return result
     } catch (err: any) {
-      set({ error: err.message || 'Failed to add session' })
+      set({ error: friendlyError(err, 'Failed to add session') })
       return null
     }
   },
@@ -44,7 +45,7 @@ export const useSessionsStore = create<SessionsState>((set) => ({
       set((s) => ({ sessions: s.sessions.map((x) => (x.id === id ? result : x)) }))
       return result
     } catch (err: any) {
-      set({ error: err.message || 'Failed to update session' })
+      set({ error: friendlyError(err, 'Failed to update session') })
       return null
     }
   },
@@ -55,7 +56,7 @@ export const useSessionsStore = create<SessionsState>((set) => ({
       set((s) => ({ sessions: s.sessions.filter((x) => x.id !== id) }))
       return true
     } catch (err: any) {
-      set({ error: err.message || 'Failed to delete session' })
+      set({ error: friendlyError(err, 'Failed to delete session') })
       return false
     }
   },

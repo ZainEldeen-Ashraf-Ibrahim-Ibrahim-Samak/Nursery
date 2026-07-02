@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { friendlyError } from '../utils/errors.js'
 import type { Child } from '../types/index.js'
 
 interface ChildrenFilters {
@@ -56,10 +57,7 @@ export const useChildrenStore = create<ChildrenState>((set, get) => ({
       })
       set({ children: results, isLoading: false })
     } catch (err: any) {
-      let errorMsg = err.message || 'Failed to fetch children'
-      if (errorMsg.includes('Error invoking remote method')) {
-        errorMsg = errorMsg.replace(/^Error: Error invoking remote method '[^']+':\s*/, '')
-      }
+      const errorMsg = friendlyError(err, 'Failed to fetch children')
       set({ error: errorMsg, isLoading: false })
     }
   },
@@ -74,10 +72,7 @@ export const useChildrenStore = create<ChildrenState>((set, get) => ({
       }))
       return result
     } catch (err: any) {
-      let errorMsg = err.message || 'Failed to add child'
-      if (errorMsg.includes('Error invoking remote method')) {
-        errorMsg = errorMsg.replace(/^Error: Error invoking remote method '[^']+':\s*/, '')
-      }
+      const errorMsg = friendlyError(err, 'Failed to add child')
       set({ error: errorMsg, isLoading: false })
       return null
     }
@@ -93,10 +88,7 @@ export const useChildrenStore = create<ChildrenState>((set, get) => ({
       }))
       return result
     } catch (err: any) {
-      let errorMsg = err.message || 'Failed to update child'
-      if (errorMsg.includes('Error invoking remote method')) {
-        errorMsg = errorMsg.replace(/^Error: Error invoking remote method '[^']+':\s*/, '')
-      }
+      const errorMsg = friendlyError(err, 'Failed to update child')
       set({ error: errorMsg, isLoading: false })
       return null
     }
@@ -123,10 +115,7 @@ export const useChildrenStore = create<ChildrenState>((set, get) => ({
       }
       return true
     } catch (err: any) {
-      let errorMsg = err.message || 'Failed to deactivate child'
-      if (errorMsg.includes('Error invoking remote method')) {
-        errorMsg = errorMsg.replace(/^Error: Error invoking remote method '[^']+':\s*/, '')
-      }
+      const errorMsg = friendlyError(err, 'Failed to deactivate child')
       set({ error: errorMsg, isLoading: false })
       return false
     }

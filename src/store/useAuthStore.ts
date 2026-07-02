@@ -39,10 +39,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       return true
     } catch (err: any) {
       // Extract the raw message if wrapped by Electron IPC
-      let errorMsg = err.message || 'Login failed'
-      if (errorMsg.includes('Error invoking remote method')) {
-        errorMsg = errorMsg.replace(/^Error: Error invoking remote method '[^']+':\s*/, '')
-      }
+      const errorMsg = friendlyError(err, 'Login failed')
       set({ error: errorMsg, isLoading: false })
       return false
     }

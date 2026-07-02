@@ -283,6 +283,12 @@ ipcMain.handle('payments:update', async (_event, { id, quantity, paid, notes, pa
     const payment = db.prepare('SELECT * FROM payments WHERE id = ?').get(id) as any
     if (!payment) throw new Error('سجل الدفع غير موجود / Payment record not found')
 
+    const user = getCurrentUser()
+    const isAdmin = user?.role === 'admin'
+    if (quantity !== undefined && Number(quantity) !== payment.quantity && !isAdmin) {
+      throw new Error('FORBIDDEN: غير مسموح بتعديل الكمية لغير المسؤولين / Forbidden: Only admins can edit quantity')
+    }
+
     const newQuantity = quantity !== undefined ? Number(quantity) : payment.quantity
     const newPaid = paid !== undefined ? Number(paid) : payment.paid
     const newNotes = notes !== undefined ? notes : payment.notes
@@ -466,6 +472,60 @@ ipcMain.handle('payments:deleteTransaction', async (_event, { id }) => {
   } catch (error: any) {
     console.error('Failed to delete payment transaction:', error)
     throw new Error(error.message || 'Failed to delete payment transaction')
+  }
+})
+
+// Deletes a specific set of payment records (and their installment transactions), for the
+// "delete selected" action in the payments list. Admin-only, matching the other destructive
+// payment operations in this file.
+ipcMain.handle('payments:deleteBulk', async (_event, { ids }) => {
+  try {
+    requireAdmin()
+    const db = getDb()
+    const list: number[] = Array.isArray(ids) ? ids.map(Number).filter((n) => Number.isFinite(n)) : []
+    if (list.length === 0) return { ok: true, deleted: 0 }
+
+    let deleted = 0
+    db.transaction(() => {
+      const placeholders = list.map(() => '?').join(',')
+      db.prepare(`DELETE FROM payment_transactions WHERE payment_id IN (${placeholders})`).run(...list)
+      const res = db.prepare(`DELETE FROM payments WHERE id IN (${placeholders})`).run(...list)
+      deleted = Number(res.changes)
+    })()
+
+    return { ok: true, deleted }
+  } catch (error: any) {
+    console.error('Failed to delete selected payments:', error)
+    throw new Error(error.message || 'Failed to delete selected payments')
+  }
+})
+
+// Deletes every payment record for a given month/year — the "delete all" action, scoped to
+// whatever period is currently open in the payments list (never the whole table at once).
+ipcMain.handle('payments:deleteAll', async (_event, { month, year }) => {
+  try {
+    requireAdmin()
+    const db = getDb()
+    if (!month || !year) {
+      throw new Error('Month and year are required')
+    }
+
+    let deleted = 0
+    db.transaction(() => {
+      const rows = db.prepare('SELECT id FROM payments WHERE month = ? AND year = ?').all(month, year) as { id: number }[]
+      if (rows.length > 0) {
+        const ids = rows.map((r) => r.id)
+        const placeholders = ids.map(() => '?').join(',')
+        db.prepare(`DELETE FROM payment_transactions WHERE payment_id IN (${placeholders})`).run(...ids)
+      }
+      const res = db.prepare(`DELETE FROM payments WHERE month = ? AND year = ?`).run(month, year)
+      deleted = Number(res.changes)
+    })()
+
+    return { ok: true, deleted }
+  } catch (error: any) {
+    console.error('Failed to delete all payments for period:', error)
+    throw new Error(error.message || 'Failed to delete all payments for period')
   }
 })
 

@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { friendlyError } from '../utils/errors.js'
 import type { Employee, SalaryPayment } from '../types/index.js'
 
 interface SalariesState {
@@ -70,10 +71,7 @@ export const useSalariesStore = create<SalariesState>((set, get) => ({
       const result = await window.api.employees.get()
       set({ employees: result, isLoading: false })
     } catch (err: any) {
-      let errorMsg = err.message || 'Failed to fetch employees'
-      if (errorMsg.includes('Error invoking remote method')) {
-        errorMsg = errorMsg.replace(/^Error: Error invoking remote method '[^']+':\s*/, '')
-      }
+      const errorMsg = friendlyError(err, 'Failed to fetch employees')
       set({ error: errorMsg, isLoading: false })
     }
   },
@@ -88,10 +86,7 @@ export const useSalariesStore = create<SalariesState>((set, get) => ({
       }))
       return result
     } catch (err: any) {
-      let errorMsg = err.message || 'Failed to add employee'
-      if (errorMsg.includes('Error invoking remote method')) {
-        errorMsg = errorMsg.replace(/^Error: Error invoking remote method '[^']+':\s*/, '')
-      }
+      const errorMsg = friendlyError(err, 'Failed to add employee')
       set({ error: errorMsg, isLoading: false })
       return null
     }
@@ -107,10 +102,7 @@ export const useSalariesStore = create<SalariesState>((set, get) => ({
       }))
       return result
     } catch (err: any) {
-      let errorMsg = err.message || 'Failed to update employee'
-      if (errorMsg.includes('Error invoking remote method')) {
-        errorMsg = errorMsg.replace(/^Error: Error invoking remote method '[^']+':\s*/, '')
-      }
+      const errorMsg = friendlyError(err, 'Failed to update employee')
       set({ error: errorMsg, isLoading: false })
       return null
     }
@@ -126,10 +118,7 @@ export const useSalariesStore = create<SalariesState>((set, get) => ({
       }))
       return true
     } catch (err: any) {
-      let errorMsg = err.message || 'Failed to deactivate employee'
-      if (errorMsg.includes('Error invoking remote method')) {
-        errorMsg = errorMsg.replace(/^Error: Error invoking remote method '[^']+':\s*/, '')
-      }
+      const errorMsg = friendlyError(err, 'Failed to deactivate employee')
       set({ error: errorMsg, isLoading: false })
       return false
     }
@@ -143,10 +132,7 @@ export const useSalariesStore = create<SalariesState>((set, get) => ({
       const result = await window.api.salary.get({ month, year })
       set({ salaryPayments: result, isLoading: false })
     } catch (err: any) {
-      let errorMsg = err.message || 'Failed to fetch salary payments'
-      if (errorMsg.includes('Error invoking remote method')) {
-        errorMsg = errorMsg.replace(/^Error: Error invoking remote method '[^']+':\s*/, '')
-      }
+      const errorMsg = friendlyError(err, 'Failed to fetch salary payments')
       set({ error: errorMsg, isLoading: false })
     }
   },
@@ -171,10 +157,7 @@ export const useSalariesStore = create<SalariesState>((set, get) => ({
       })
       return result
     } catch (err: any) {
-      let errorMsg = err.message || 'Failed to update salary payment'
-      if (errorMsg.includes('Error invoking remote method')) {
-        errorMsg = errorMsg.replace(/^Error: Error invoking remote method '[^']+':\s*/, '')
-      }
+      const errorMsg = friendlyError(err, 'Failed to update salary payment')
       set({ error: errorMsg, isLoading: false })
       return null
     }

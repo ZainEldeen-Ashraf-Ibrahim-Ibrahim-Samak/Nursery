@@ -9,9 +9,9 @@ export function getChildStatement(child: any, existingPayments: any[], currentDa
   let startMonth = regDate.getMonth()
 
   if (isNaN(startYear) || isNaN(startMonth)) {
-    const now = new Date()
-    startYear = now.getFullYear()
-    startMonth = now.getMonth()
+    const fallbackDate = currentDate || new Date()
+    startYear = fallbackDate.getFullYear()
+    startMonth = fallbackDate.getMonth()
   }
 
   const endYear = currentDate.getFullYear()

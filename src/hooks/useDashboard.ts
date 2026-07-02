@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import { friendlyError } from '../utils/errors.js'
 
 export interface DashboardKPIs {
   invoiced: number
@@ -63,10 +64,7 @@ export function useDashboard(month: string, year: number) {
       setData(result)
     } catch (err: any) {
       console.error('Failed to fetch dashboard:', err)
-      let errorMsg = err.message || 'Failed to fetch dashboard data'
-      if (errorMsg.includes('Error invoking remote method')) {
-        errorMsg = errorMsg.replace(/^Error: Error invoking remote method '[^']+':\s*/, '')
-      }
+      const errorMsg = friendlyError(err, 'Failed to fetch dashboard data')
       setError(errorMsg)
     } finally {
       setIsLoading(false)

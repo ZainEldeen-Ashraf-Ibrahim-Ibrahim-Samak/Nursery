@@ -7,6 +7,7 @@ import { Button } from '../../components/ui/Button.js'
 import { Modal } from '../../components/ui/Modal.js'
 import { Input } from '../../components/ui/Input.js'
 import { Alert } from '../../components/ui/Alert.js'
+import { Select } from '../../components/ui/Select.js'
 import type { ScheduledSession, AttendanceRecord, AttendanceStatus } from '../../types/index.js'
 
 export default function SessionsList() {
@@ -39,9 +40,10 @@ export default function SessionsList() {
   // Search state
   const [sessionsSearch, setSessionsSearch] = useState('')
   const [attendanceSearch, setAttendanceSearch] = useState('')
+  const [hasTeacherFilter, setHasTeacherFilter] = useState<'all' | 'yes' | 'no'>('all')
+  const [attendanceHasTeacherOnly, setAttendanceHasTeacherOnly] = useState(false)
 
   // Teacher filters
-  const [hasTeacherFilter, setHasTeacherFilter] = useState(false)
   const [teacherFilterId, setTeacherFilterId] = useState<number | ''>('')
 
   // Attendance sheet state
@@ -118,7 +120,7 @@ export default function SessionsList() {
     await fetchSheet(sessionId)
     setAttendanceEdits({})
     setAttendanceSearch('')
-    setHasTeacherFilter(false)
+    setAttendanceHasTeacherOnly(false)
     setTeacherFilterId('')
   }
 
@@ -258,6 +260,9 @@ export default function SessionsList() {
   }
 
   const filteredSessions = sessions.filter(s => {
+    if (hasTeacherFilter === 'yes' && (!s.teachers || s.teachers.length === 0)) return false
+    if (hasTeacherFilter === 'no' && s.teachers && s.teachers.length > 0) return false
+
     if (!sessionsSearch) return true
     const searchLower = sessionsSearch.toLowerCase()
     return (
@@ -315,6 +320,18 @@ export default function SessionsList() {
             placeholder={isAr ? 'المجموعة، الملاحظات...' : 'Group, notes...'}
             value={sessionsSearch}
             onChange={(e) => setSessionsSearch(e.target.value)}
+          />
+        </div>
+        <div className="w-full sm:w-48">
+          <Select
+            label={isAr ? 'يوجد معلم' : 'Has Teacher'}
+            value={hasTeacherFilter}
+            onChange={(e) => setHasTeacherFilter(e.target.value as 'all' | 'yes' | 'no')}
+            options={[
+              { value: 'all', label: isAr ? 'الكل' : 'All' },
+              { value: 'yes', label: isAr ? 'نعم' : 'Yes' },
+              { value: 'no', label: isAr ? 'لا' : 'No' }
+            ]}
           />
         </div>
       </div>
@@ -410,7 +427,7 @@ export default function SessionsList() {
           return [...map.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name))
         })()
         const filteredSheet = sheet.filter(rec => {
-          if (hasTeacherFilter && !rec.teacher_id) return false
+          if (attendanceHasTeacherOnly && !rec.teacher_id) return false
           if (teacherFilterId !== '' && rec.teacher_id !== teacherFilterId) return false
           if (!attendanceSearch) return true
           const searchLower = attendanceSearch.toLowerCase()
@@ -485,8 +502,8 @@ export default function SessionsList() {
               <label className="flex items-center gap-2 text-sm text-slate-600 whitespace-nowrap select-none">
                 <input
                   type="checkbox"
-                  checked={hasTeacherFilter}
-                  onChange={(e) => setHasTeacherFilter(e.target.checked)}
+                  checked={attendanceHasTeacherOnly}
+                  onChange={(e) => setAttendanceHasTeacherOnly(e.target.checked)}
                   className="rounded border-slate-300"
                 />
                 {isAr ? 'لديه معلم' : 'Has teacher'}

@@ -21926,9 +21926,9 @@ function getChildStatement(child, existingPayments, currentDate) {
 	let startYear = regDate.getFullYear();
 	let startMonth = regDate.getMonth();
 	if (isNaN(startYear) || isNaN(startMonth)) {
-		const now = /* @__PURE__ */ new Date();
-		startYear = now.getFullYear();
-		startMonth = now.getMonth();
+		const fallbackDate = currentDate || /* @__PURE__ */ new Date();
+		startYear = fallbackDate.getFullYear();
+		startMonth = fallbackDate.getMonth();
 	}
 	const endYear = currentDate.getFullYear();
 	const endMonth = currentDate.getMonth();
@@ -22593,6 +22593,8 @@ ipcMain.handle("payments:update", async (_event, { id, quantity, paid, notes, pa
 		if (!id) throw new Error("Payment ID is required");
 		const payment = db.prepare("SELECT * FROM payments WHERE id = ?").get(id);
 		if (!payment) throw new Error("سجل الدفع غير موجود / Payment record not found");
+		const isAdmin = getCurrentUser()?.role === "admin";
+		if (quantity !== void 0 && Number(quantity) !== payment.quantity && !isAdmin) throw new Error("FORBIDDEN: غير مسموح بتعديل الكمية لغير المسؤولين / Forbidden: Only admins can edit quantity");
 		const newQuantity = quantity !== void 0 ? Number(quantity) : payment.quantity;
 		const newPaid = paid !== void 0 ? Number(paid) : payment.paid;
 		const newNotes = notes !== void 0 ? notes : payment.notes;
@@ -22725,6 +22727,56 @@ ipcMain.handle("payments:deleteTransaction", async (_event, { id }) => {
 	} catch (error) {
 		console.error("Failed to delete payment transaction:", error);
 		throw new Error(error.message || "Failed to delete payment transaction");
+	}
+});
+ipcMain.handle("payments:deleteBulk", async (_event, { ids }) => {
+	try {
+		requireAdmin();
+		const db = getDb();
+		const list = Array.isArray(ids) ? ids.map(Number).filter((n) => Number.isFinite(n)) : [];
+		if (list.length === 0) return {
+			ok: true,
+			deleted: 0
+		};
+		let deleted = 0;
+		db.transaction(() => {
+			const placeholders = list.map(() => "?").join(",");
+			db.prepare(`DELETE FROM payment_transactions WHERE payment_id IN (${placeholders})`).run(...list);
+			const res = db.prepare(`DELETE FROM payments WHERE id IN (${placeholders})`).run(...list);
+			deleted = Number(res.changes);
+		})();
+		return {
+			ok: true,
+			deleted
+		};
+	} catch (error) {
+		console.error("Failed to delete selected payments:", error);
+		throw new Error(error.message || "Failed to delete selected payments");
+	}
+});
+ipcMain.handle("payments:deleteAll", async (_event, { month, year }) => {
+	try {
+		requireAdmin();
+		const db = getDb();
+		if (!month || !year) throw new Error("Month and year are required");
+		let deleted = 0;
+		db.transaction(() => {
+			const rows = db.prepare("SELECT id FROM payments WHERE month = ? AND year = ?").all(month, year);
+			if (rows.length > 0) {
+				const ids = rows.map((r) => r.id);
+				const placeholders = ids.map(() => "?").join(",");
+				db.prepare(`DELETE FROM payment_transactions WHERE payment_id IN (${placeholders})`).run(...ids);
+			}
+			const res = db.prepare(`DELETE FROM payments WHERE month = ? AND year = ?`).run(month, year);
+			deleted = Number(res.changes);
+		})();
+		return {
+			ok: true,
+			deleted
+		};
+	} catch (error) {
+		console.error("Failed to delete all payments for period:", error);
+		throw new Error(error.message || "Failed to delete all payments for period");
 	}
 });
 ipcMain.handle("payments:deleteForChild", async (_event, { child_id, month, year }) => {
@@ -26897,7 +26949,7 @@ ipcMain.handle("storage:import", async (event, args) => {
 			if (result.canceled || result.filePaths.length === 0) throw new Error("Import cancelled");
 			filePath = result.filePaths[0];
 		}
-		const { importFromWorkbook } = await import("./importService-D6aYz79l.js");
+		const { importFromWorkbook } = await import("./importService-RFu9XWou.js");
 		return { imported: await importFromWorkbook(filePath, progressReporter(event, "import")) };
 	} catch (error) {
 		console.error("storage:import error:", error);
@@ -28383,13 +28435,6 @@ ipcMain.handle("attendance:getSheet", async (_event, { session_id }) => {
 	try {
 		checkAuth$6();
 		const db = getDb();
-		const user = getCurrentUser();
-		if (user?.role !== "admin") {
-			const emp = db.prepare("SELECT id FROM employees WHERE name = ?").get(user?.name ?? "");
-			if (emp) {
-				if (!db.prepare("SELECT 1 FROM session_teachers WHERE session_id = ? AND employee_id = ?").get(session_id, emp.id)) throw new Error("غير مصرح لك بالوصول / Not authorized for this session");
-			}
-		}
 		const session = db.prepare("SELECT session_date FROM scheduled_sessions WHERE id = ?").get(session_id);
 		let dayOfWeek = null;
 		if (session?.session_date) {

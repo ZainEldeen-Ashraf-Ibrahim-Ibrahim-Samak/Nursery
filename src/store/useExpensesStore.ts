@@ -51,10 +51,7 @@ export const useExpensesStore = create<ExpensesState>((set, get) => ({
       const result = await window.api.expenses.get({ year })
       set({ expenses: result, isLoading: false })
     } catch (err: any) {
-      let errorMsg = err.message || 'Failed to fetch expenses'
-      if (errorMsg.includes('Error invoking remote method')) {
-        errorMsg = errorMsg.replace(/^Error: Error invoking remote method '[^']+': /, '')
-      }
+      const errorMsg = friendlyError(err, 'Failed to fetch expenses')
       set({ error: errorMsg, isLoading: false })
     }
   },
@@ -79,10 +76,7 @@ export const useExpensesStore = create<ExpensesState>((set, get) => ({
       })
       return result
     } catch (err: any) {
-      let errorMsg = err.message || 'Failed to update expense'
-      if (errorMsg.includes('Error invoking remote method')) {
-        errorMsg = errorMsg.replace(/^Error: Error invoking remote method '[^']+': /, '')
-      }
+      const errorMsg = friendlyError(err, 'Failed to update expense')
       set({ error: errorMsg, isLoading: false })
       return null
     }
@@ -96,10 +90,7 @@ export const useExpensesStore = create<ExpensesState>((set, get) => ({
       await get().fetchExpenses()
       return true
     } catch (err: any) {
-      let errorMsg = err.message || 'Failed to add expense item'
-      if (errorMsg.includes('Error invoking remote method')) {
-        errorMsg = errorMsg.replace(/^Error: Error invoking remote method '[^']+': /, '')
-      }
+      const errorMsg = friendlyError(err, 'Failed to add expense item')
       set({ error: errorMsg, isLoading: false })
       return false
     }
@@ -115,10 +106,7 @@ export const useExpensesStore = create<ExpensesState>((set, get) => ({
       }))
       return true
     } catch (err: any) {
-      let errorMsg = err.message || 'Failed to remove expense item'
-      if (errorMsg.includes('Error invoking remote method')) {
-        errorMsg = errorMsg.replace(/^Error: Error invoking remote method '[^']+': /, '')
-      }
+      const errorMsg = friendlyError(err, 'Failed to remove expense item')
       set({ error: errorMsg, isLoading: false })
       return false
     }

@@ -13,6 +13,7 @@ interface PaymentRowProps {
   onUpdate: (id: number, quantity: number, paid: number, notes: string, payment_method_id?: number | null) => Promise<any>
   paymentMethods: PaymentMethod[]
   onOpenInstallments: () => void
+  isAdmin?: boolean
 }
 
 export default function PaymentRow({
@@ -22,6 +23,7 @@ export default function PaymentRow({
   onUpdate,
   paymentMethods,
   onOpenInstallments,
+  isAdmin = false,
 }: PaymentRowProps) {
   const { t, i18n } = useTranslation()
   const isAr = i18n.language === 'ar'
@@ -158,9 +160,9 @@ export default function PaymentRow({
           onChange={(e) => setLocalQty(e.target.value)}
           onBlur={handleBlur}
           onKeyDown={handleKeyDown}
-          disabled={isSaving}
+          disabled={isSaving || !isAdmin}
           min={0.1}
-          className="w-16 px-2 py-1 text-center font-mono border border-slate-300 rounded focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+          className="w-16 px-2 py-1 text-center font-mono border border-slate-300 rounded focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary disabled:bg-slate-50 disabled:text-slate-500 disabled:border-slate-200"
         />
       </td>
 

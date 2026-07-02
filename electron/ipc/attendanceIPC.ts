@@ -19,14 +19,6 @@ ipcMain.handle('attendance:getSheet', async (_event, { session_id }) => {
   try {
     checkAuth()
     const db = getDb()
-    const user = getCurrentUser()
-    if (user?.role !== 'admin') {
-      const emp = db.prepare('SELECT id FROM employees WHERE name = ?').get(user?.name ?? '') as any
-      if (emp) {
-        const isTeacher = db.prepare('SELECT 1 FROM session_teachers WHERE session_id = ? AND employee_id = ?').get(session_id, emp.id)
-        if (!isTeacher) throw new Error('غير مصرح لك بالوصول / Not authorized for this session')
-      }
-    }
     // Get session date to compute weekday
     const session = db.prepare('SELECT session_date FROM scheduled_sessions WHERE id = ?').get(session_id) as any
     let dayOfWeek: number | null = null

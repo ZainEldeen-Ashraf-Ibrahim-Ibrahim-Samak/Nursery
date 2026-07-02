@@ -12,6 +12,7 @@ import { Stat } from '../../components/ui/Stat.js'
 import { Button } from '../../components/ui/Button.js'
 import { Select } from '../../components/ui/Select.js'
 import { Alert } from '../../components/ui/Alert.js'
+import { Modal } from '../../components/ui/Modal.js'
 import * as React from 'react'
 
 const arabicMonths = [
@@ -65,6 +66,8 @@ export default function MonthlyPayments() {
     updatePayment,
     bulkPay,
     deleteChildPayments,
+    deleteSelectedPayments,
+    deleteAllPayments,
     clearError,
   } = usePaymentsStore()
 
@@ -171,6 +174,24 @@ export default function MonthlyPayments() {
     if (count > 0) setSelectedIds([])
   }
 
+  // Delete selected / delete all — admin-only, both gated behind a confirmation panel since
+  // they permanently remove payment history (and any linked installment transactions).
+  const [confirmDeleteMode, setConfirmDeleteMode] = useState<'selected' | 'all' | null>(null)
+  const [isDeletingPayments, setIsDeletingPayments] = useState(false)
+
+  const handleConfirmDelete = async () => {
+    setIsDeletingPayments(true)
+    if (confirmDeleteMode === 'selected') {
+      const count = await deleteSelectedPayments(selectedIds)
+      if (count > 0) setSelectedIds([])
+    } else if (confirmDeleteMode === 'all') {
+      await deleteAllPayments()
+      setSelectedIds([])
+    }
+    setIsDeletingPayments(false)
+    setConfirmDeleteMode(null)
+  }
+
   // Update row
   const handleUpdateRow = async (id: number, quantity: number, paid: number, notes: string, payment_method_id?: number | null) => {
     return await updatePayment({ id, quantity, paid, notes, payment_method_id })
@@ -257,6 +278,11 @@ export default function MonthlyPayments() {
           <Button variant="primary" onClick={handleGenerate} isLoading={isGenerating}>
             ⚡ {t('generate_payments')}
           </Button>
+          {isAdmin && payments.length > 0 && (
+            <Button variant="danger" onClick={() => setConfirmDeleteMode('all')}>
+              🗑️ {isAr ? 'حذف الكل' : 'Delete All'}
+            </Button>
+          )}
         </div>
       </div>
 
@@ -433,6 +459,11 @@ export default function MonthlyPayments() {
                   <Button variant="secondary" size="sm" onClick={handleBulkPay} isLoading={isBulkPaying}>
                     💵 {t('bulk_pay_selected')}
                   </Button>
+                  {isAdmin && (
+                    <Button variant="danger" size="sm" onClick={() => setConfirmDeleteMode('selected')}>
+                      🗑️ {isAr ? 'حذف المحدد' : 'Delete Selected'}
+                    </Button>
+                  )}
                 </div>
               </div>
             )}
@@ -543,6 +574,7 @@ export default function MonthlyPayments() {
                             onUpdate={handleUpdateRow}
                             paymentMethods={paymentMethods}
                             onOpenInstallments={() => setInstallmentsFor(payment)}
+                            isAdmin={isAdmin}
                           />
                         ))}
                       </React.Fragment>
@@ -569,6 +601,32 @@ export default function MonthlyPayments() {
           onChanged={() => fetchPayments()}
         />
       )}
+
+      <Modal
+        isOpen={confirmDeleteMode !== null}
+        onClose={() => setConfirmDeleteMode(null)}
+        title={isAr ? 'تأكيد الحذف' : 'Confirm Deletion'}
+        footer={
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => setConfirmDeleteMode(null)} disabled={isDeletingPayments}>
+              {isAr ? 'إلغاء' : 'Cancel'}
+            </Button>
+            <Button variant="danger" onClick={handleConfirmDelete} isLoading={isDeletingPayments}>
+              {isAr ? 'حذف نهائياً' : 'Delete Permanently'}
+            </Button>
+          </div>
+        }
+      >
+        <p className="text-sm text-slate-600">
+          {confirmDeleteMode === 'selected'
+            ? (isAr
+                ? `سيتم حذف ${selectedIds.length} مطالبة نهائياً، بما في ذلك أي دفعات جزئية مسجلة عليها. لا يمكن التراجع عن هذا الإجراء.`
+                : `This will permanently delete ${selectedIds.length} payment record${selectedIds.length !== 1 ? 's' : ''}, including any partial-payment installments recorded on them. This cannot be undone.`)
+            : (isAr
+                ? `سيتم حذف جميع مطالبات ${monthOptions.find(m => m.value === currentMonth)?.label ?? currentMonth} ${currentYear} (${payments.length} مطالبة) نهائياً، بما في ذلك أي دفعات جزئية مسجلة عليها. لا يمكن التراجع عن هذا الإجراء.`
+                : `This will permanently delete ALL payments for ${monthOptions.find(m => m.value === currentMonth)?.label ?? currentMonth} ${currentYear} (${payments.length} record${payments.length !== 1 ? 's' : ''}), including any partial-payment installments recorded on them. This cannot be undone.`)}
+        </p>
+      </Modal>
     </div>
   )
 }

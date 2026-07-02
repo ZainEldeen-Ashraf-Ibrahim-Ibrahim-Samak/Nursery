@@ -121,7 +121,7 @@ describe('Payments IPC Contract tests', () => {
       VALUES (100, 10, 10, 'يونيو', 2026, 'حضانة', 'شهر', 1, 2000, 2000, 0, 2000, 'unpaid', '2026-06-06', '2026-06-06', 1)
     `).run()
 
-    employeeSession()
+    adminSession()
 
     // Update with quantity=1.5, paid=2000, and trying to cheat price=100
     const updated = await updateHandler(null, {
@@ -138,6 +138,42 @@ describe('Payments IPC Contract tests', () => {
     expect(updated.balance).toBe(1000) // 3000 - 2000
     expect(updated.status).toBe('partial')
     expect(updated.synced).toBe(0) // reset synced to 0
+  })
+
+  it('should block employees from updating payment quantity, but allow updating paid and notes', async () => {
+    const updateHandler = getHandlers()['payments:update']
+
+    db.prepare(`
+      INSERT INTO children (id, name, guardian, guardian_phone, service, unit, price, reg_date, created_at, updated_at, is_active)
+      VALUES (11, 'طفل 11', 'ولي 11', '011', 'حضانة', 'شهر', 2000, '2026-01-01', '2026-06-06', '2026-06-06', 1)
+    `).run()
+
+    db.prepare(`
+      INSERT INTO child_services (id, child_id, service, unit, price, created_at, updated_at)
+      VALUES (11, 11, 'حضانة', 'شهر', 2000, '2026-06-06', '2026-06-06')
+    `).run()
+
+    db.prepare(`
+      INSERT INTO payments (id, child_id, service_id, month, year, service, unit, quantity, price, total, paid, balance, status, created_at, updated_at, synced)
+      VALUES (101, 11, 11, 'يونيو', 2026, 'حضانة', 'شهر', 1, 2000, 2000, 0, 2000, 'unpaid', '2026-06-06', '2026-06-06', 1)
+    `).run()
+
+    employeeSession()
+
+    // 1. Changing quantity is blocked
+    await expect(updateHandler(null, {
+      id: 101,
+      quantity: 1.5
+    })).rejects.toThrow('FORBIDDEN')
+
+    // 2. Changing paid and notes is allowed
+    const updated = await updateHandler(null, {
+      id: 101,
+      paid: 500,
+      notes: 'Some note'
+    })
+    expect(updated.paid).toBe(500)
+    expect(updated.notes).toBe('Some note')
   })
 
   it('should support bulk recording full payments', async () => {

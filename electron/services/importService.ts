@@ -289,16 +289,16 @@ export async function importFromWorkbook(
   const insertChildService = db.prepare(`
     INSERT INTO child_services (child_id, service, unit, price, created_at, updated_at, synced)
     VALUES (?, ?, ?, ?, ?, ?, 0)
-    ON CONFLICT(child_id, service) DO NOTHING
   `)
   const findChildService = db.prepare(
     'SELECT id FROM child_services WHERE child_id = ? AND service = ?'
   )
   /** Ensure a (child, service) enrollment exists; return its id. Idempotent. */
   function ensureEnrollment(childId: number, service: string, unit: string, price: number): number | null {
-    insertChildService.run(childId, service, unit, price, now, now)
     const row = findChildService.get(childId, service) as any
-    return row ? row.id : null
+    if (row) return row.id
+    const res = insertChildService.run(childId, service, unit, price, now, now)
+    return Number(res.lastInsertRowid)
   }
   const findEmployee = db.prepare('SELECT id FROM employees WHERE name = ?')
   const insertEmployee = db.prepare(`

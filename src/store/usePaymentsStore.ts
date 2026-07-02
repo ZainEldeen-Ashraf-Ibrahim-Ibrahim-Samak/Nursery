@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { friendlyError } from '../utils/errors.js'
 import type { Payment } from '../types/index.js'
 
 interface PaymentSummary {
@@ -27,6 +28,8 @@ interface PaymentsState {
   }) => Promise<Payment | null>
   bulkPay: (ids: number[], payment_method_id?: number | null) => Promise<number>
   deleteChildPayments: (child_id: number) => Promise<boolean>
+  deleteSelectedPayments: (ids: number[]) => Promise<number>
+  deleteAllPayments: () => Promise<number>
   clearError: () => void
 }
 
@@ -76,10 +79,7 @@ export const usePaymentsStore = create<PaymentsState>((set, get) => ({
         isLoading: false,
       })
     } catch (err: any) {
-      let errorMsg = err.message || 'Failed to fetch payments'
-      if (errorMsg.includes('Error invoking remote method')) {
-        errorMsg = errorMsg.replace(/^Error: Error invoking remote method '[^']+':\s*/, '')
-      }
+      const errorMsg = friendlyError(err, 'Failed to fetch payments')
       set({ error: errorMsg, isLoading: false })
     }
   },
@@ -93,10 +93,7 @@ export const usePaymentsStore = create<PaymentsState>((set, get) => ({
       await get().fetchPayments()
       return result.created
     } catch (err: any) {
-      let errorMsg = err.message || 'Failed to generate payments'
-      if (errorMsg.includes('Error invoking remote method')) {
-        errorMsg = errorMsg.replace(/^Error: Error invoking remote method '[^']+':\s*/, '')
-      }
+      const errorMsg = friendlyError(err, 'Failed to generate payments')
       set({ error: errorMsg, isLoading: false })
       return 0
     }
@@ -114,10 +111,7 @@ export const usePaymentsStore = create<PaymentsState>((set, get) => ({
       
       return result
     } catch (err: any) {
-      let errorMsg = err.message || 'Failed to update payment'
-      if (errorMsg.includes('Error invoking remote method')) {
-        errorMsg = errorMsg.replace(/^Error: Error invoking remote method '[^']+':\s*/, '')
-      }
+      const errorMsg = friendlyError(err, 'Failed to update payment')
       set({ error: errorMsg, isLoading: false })
       return null
     }
@@ -130,10 +124,7 @@ export const usePaymentsStore = create<PaymentsState>((set, get) => ({
       await get().fetchPayments()
       return result.updated
     } catch (err: any) {
-      let errorMsg = err.message || 'Failed to process bulk payments'
-      if (errorMsg.includes('Error invoking remote method')) {
-        errorMsg = errorMsg.replace(/^Error: Error invoking remote method '[^']+':\s*/, '')
-      }
+      const errorMsg = friendlyError(err, 'Failed to process bulk payments')
       set({ error: errorMsg, isLoading: false })
       return 0
     }
@@ -148,12 +139,37 @@ export const usePaymentsStore = create<PaymentsState>((set, get) => ({
       await get().fetchPayments()
       return true
     } catch (err: any) {
-      let errorMsg = err.message || 'Failed to delete child payments'
-      if (errorMsg.includes('Error invoking remote method')) {
-        errorMsg = errorMsg.replace(/^Error: Error invoking remote method '[^']+':\s*/, '')
-      }
+      const errorMsg = friendlyError(err, 'Failed to delete child payments')
       set({ error: errorMsg, isLoading: false })
       return false
+    }
+  },
+
+  deleteSelectedPayments: async (ids) => {
+    set({ isLoading: true, error: null })
+    try {
+      const result = await window.api.payments.deleteBulk(ids)
+      await get().fetchPayments()
+      return result.deleted
+    } catch (err: any) {
+      const errorMsg = friendlyError(err, 'Failed to delete selected payments')
+      set({ error: errorMsg, isLoading: false })
+      return 0
+    }
+  },
+
+  deleteAllPayments: async () => {
+    set({ isLoading: true, error: null })
+    try {
+      const month = get().currentMonth
+      const year = get().currentYear
+      const result = await window.api.payments.deleteAll({ month, year })
+      await get().fetchPayments()
+      return result.deleted
+    } catch (err: any) {
+      const errorMsg = friendlyError(err, 'Failed to delete all payments')
+      set({ error: errorMsg, isLoading: false })
+      return 0
     }
   },
 

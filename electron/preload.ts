@@ -64,6 +64,8 @@ const api = {
     addTransaction: (args: { payment_id: number; amount: number; payment_method_id?: number | null; paid_date?: string | null; notes?: string | null }) => ipcRenderer.invoke('payments:addTransaction', args),
     deleteTransaction: (id: number) => ipcRenderer.invoke('payments:deleteTransaction', { id }),
     deleteForChild: (args: { child_id: number; month: string; year: number }) => ipcRenderer.invoke('payments:deleteForChild', args),
+    deleteBulk: (ids: number[]) => ipcRenderer.invoke('payments:deleteBulk', { ids }) as Promise<{ ok: boolean; deleted: number }>,
+    deleteAll: (args: { month: string; year: number }) => ipcRenderer.invoke('payments:deleteAll', args) as Promise<{ ok: boolean; deleted: number }>,
   },
 
   // Salaries
