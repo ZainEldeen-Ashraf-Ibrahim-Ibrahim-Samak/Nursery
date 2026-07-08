@@ -68,6 +68,16 @@ const api = {
     deleteAll: (args: { month: string; year: number }) => ipcRenderer.invoke('payments:deleteAll', args) as Promise<{ ok: boolean; deleted: number }>,
   },
 
+  dailyPayments: {
+    get: (args: { billing_date: string }) => ipcRenderer.invoke('daily_payments:get', args),
+    generate: (args: { billing_date: string }) => ipcRenderer.invoke('daily_payments:generate', args),
+    update: (args: { id: number; quantity?: number; paid?: number; notes?: string; payment_method_id?: number | null }) => ipcRenderer.invoke('daily_payments:update', args),
+    bulkPay: (args: { ids: number[]; payment_method_id?: number | null }) => ipcRenderer.invoke('daily_payments:bulkPay', args),
+    deleteBulk: (args: { ids: number[] }) => ipcRenderer.invoke('daily_payments:deleteBulk', args),
+    deleteAll: (args: { billing_date: string }) => ipcRenderer.invoke('daily_payments:deleteAll', args),
+    deleteForChild: (args: { child_id: number; billing_date: string }) => ipcRenderer.invoke('daily_payments:deleteForChild', args),
+  },
+
   // Salaries
   employees: {
     get: () => ipcRenderer.invoke('employees:get'),

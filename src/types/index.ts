@@ -95,6 +95,35 @@ export interface Payment {
   transaction_count?: number
 }
 
+export interface DailyPayment {
+  id: number
+  child_id: number
+  service_id?: number | null
+  billing_date: string
+  month: string
+  year: number
+  service: string
+  unit: string
+  quantity: number
+  price: number
+  total: number
+  paid: number
+  balance: number
+  status: PaymentStatus
+  notes?: string | null
+  payment_method_id?: number | null
+  payment_method_name?: string | null
+  created_at: string
+  updated_at: string
+  synced: number
+
+  // Optional join fields for UI
+  child_name?: string
+  child_guardian?: string
+  child_guardian_phone?: string
+  child_is_active?: number
+}
+
 export interface PaymentTransaction {
   id: number
   payment_id: number

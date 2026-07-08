@@ -220,6 +220,7 @@ ipcMain.handle('storage:clear', async (_event, { confirm }) => {
         db.prepare('DELETE FROM notifications').run()
         db.prepare('DELETE FROM imported_snapshots').run()
         db.prepare('DELETE FROM employees').run()
+        db.prepare('DELETE FROM daily_payments').run()
       })
       clearAll()
     } finally {

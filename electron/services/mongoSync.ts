@@ -591,6 +591,34 @@ const notificationSchema = new Schema({
 export const NotificationModel: Model<any> = mongoose.models['sync_notifications'] ||
   mongoose.model('sync_notifications', notificationSchema)
 
+// ── Daily Payments ───────────────────────────────────────────────────────────────
+
+const dailyPaymentSchema = new Schema({
+  id: { type: Number, required: true, unique: true },
+  child_id: Number,
+  service_id: Number,
+  billing_date: String,
+  month: String,
+  year: Number,
+  service: String,
+  unit: String,
+  quantity: Number,
+  price: Number,
+  total: Number,
+  paid: Number,
+  balance: Number,
+  status: String,
+  notes: String,
+  payment_method_id: Number,
+  payment_method_name: String,
+  created_at: String,
+  updated_at: String,
+  synced: Number
+}, sharedOptions)
+
+export const DailyPaymentModel: Model<any> = mongoose.models['sync_daily_payments'] ||
+  mongoose.model('sync_daily_payments', dailyPaymentSchema)
+
 // ── Entity registry ───────────────────────────────────────────────────────────
 
 export const SYNC_ENTITIES: {
@@ -623,4 +651,5 @@ export const SYNC_ENTITIES: {
   { name: 'attendance_edit_requests', model: AttendanceEditRequestModel, table: 'attendance_edit_requests' },
   { name: 'attendance_audit_log', model: AttendanceAuditLogModel, table: 'attendance_audit_log' },
   { name: 'notifications', model: NotificationModel, table: 'notifications' },
+  { name: 'daily_payments', model: DailyPaymentModel, table: 'daily_payments' },
 ]

@@ -19,6 +19,7 @@ import ChildStatement from './pages/Children/ChildStatement.js'
 import MonthlyPayments from './pages/Payments/MonthlyPayments.js'
 import SalariesList from './pages/Salaries/SalariesList.js'
 import PayrollReport from './pages/Salaries/PayrollReport.js'
+import DailyPayments from './pages/Payments/DailyPayments.js'
 import EmployeesList from './pages/Employees/EmployeesList.js'
 import ExpensesList from './pages/Expenses/ExpensesList.js'
 import TargetPlanning from './pages/Target/TargetPlanning.js'
@@ -90,6 +91,7 @@ export default function App() {
 
           {/* Payments - Both read/write */}
           <Route path="payments" element={<MonthlyPayments />} />
+          <Route path="payments/daily" element={<DailyPayments />} />
 
           {/* Employees - Admin only */}
           <Route

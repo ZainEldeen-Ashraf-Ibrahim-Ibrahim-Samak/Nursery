@@ -888,6 +888,42 @@ const migrations: Migration[] = [
         db.exec(`CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, read_at);`)
       } catch { /* ignore */ }
     }
+  },
+  {
+    name: '034_daily_payments',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS daily_payments (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          child_id INTEGER NOT NULL,
+          service_id INTEGER,
+          billing_date TEXT NOT NULL,
+          month TEXT NOT NULL,
+          year INTEGER NOT NULL,
+          service TEXT NOT NULL,
+          unit TEXT NOT NULL,
+          quantity REAL DEFAULT 1,
+          price REAL NOT NULL,
+          total REAL NOT NULL,
+          paid REAL DEFAULT 0,
+          balance REAL NOT NULL,
+          status TEXT NOT NULL,
+          notes TEXT,
+          payment_method_id INTEGER,
+          payment_method_name TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          synced INTEGER DEFAULT 0,
+          FOREIGN KEY (child_id) REFERENCES children(id) ON DELETE CASCADE,
+          UNIQUE (child_id, service_id, billing_date)
+        );
+      `)
+      try {
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_daily_payments_date ON daily_payments(billing_date);`)
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_daily_payments_child ON daily_payments(child_id, billing_date);`)
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_daily_payments_synced ON daily_payments(synced);`)
+      } catch { /* ignore */ }
+    }
   }
 ]
 
