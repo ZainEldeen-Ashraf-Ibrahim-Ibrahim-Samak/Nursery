@@ -36,10 +36,10 @@ ipcMain.handle('sessions:list', async (_event, args) => {
 
 ipcMain.handle('sessions:add', async (_event, input) => {
   try {
-    requireAdmin()
-    const db = getDb()
+    checkAuth()
     const { session_date, service_id = null, group_name = null, notes = null, employee_ids = [] } = input
     if (!session_date) throw new Error('تاريخ الجلسة مطلوب / Session date is required')
+    const db = getDb()
     const now = new Date().toISOString()
     const result = db.prepare(`
       INSERT INTO scheduled_sessions (session_date, service_id, group_name, notes, created_at, updated_at, synced)

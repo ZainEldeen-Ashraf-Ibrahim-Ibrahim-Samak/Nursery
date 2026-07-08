@@ -1,1 +1,0 @@
-in users page the delte button it must delte and add button that decative and active the user 

@@ -27,6 +27,7 @@ export default function SessionsList() {
   // of editing it directly.
   const [editRequestTarget, setEditRequestTarget] = useState<AttendanceRecord | null>(null)
   const [editRequestStatus, setEditRequestStatus] = useState<AttendanceStatus>('attended')
+  const [editRequestExcuseNotes, setEditRequestExcuseNotes] = useState('')
   const [editRequestReason, setEditRequestReason] = useState('')
   const [editRequestError, setEditRequestError] = useState('')
 
@@ -645,6 +646,7 @@ export default function SessionsList() {
                           onClick={() => {
                             setEditRequestTarget(rec)
                             setEditRequestStatus((rec.status as AttendanceStatus) ?? 'attended')
+                            setEditRequestExcuseNotes(rec.excuse_notes || '')
                             setEditRequestReason('')
                             setEditRequestError('')
                           }}
@@ -683,6 +685,7 @@ export default function SessionsList() {
                 const created = await submitEditRequest({
                   attendance_record_id: (editRequestTarget.attendance_id ?? editRequestTarget.id) as number,
                   requested_status: editRequestStatus,
+                  requested_excuse_notes: editRequestStatus === 'absent_excused' ? (editRequestExcuseNotes.trim() || null) : null,
                   reason: editRequestReason.trim()
                 })
                 if (created) {
@@ -725,6 +728,13 @@ export default function SessionsList() {
               ))}
             </div>
           </div>
+          {editRequestStatus === 'absent_excused' && (
+            <Input
+              label={isAr ? 'سبب الغياب بعذر' : 'Excuse reason'}
+              value={editRequestExcuseNotes}
+              onChange={(e) => setEditRequestExcuseNotes(e.target.value)}
+            />
+          )}
           <Input
             label={isAr ? 'سبب التعديل' : 'Reason for change'}
             value={editRequestReason}
