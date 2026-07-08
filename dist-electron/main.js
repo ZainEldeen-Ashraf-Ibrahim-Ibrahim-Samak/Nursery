@@ -29997,10 +29997,10 @@ ipcMain.handle("sessions:list", async (_event, args) => {
 });
 ipcMain.handle("sessions:add", async (_event, input) => {
 	try {
-		requireAdmin();
-		const db = getDb();
+		checkAuth$10();
 		const { session_date, service_id = null, group_name = null, notes = null, employee_ids = [] } = input;
 		if (!session_date) throw new Error("تاريخ الجلسة مطلوب / Session date is required");
+		const db = getDb();
 		const now = (/* @__PURE__ */ new Date()).toISOString();
 		const result = db.prepare(`
       INSERT INTO scheduled_sessions (session_date, service_id, group_name, notes, created_at, updated_at, synced)
@@ -31107,21 +31107,22 @@ function buildMonthEntries(db, year, month) {
     FROM child_services cs
     JOIN children c ON c.id = cs.child_id
     LEFT JOIN employees e ON e.id = cs.teacher_id
-    WHERE cs.lesson_days IS NOT NULL AND cs.lesson_days != '' AND cs.lesson_days != '[]'
-      AND c.is_active = 1
+    WHERE c.is_active = 1
   `).all();
 	for (let d = 1; d <= daysInMonth; d++) {
 		const date = new Date(year, month - 1, d);
 		const iso = date.toISOString().slice(0, 10);
 		const weekday = date.getDay();
 		for (const en of enrollments) {
-			let days;
-			try {
-				days = JSON.parse(en.lesson_days);
-			} catch {
-				continue;
+			if (en.lesson_days != null && en.lesson_days !== "" && en.lesson_days !== "[]") {
+				let days;
+				try {
+					days = JSON.parse(en.lesson_days);
+				} catch {
+					continue;
+				}
+				if (!days.includes(weekday)) continue;
 			}
-			if (!days.includes(weekday)) continue;
 			entries.push({
 				date: iso,
 				user_id: en.child_id,
