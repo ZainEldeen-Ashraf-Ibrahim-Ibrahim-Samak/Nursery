@@ -31,15 +31,18 @@ function buildMonthEntries(db: any, year: number, month: number): CalendarEntry[
   const daysInMonth = new Date(year, month, 0).getDate()
   const entries: CalendarEntry[] = []
 
-  // Child-services-based recurring lessons (lesson_days is a JSON array of weekday numbers 0-6)
+  // Child-services-based recurring lessons. lesson_days is a JSON array of weekday numbers 0-6
+  // when the enrollment has specific scheduled days; enrollments with no lesson_days set have no
+  // day restriction, so — rather than disappearing from the calendar until someone manually
+  // creates a scheduled_sessions row — they are shown on every day of the month (an enrollment is
+  // always "on the calendar", created or not; see spec.md FR-011…FR-013).
   const enrollments = db.prepare(`
     SELECT cs.id as service_row_id, cs.child_id, c.name as child_name, cs.service, cs.teacher_id,
            e.name as teacher_name, cs.lesson_days
     FROM child_services cs
     JOIN children c ON c.id = cs.child_id
     LEFT JOIN employees e ON e.id = cs.teacher_id
-    WHERE cs.lesson_days IS NOT NULL AND cs.lesson_days != '' AND cs.lesson_days != '[]'
-      AND c.is_active = 1
+    WHERE c.is_active = 1
   `).all() as any[]
 
   for (let d = 1; d <= daysInMonth; d++) {
@@ -48,13 +51,17 @@ function buildMonthEntries(db: any, year: number, month: number): CalendarEntry[
     const weekday = date.getDay()
 
     for (const en of enrollments) {
-      let days: number[]
-      try {
-        days = JSON.parse(en.lesson_days)
-      } catch {
-        continue
+      const hasDays = en.lesson_days != null && en.lesson_days !== '' && en.lesson_days !== '[]'
+      if (hasDays) {
+        let days: number[]
+        try {
+          days = JSON.parse(en.lesson_days)
+        } catch {
+          continue
+        }
+        if (!days.includes(weekday)) continue
       }
-      if (!days.includes(weekday)) continue
+      // No lesson_days set → no day restriction, shown every day.
 
       entries.push({
         date: iso,
