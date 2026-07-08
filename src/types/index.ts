@@ -122,11 +122,25 @@ export interface DailyPayment {
   child_guardian?: string
   child_guardian_phone?: string
   child_is_active?: number
+  transaction_count?: number
 }
 
 export interface PaymentTransaction {
   id: number
   payment_id: number
+  amount: number
+  payment_method_id?: number | null
+  payment_method_name?: string | null
+  paid_date?: string | null
+  notes?: string | null
+  created_at: string
+  updated_at: string
+  synced: number
+}
+
+export interface DailyPaymentTransaction {
+  id: number
+  daily_payment_id: number
   amount: number
   payment_method_id?: number | null
   payment_method_name?: string | null

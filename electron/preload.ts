@@ -76,6 +76,9 @@ const api = {
     deleteBulk: (args: { ids: number[] }) => ipcRenderer.invoke('daily_payments:deleteBulk', args),
     deleteAll: (args: { billing_date: string }) => ipcRenderer.invoke('daily_payments:deleteAll', args),
     deleteForChild: (args: { child_id: number; billing_date: string }) => ipcRenderer.invoke('daily_payments:deleteForChild', args),
+    listTransactions: (payment_id: number) => ipcRenderer.invoke('daily_payments:listTransactions', { payment_id }),
+    addTransaction: (args: { payment_id: number; amount: number; payment_method_id?: number | null; paid_date?: string | null; notes?: string | null }) => ipcRenderer.invoke('daily_payments:addTransaction', args),
+    deleteTransaction: (id: number) => ipcRenderer.invoke('daily_payments:deleteTransaction', { id }),
   },
 
   // Salaries

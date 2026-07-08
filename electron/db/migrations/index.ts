@@ -924,6 +924,26 @@ const migrations: Migration[] = [
         db.exec(`CREATE INDEX IF NOT EXISTS idx_daily_payments_synced ON daily_payments(synced);`)
       } catch { /* ignore */ }
     }
+  },
+  {
+    name: '035_daily_payment_transactions',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS daily_payment_transactions (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          daily_payment_id INTEGER NOT NULL REFERENCES daily_payments(id) ON DELETE CASCADE,
+          amount REAL NOT NULL,
+          payment_method_id INTEGER REFERENCES payment_methods(id),
+          payment_method_name TEXT,
+          paid_date TEXT,
+          notes TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          synced INTEGER DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_daily_payment_tx_payment ON daily_payment_transactions(daily_payment_id);
+      `)
+    }
   }
 ]
 

@@ -21,9 +21,10 @@ ipcMain.handle('daily_payments:get', async (_event, { billing_date }) => {
       throw new Error('Billing date is required')
     }
     
-    // Fetch daily payments joined with children names and status
+    // Fetch daily payments joined with children names, status, and transaction count
     const payments = db.prepare(`
-      SELECT p.*, c.name as child_name, c.guardian as child_guardian, c.guardian_phone as child_guardian_phone, c.is_active as child_is_active
+      SELECT p.*, c.name as child_name, c.guardian as child_guardian, c.guardian_phone as child_guardian_phone, c.is_active as child_is_active,
+             (SELECT COUNT(*) FROM daily_payment_transactions WHERE daily_payment_id = p.id) as transaction_count
       FROM daily_payments p
       JOIN children c ON p.child_id = c.id
       WHERE p.billing_date = ?
@@ -300,5 +301,109 @@ ipcMain.handle('daily_payments:deleteForChild', async (_event, { child_id, billi
   } catch (error: any) {
     console.error('Failed to delete daily payments for child:', error)
     throw new Error(error.message || 'Failed to delete daily payments for child')
+  }
+})
+
+// ── Daily payment partial-payment (installment) transactions ──────────────────
+
+function recomputeDailyPaymentFromTransactions(db: any, dailyPaymentId: number) {
+  const payment = db.prepare('SELECT * FROM daily_payments WHERE id = ?').get(dailyPaymentId) as any
+  if (!payment) return
+  const paid = Number(((db.prepare(
+    'SELECT COALESCE(SUM(amount), 0) as s FROM daily_payment_transactions WHERE daily_payment_id = ?'
+  ).get(dailyPaymentId) as any).s ?? 0).toFixed(2))
+  const last = db.prepare(
+    'SELECT payment_method_id, payment_method_name FROM daily_payment_transactions WHERE daily_payment_id = ? ORDER BY paid_date DESC, id DESC LIMIT 1'
+  ).get(dailyPaymentId) as any
+  const { total, balance, status } = calculatePayment(payment.quantity, payment.price, paid)
+  db.prepare(`
+    UPDATE daily_payments SET paid = ?, total = ?, balance = ?, status = ?,
+      payment_method_id = ?, payment_method_name = ?, updated_at = ?, synced = 0
+    WHERE id = ?
+  `).run(paid, total, balance, status, last?.payment_method_id ?? null, last?.payment_method_name ?? null, new Date().toISOString(), dailyPaymentId)
+}
+
+ipcMain.handle('daily_payments:listTransactions', async (_event, { payment_id }) => {
+  try {
+    checkAuth()
+    const db = getDb()
+    if (!payment_id) throw new Error('Payment ID is required')
+    return db.prepare(
+      'SELECT * FROM daily_payment_transactions WHERE daily_payment_id = ? ORDER BY paid_date ASC, id ASC'
+    ).all(payment_id)
+  } catch (error: any) {
+    console.error('Failed to list daily payment transactions:', error)
+    throw new Error(error.message || 'Failed to list daily payment transactions')
+  }
+})
+
+ipcMain.handle('daily_payments:addTransaction', async (_event, { payment_id, amount, payment_method_id = null, paid_date = null, notes = null }) => {
+  try {
+    checkAuth()
+    const db = getDb()
+    if (!payment_id) throw new Error('Payment ID is required')
+    const amt = Number(amount)
+    if (!amt || amt <= 0) throw new Error('المبلغ يجب أن يكون أكبر من صفر / Amount must be greater than zero')
+
+    const payment = db.prepare('SELECT * FROM daily_payments WHERE id = ?').get(payment_id) as any
+    if (!payment) throw new Error('سجل الدفع اليومي غير موجود / Daily payment record not found')
+
+    const resolveMethodName = (id: number | null): string | null => {
+      if (id == null) return null
+      const m = db.prepare('SELECT name FROM payment_methods WHERE id = ?').get(id) as any
+      return m?.name ?? null
+    }
+    const now = new Date().toISOString()
+    const date = paid_date || now.slice(0, 10)
+
+    db.transaction(() => {
+      const existing = (db.prepare(
+        'SELECT COUNT(*) as c FROM daily_payment_transactions WHERE daily_payment_id = ?'
+      ).get(payment_id) as any).c
+      // Seed any pre-existing paid amount as a first transaction
+      if (existing === 0 && Number(payment.paid) > 0) {
+        db.prepare(`
+          INSERT INTO daily_payment_transactions (daily_payment_id, amount, payment_method_id, payment_method_name, paid_date, notes, created_at, updated_at, synced)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
+        `).run(payment_id, Number(payment.paid), payment.payment_method_id ?? null, payment.payment_method_name ?? null,
+          (payment.updated_at || payment.created_at || now).slice(0, 10), 'رصيد سابق / Previous balance', now, now)
+      }
+      db.prepare(`
+        INSERT INTO daily_payment_transactions (daily_payment_id, amount, payment_method_id, payment_method_name, paid_date, notes, created_at, updated_at, synced)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
+      `).run(payment_id, amt, payment_method_id, resolveMethodName(payment_method_id), date, notes, now, now)
+      recomputeDailyPaymentFromTransactions(db, payment_id)
+    })()
+
+    const updated = db.prepare(
+      'SELECT p.*, c.name as child_name, c.guardian as child_guardian, c.guardian_phone as child_guardian_phone FROM daily_payments p JOIN children c ON p.child_id = c.id WHERE p.id = ?'
+    ).get(payment_id)
+    const transactions = db.prepare('SELECT * FROM daily_payment_transactions WHERE daily_payment_id = ? ORDER BY paid_date ASC, id ASC').all(payment_id)
+    return { payment: updated, transactions }
+  } catch (error: any) {
+    console.error('Failed to add daily payment transaction:', error)
+    throw new Error(error.message || 'Failed to add daily payment transaction')
+  }
+})
+
+ipcMain.handle('daily_payments:deleteTransaction', async (_event, { id }) => {
+  try {
+    checkAuth()
+    const db = getDb()
+    if (!id) throw new Error('Transaction ID is required')
+    const tx = db.prepare('SELECT daily_payment_id FROM daily_payment_transactions WHERE id = ?').get(id) as any
+    if (!tx) throw new Error('العملية غير موجودة / Transaction not found')
+    db.transaction(() => {
+      db.prepare('DELETE FROM daily_payment_transactions WHERE id = ?').run(id)
+      recomputeDailyPaymentFromTransactions(db, tx.daily_payment_id)
+    })()
+    const updated = db.prepare(
+      'SELECT p.*, c.name as child_name, c.guardian as child_guardian, c.guardian_phone as child_guardian_phone FROM daily_payments p JOIN children c ON p.child_id = c.id WHERE p.id = ?'
+    ).get(tx.daily_payment_id)
+    const transactions = db.prepare('SELECT * FROM daily_payment_transactions WHERE daily_payment_id = ? ORDER BY paid_date ASC, id ASC').all(tx.daily_payment_id)
+    return { payment: updated, transactions }
+  } catch (error: any) {
+    console.error('Failed to delete daily payment transaction:', error)
+    throw new Error(error.message || 'Failed to delete daily payment transaction')
   }
 })

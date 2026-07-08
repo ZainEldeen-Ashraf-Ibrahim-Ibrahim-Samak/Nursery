@@ -619,6 +619,24 @@ const dailyPaymentSchema = new Schema({
 export const DailyPaymentModel: Model<any> = mongoose.models['sync_daily_payments'] ||
   mongoose.model('sync_daily_payments', dailyPaymentSchema)
 
+// ── Daily Payment Transactions (partial payments / installments) ───────────────
+
+const dailyPaymentTransactionSchema = new Schema({
+  id: { type: Number, required: true, unique: true },
+  daily_payment_id: Number,
+  amount: Number,
+  payment_method_id: Number,
+  payment_method_name: String,
+  paid_date: String,
+  notes: String,
+  created_at: String,
+  updated_at: String,
+  synced: Number
+}, sharedOptions)
+
+export const DailyPaymentTransactionModel: Model<any> = mongoose.models['sync_daily_payment_transactions'] ||
+  mongoose.model('sync_daily_payment_transactions', dailyPaymentTransactionSchema)
+
 // ── Entity registry ───────────────────────────────────────────────────────────
 
 export const SYNC_ENTITIES: {
@@ -652,4 +670,5 @@ export const SYNC_ENTITIES: {
   { name: 'attendance_audit_log', model: AttendanceAuditLogModel, table: 'attendance_audit_log' },
   { name: 'notifications', model: NotificationModel, table: 'notifications' },
   { name: 'daily_payments', model: DailyPaymentModel, table: 'daily_payments' },
+  { name: 'daily_payment_transactions', model: DailyPaymentTransactionModel, table: 'daily_payment_transactions' },
 ]
