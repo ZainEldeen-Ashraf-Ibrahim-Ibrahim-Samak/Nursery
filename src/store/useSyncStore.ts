@@ -49,7 +49,7 @@ interface SyncState {
   connect: (uri: string) => Promise<boolean>
   reconnect: () => Promise<boolean>
   disconnect: () => Promise<void>
-  push: () => Promise<void>
+  push: (force?: boolean) => Promise<void>
   pull: (force?: boolean) => Promise<void>
   setAutoSync: (enabled: boolean, intervalMinutes?: number) => Promise<void>
   clearError: () => void
@@ -129,10 +129,10 @@ export const useSyncStore = create<SyncState>((set, get) => ({
     }
   },
 
-  push: async () => {
+  push: async (force = false) => {
     set({ isPushing: true, error: null, lastPushResults: null })
     try {
-      const result = await window.api.sync.push()
+      const result = await window.api.sync.push(force)
       set({ lastPushResults: result.results, isPushing: false })
       await get().fetchStatus()
     } catch (err: any) {

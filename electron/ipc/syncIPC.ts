@@ -191,9 +191,10 @@ ipcMain.handle('sync:status', async () => {
  * sync:push — Push all unsynced records to MongoDB.
  * Admin only. Graceful: reports pushed/failed counts per entity.
  */
-ipcMain.handle('sync:push', async (event) => {
+ipcMain.handle('sync:push', async (event, args) => {
   try {
     requireAdmin()
+    const force = args?.force === true
     const db = getDb()
     const { connected } = getConnectionStatus()
 
@@ -211,17 +212,19 @@ ipcMain.handle('sync:push', async (event) => {
     const report = progressReporter(event, 'push')
     let totalWork = 0
     for (const entity of SYNC_ENTITIES) {
-      let cq = `SELECT COUNT(*) AS c FROM ${entity.table} WHERE synced = 0`
-      if (entity.name === 'settings') cq += " AND key != 'sync_mongo_uri'"
+      let cq = force ? `SELECT COUNT(*) AS c FROM ${entity.table}` : `SELECT COUNT(*) AS c FROM ${entity.table} WHERE synced = 0`
+      if (entity.name === 'settings') {
+        cq += force ? " WHERE key != 'sync_mongo_uri'" : " AND key != 'sync_mongo_uri'"
+      }
       totalWork += (db.prepare(cq).get() as any)?.c ?? 0
     }
     let done = 0
     report(0, totalWork, 'starting')
 
     for (const entity of SYNC_ENTITIES) {
-      let query = `SELECT * FROM ${entity.table} WHERE synced = 0`
+      let query = force ? `SELECT * FROM ${entity.table}` : `SELECT * FROM ${entity.table} WHERE synced = 0`
       if (entity.name === 'settings') {
-        query += ` AND key != 'sync_mongo_uri'`
+        query += force ? ` WHERE key != 'sync_mongo_uri'` : ` AND key != 'sync_mongo_uri'`
       }
       
       const unsynced = db.prepare(query).all() as SyncRecord[]

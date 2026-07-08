@@ -6,6 +6,7 @@ import { requireAdmin } from './_guard.js'
 import { getCurrentUser } from './authIPC.js'
 import { progressReporter } from './progress.js'
 import { uploadImage } from '../services/cloudinaryService.js'
+import { getMongoUri } from './syncIPC.js'
 
 /**
  * storage:uploadPhoto { dataUrl, folder? }
@@ -228,7 +229,6 @@ ipcMain.handle('storage:clear', async (_event, { confirm }) => {
 
     // Clear MongoDB synced collections if a URI is available or if we are connected
     try {
-      const { getMongoUri } = await import('./syncIPC.js')
       const mongoUri = getMongoUri()
       if (mongoUri && process.env.NODE_ENV !== 'test') {
         const { getConnectionStatus, connectMongo, disconnectMongo, SYNC_ENTITIES } = await import('../services/mongoSync.js')

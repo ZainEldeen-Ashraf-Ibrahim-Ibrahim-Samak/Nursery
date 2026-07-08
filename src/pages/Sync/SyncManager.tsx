@@ -210,6 +210,23 @@ export default function SyncManager() {
             )
           })()}
 
+          <div className="border-t border-slate-100 pt-3 space-y-2">
+            <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+              ⚠️ {isAr
+                ? 'استخدم "رفع إجباري" إذا قمت بتغيير قاعدة البيانات السحابية وتريد إجبار جميع بياناتك المحلية على الرفع من جديد حتى لو كانت تعتبر مزامنة مسبقاً.'
+                : 'Use "Force Push" if you changed your cloud database and need to force upload all local data again, even if it is already marked as synced.'}
+            </p>
+            <Button
+              variant="danger"
+              onClick={() => { resetProgress('push'); push(true) }}
+              isLoading={isPushing}
+              disabled={!isConnected}
+              className="w-full"
+            >
+              ⚠️ {isAr ? 'رفع إجباري (رفع كل السجلات)' : 'Force Push (upload all records)'}
+            </Button>
+          </div>
+
           {lastPushResults && (
             <div className="bg-emerald-50 rounded-xl p-3 space-y-1 text-xs">
               <p className="font-bold text-emerald-700">✅ {isAr ? 'نتائج الرفع:' : 'Push Results:'}</p>
