@@ -4,7 +4,8 @@ import { useDailyPaymentsStore } from '../../store/useDailyPaymentsStore.js'
 import { usePaymentMethodsStore } from '../../store/usePaymentMethodsStore.js'
 import { useAuthStore } from '../../store/useAuthStore.js'
 import PaymentRow from './PaymentRow.js'
-import type { Payment } from '../../types/index.js'
+import DailyPaymentInstallmentsModal from './DailyPaymentInstallmentsModal.js'
+import type { Payment, DailyPayment } from '../../types/index.js'
 import { Card } from '../../components/ui/Card.js'
 import { Stat } from '../../components/ui/Stat.js'
 import { Button } from '../../components/ui/Button.js'
@@ -117,6 +118,7 @@ export default function DailyPayments() {
 
   const [confirmDeleteMode, setConfirmDeleteMode] = useState<'selected' | 'all' | null>(null)
   const [isDeletingPayments, setIsDeletingPayments] = useState(false)
+  const [installmentsFor, setInstallmentsFor] = useState<DailyPayment | null>(null)
 
   const handleConfirmDelete = async () => {
     setIsDeletingPayments(true)
@@ -421,17 +423,17 @@ export default function DailyPayments() {
                           )}
                         </td>
                       </tr>
-                      {group.services.map((p: any) => (
-                        <PaymentRow
-                          key={p.id}
-                          payment={p as Payment}
-                          isSelected={selectedIds.includes(p.id)}
-                          onToggleSelect={() => handleToggleSelectRow(p.id)}
-                          onUpdate={handleUpdateRow}
-                          onOpenInstallments={() => {}}
-                          paymentMethods={paymentMethods}
-                        />
-                      ))}
+                        {group.services.map((p: any) => (
+                          <PaymentRow
+                            key={p.id}
+                            payment={p as Payment}
+                            isSelected={selectedIds.includes(p.id)}
+                            onToggleSelect={() => handleToggleSelectRow(p.id)}
+                            onUpdate={handleUpdateRow}
+                            onOpenInstallments={() => setInstallmentsFor(p as DailyPayment)}
+                            paymentMethods={paymentMethods}
+                          />
+                        ))}
                     </React.Fragment>
                   ))}
                 </tbody>
@@ -472,6 +474,15 @@ export default function DailyPayments() {
           </div>
         </div>
       </Modal>
+
+      {installmentsFor && (
+        <DailyPaymentInstallmentsModal
+          payment={installmentsFor}
+          paymentMethods={paymentMethods}
+          onClose={() => setInstallmentsFor(null)}
+          onChanged={() => fetchDailyPayments()}
+        />
+      )}
 
     </div>
   )
