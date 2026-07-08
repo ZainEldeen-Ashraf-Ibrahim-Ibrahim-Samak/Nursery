@@ -15806,6 +15806,54 @@ var migrations = [
         CREATE INDEX IF NOT EXISTS idx_daily_payment_tx_payment ON daily_payment_transactions(daily_payment_id);
       `);
 		}
+	},
+	{
+		name: "036_child_illness_cases",
+		up: (db) => {
+			db.exec(`
+        CREATE TABLE IF NOT EXISTS child_illness_cases (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          child_id INTEGER NOT NULL REFERENCES children(id) ON DELETE CASCADE,
+          status TEXT NOT NULL CHECK(status IN ('open','resolved')),
+          description TEXT,
+          opened_at TEXT NOT NULL,
+          resolved_at TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          synced INTEGER DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_illness_cases_child_status ON child_illness_cases(child_id, status);
+      `);
+		}
+	},
+	{
+		name: "037_child_activities",
+		up: (db) => {
+			db.exec(`
+        CREATE TABLE IF NOT EXISTS child_activities (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          child_id INTEGER NOT NULL REFERENCES children(id) ON DELETE CASCADE,
+          activity_date TEXT NOT NULL,
+          note TEXT,
+          media_url TEXT,
+          media_type TEXT CHECK(media_type IN ('photo','video')),
+          media_status TEXT CHECK(media_status IN ('uploaded','failed')),
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          synced INTEGER DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_child_activities_child_date ON child_activities(child_id, activity_date);
+      `);
+		}
+	},
+	{
+		name: "038_drop_daily_payments",
+		up: (db) => {
+			db.exec(`
+        DROP TABLE IF EXISTS daily_payment_transactions;
+        DROP TABLE IF EXISTS daily_payments;
+      `);
+		}
 	}
 ];
 function runMigrations(db) {
@@ -21860,7 +21908,7 @@ function requireAdmin() {
 	if (!user) throw new Error("UNAUTHORIZED: يجب تسجيل الدخول أولاً / Unauthorized");
 	if (user.role !== "admin") throw new Error("FORBIDDEN: غير مسموح بالوصول لغير المسؤولين / Forbidden");
 }
-function checkAuth$7() {
+function checkAuth$10() {
 	if (!getCurrentUser()) throw new Error("UNAUTHORIZED: يجب تسجيل الدخول أولاً / Unauthorized");
 }
 //#endregion
@@ -22156,13 +22204,14 @@ function getChildStatement(child, existingPayments, currentDate) {
 			activeMonths: statementMonths.length,
 			totalInvoiced: Number(totalInvoiced.toFixed(2)),
 			totalCollected: Number(totalCollected.toFixed(2)),
-			totalBalance: Number(totalBalance.toFixed(2))
+			totalBalance: Number(totalBalance.toFixed(2)),
+			remainingDue: Number(totalBalance.toFixed(2))
 		}
 	};
 }
 //#endregion
 //#region electron/ipc/childrenIPC.ts
-function checkAuth$6() {
+function checkAuth$9() {
 	if (!getCurrentUser()) throw new Error("UNAUTHORIZED: يجب تسجيل الدخول أولاً / Unauthorized");
 }
 var GUARDIAN_PHONE_RE = /^(?:\+?2)?01[0-9]{9}$/;
@@ -22192,7 +22241,7 @@ function buildLessonFields(src) {
 }
 ipcMain.handle("children:get", async (_event, { search, service, activeOnly }) => {
 	try {
-		checkAuth$6();
+		checkAuth$9();
 		const db = getDb();
 		let query = "SELECT * FROM children WHERE 1=1";
 		const params = [];
@@ -22217,7 +22266,7 @@ ipcMain.handle("children:get", async (_event, { search, service, activeOnly }) =
 });
 ipcMain.handle("children:add", async (_event, childInput) => {
 	try {
-		checkAuth$6();
+		checkAuth$9();
 		const db = getDb();
 		const { name, guardian, guardian_phone, child_phone, national_id, reg_date, notes, services } = childInput;
 		const enrollments = services || (childInput.service ? [{
@@ -22381,7 +22430,7 @@ ipcMain.handle("children:deactivate", async (_event, { id }) => {
 });
 ipcMain.handle("children:statement", async (_event, { childId }) => {
 	try {
-		checkAuth$6();
+		checkAuth$9();
 		if (!childId) throw new Error("Child ID is required");
 		const db = getDb();
 		const child = db.prepare("SELECT * FROM children WHERE id = ?").get(childId);
@@ -22420,12 +22469,12 @@ function applyCloudTombstones(db, cloudTombstones) {
 }
 //#endregion
 //#region electron/ipc/childServicesIPC.ts
-function checkAuth$5() {
+function checkAuth$8() {
 	if (!getCurrentUser()) throw new Error("UNAUTHORIZED: يجب تسجيل الدخول أولاً / Unauthorized");
 }
 ipcMain.handle("childServices:list", async (_event, { childId }) => {
 	try {
-		checkAuth$5();
+		checkAuth$8();
 		const db = getDb();
 		if (!childId) throw new Error("childId is required");
 		return db.prepare("SELECT * FROM child_services WHERE child_id = ?").all(childId);
@@ -22474,7 +22523,7 @@ ipcMain.handle("childServices:update", async (_event, { id, patch }) => {
 });
 ipcMain.handle("childServices:previewTeacherCost", async (_event, { teacher_id, lesson_days }) => {
 	try {
-		checkAuth$5();
+		checkAuth$8();
 		const db = getDb();
 		let rate = db.prepare("SELECT teacher_session_rate FROM employees WHERE id = ?").get(teacher_id)?.teacher_session_rate ?? null;
 		if (rate == null) {
@@ -22499,6 +22548,38 @@ ipcMain.handle("childServices:previewTeacherCost", async (_event, { teacher_id, 
 		};
 	} catch (error) {
 		throw new Error(error.message || "Failed to preview teacher cost");
+	}
+});
+ipcMain.handle("childServices:getTimetable", async (_event, { child_id }) => {
+	try {
+		checkAuth$8();
+		if (!child_id) throw new Error("child_id is required");
+		const enrollments = getDb().prepare(`
+      SELECT cs.id as service_row_id, cs.service, cs.teacher_id, cs.lesson_days, e.name as teacher_name
+      FROM child_services cs
+      LEFT JOIN employees e ON e.id = cs.teacher_id
+      WHERE cs.child_id = ?
+    `).all(child_id);
+		const slots = [];
+		for (const en of enrollments) {
+			let days = [];
+			if (en.lesson_days) try {
+				days = JSON.parse(en.lesson_days);
+			} catch {
+				days = [];
+			}
+			for (const day of days) slots.push({
+				service_row_id: en.service_row_id,
+				service: en.service,
+				day,
+				teacher_id: en.teacher_id ?? null,
+				teacher_name: en.teacher_name ?? null
+			});
+		}
+		return slots;
+	} catch (error) {
+		console.error("Failed to get child timetable:", error);
+		throw new Error(error.message || "Failed to get child timetable");
 	}
 });
 ipcMain.handle("childServices:remove", async (_event, { id }) => {
@@ -22561,12 +22642,12 @@ function calculateChildStatusRollup(payments) {
 	if (allUnpaid) return "unpaid";
 	return "partial";
 }
-function checkAuth$4() {
+function checkAuth$7() {
 	if (!getCurrentUser()) throw new Error("UNAUTHORIZED: يجب تسجيل الدخول أولاً / Unauthorized");
 }
 ipcMain.handle("payments:get", async (_event, { month, year }) => {
 	try {
-		checkAuth$4();
+		checkAuth$7();
 		const db = getDb();
 		if (!month || !year) throw new Error("Month and year are required");
 		const payments = db.prepare(`
@@ -22625,7 +22706,7 @@ ipcMain.handle("payments:get", async (_event, { month, year }) => {
 });
 ipcMain.handle("payments:generate", async (_event, { month, year }) => {
 	try {
-		checkAuth$4();
+		checkAuth$7();
 		const db = getDb();
 		if (!month || !year) throw new Error("Month and year are required");
 		const activeEnrollments = db.prepare(`
@@ -22724,7 +22805,7 @@ ipcMain.handle("payments:generate", async (_event, { month, year }) => {
 });
 ipcMain.handle("payments:update", async (_event, { id, quantity, paid, notes, payment_method_id }) => {
 	try {
-		checkAuth$4();
+		checkAuth$7();
 		const db = getDb();
 		if (!id) throw new Error("Payment ID is required");
 		const payment = db.prepare("SELECT * FROM payments WHERE id = ?").get(id);
@@ -22760,7 +22841,7 @@ ipcMain.handle("payments:update", async (_event, { id, quantity, paid, notes, pa
 });
 ipcMain.handle("payments:bulkPay", async (_event, { ids, payment_method_id }) => {
 	try {
-		checkAuth$4();
+		checkAuth$7();
 		const db = getDb();
 		if (!ids || !Array.isArray(ids) || ids.length === 0) throw new Error("Payment IDs array is required");
 		let methodName = null;
@@ -22801,7 +22882,7 @@ function recomputePaymentFromTransactions(db, paymentId) {
 }
 ipcMain.handle("payments:listTransactions", async (_event, { payment_id }) => {
 	try {
-		checkAuth$4();
+		checkAuth$7();
 		const db = getDb();
 		if (!payment_id) throw new Error("Payment ID is required");
 		return db.prepare("SELECT * FROM payment_transactions WHERE payment_id = ? ORDER BY paid_date ASC, id ASC").all(payment_id);
@@ -22812,7 +22893,7 @@ ipcMain.handle("payments:listTransactions", async (_event, { payment_id }) => {
 });
 ipcMain.handle("payments:addTransaction", async (_event, { payment_id, amount, payment_method_id = null, paid_date = null, notes = null }) => {
 	try {
-		checkAuth$4();
+		checkAuth$7();
 		const db = getDb();
 		if (!payment_id) throw new Error("Payment ID is required");
 		const amt = Number(amount);
@@ -22847,7 +22928,7 @@ ipcMain.handle("payments:addTransaction", async (_event, { payment_id, amount, p
 });
 ipcMain.handle("payments:deleteTransaction", async (_event, { id }) => {
 	try {
-		checkAuth$4();
+		checkAuth$7();
 		const db = getDb();
 		if (!id) throw new Error("Transaction ID is required");
 		const tx = db.prepare("SELECT payment_id FROM payment_transactions WHERE id = ?").get(id);
@@ -22951,7 +23032,7 @@ var ARABIC_MONTHS = {
 	"نوفمبر": 11,
 	"ديسمبر": 12
 };
-function monthBounds(month, year) {
+function monthBounds$1(month, year) {
 	const n = ARABIC_MONTHS[month] ?? Number(month) ?? 1;
 	const mm = String(n).padStart(2, "0");
 	return {
@@ -22998,7 +23079,7 @@ function computeBaseSalary(db, employeeId, month, year) {
 	let totalSessions = 0;
 	let salaryTypeName = null;
 	let salaryTypeMode = null;
-	const { start, end } = monthBounds(month, year);
+	const { start, end } = monthBounds$1(month, year);
 	const hasOwnTeacherRate = row?.teacher_session_rate != null;
 	const teacherPayments = hasOwnTeacherRate ? getTeacherPaymentsForMonth(db, employeeId, start, end) : null;
 	if (row?.eff) {
@@ -27977,7 +28058,7 @@ function buildPrintPreviewHtml(reportType, params) {
 }
 //#endregion
 //#region electron/ipc/exportIPC.ts
-function checkAuth$3() {
+function checkAuth$6() {
 	const user = getCurrentUser();
 	if (!user) throw new Error("UNAUTHORIZED: يجب تسجيل الدخول أولاً / Unauthorized");
 	return user;
@@ -28022,7 +28103,7 @@ ipcMain.handle("export:full", async (_event, { year, format, lang }) => {
 });
 ipcMain.handle("export:month", async (_event, { month, year, format, lang }) => {
 	try {
-		checkAuth$3();
+		checkAuth$6();
 		const filename = lang === "ar" ? `مطالبات_${month}_${year}.${format}` : `billing_${month}_${year}.${format}`;
 		return await executeExport("month", {
 			month,
@@ -28037,7 +28118,7 @@ ipcMain.handle("export:month", async (_event, { month, year, format, lang }) => 
 });
 ipcMain.handle("export:child", async (_event, { childId, format, lang }) => {
 	try {
-		checkAuth$3();
+		checkAuth$6();
 		const filename = lang === "ar" ? `كشف_حساب_طفل_${childId}.${format}` : `child_statement_${childId}.${format}`;
 		return await executeExport("child", {
 			childId,
@@ -28051,7 +28132,7 @@ ipcMain.handle("export:child", async (_event, { childId, format, lang }) => {
 });
 ipcMain.handle("export:childReport", async (_event, { childId, format, lang }) => {
 	try {
-		checkAuth$3();
+		checkAuth$6();
 		const filename = lang === "ar" ? `تقرير_طفل_شامل_${childId}.${format}` : `child_report_${childId}.${format}`;
 		return await executeExport("childReport", {
 			childId,
@@ -28123,7 +28204,7 @@ ipcMain.handle("export:expenses", async (_event, { year, format, lang }) => {
 ipcMain.handle("print:preview", async (_event, args) => {
 	try {
 		if (args.reportType === "payroll" || args.reportType === "expenses") requireAdmin();
-		else checkAuth$3();
+		else checkAuth$6();
 		return { html: buildPrintPreviewHtml(args.reportType, args) };
 	} catch (error) {
 		console.error("Failed to build print preview:", error);
@@ -28196,6 +28277,45 @@ async function uploadImage(dataUrl, folder = "nursery/children") {
 			detail = body?.error?.message ? `: ${body.error.message}` : "";
 		} catch {}
 		throw new Error(`Cloudinary upload failed (${res.status})${detail}`);
+	}
+	const body = await res.json();
+	return {
+		url: body.secure_url,
+		publicId: body.public_id
+	};
+}
+/**
+* Upload a video (data URL or remote URL) to Cloudinary via a signed REST request,
+* identical in shape to `uploadImage` but targeting the `/video/upload` endpoint with
+* `resource_type=video` (feature 009 — child activity/diary media).
+*/
+async function uploadVideo(dataUrl, folder = "nursery/children") {
+	const config = getCloudinaryConfig();
+	if (!config) throw new Error("Cloudinary is not configured / لم يتم إعداد Cloudinary");
+	if (!dataUrl) throw new Error("No video provided / لا يوجد فيديو");
+	const timestamp = Math.floor(Date.now() / 1e3);
+	const signature = signParams({
+		folder,
+		timestamp
+	}, config.apiSecret);
+	const form = new FormData();
+	form.append("file", dataUrl);
+	form.append("api_key", config.apiKey);
+	form.append("timestamp", String(timestamp));
+	form.append("folder", folder);
+	form.append("signature", signature);
+	const endpoint = `https://api.cloudinary.com/v1_1/${config.cloudName}/video/upload`;
+	const res = await fetch(endpoint, {
+		method: "POST",
+		body: form
+	});
+	if (!res.ok) {
+		let detail = "";
+		try {
+			const body = await res.json();
+			detail = body?.error?.message ? `: ${body.error.message}` : "";
+		} catch {}
+		throw new Error(`Cloudinary video upload failed (${res.status})${detail}`);
 	}
 	const body = await res.json();
 	return {
@@ -28378,8 +28498,8 @@ ipcMain.handle("storage:clear", async (_event, { confirm }) => {
 				db.prepare("DELETE FROM notifications").run();
 				db.prepare("DELETE FROM imported_snapshots").run();
 				db.prepare("DELETE FROM employees").run();
-				db.prepare("DELETE FROM daily_payment_transactions").run();
-				db.prepare("DELETE FROM daily_payments").run();
+				db.prepare("DELETE FROM child_activities").run();
+				db.prepare("DELETE FROM child_illness_cases").run();
 			})();
 		} finally {
 			db.pragma("foreign_keys = ON");
@@ -28925,50 +29045,39 @@ var notificationSchema = new Schema({
 	synced: Number
 }, sharedOptions);
 var NotificationModel = mongoose.models["sync_notifications"] || mongoose.model("sync_notifications", notificationSchema);
-var dailyPaymentSchema = new Schema({
+var childIllnessCaseSchema = new Schema({
 	id: {
 		type: Number,
 		required: true,
 		unique: true
 	},
 	child_id: Number,
-	service_id: Number,
-	billing_date: String,
-	month: String,
-	year: Number,
-	service: String,
-	unit: String,
-	quantity: Number,
-	price: Number,
-	total: Number,
-	paid: Number,
-	balance: Number,
 	status: String,
-	notes: String,
-	payment_method_id: Number,
-	payment_method_name: String,
+	description: String,
+	opened_at: String,
+	resolved_at: String,
 	created_at: String,
 	updated_at: String,
 	synced: Number
 }, sharedOptions);
-var DailyPaymentModel = mongoose.models["sync_daily_payments"] || mongoose.model("sync_daily_payments", dailyPaymentSchema);
-var dailyPaymentTransactionSchema = new Schema({
+var ChildIllnessCaseModel = mongoose.models["sync_child_illness_cases"] || mongoose.model("sync_child_illness_cases", childIllnessCaseSchema);
+var childActivitySchema = new Schema({
 	id: {
 		type: Number,
 		required: true,
 		unique: true
 	},
-	daily_payment_id: Number,
-	amount: Number,
-	payment_method_id: Number,
-	payment_method_name: String,
-	paid_date: String,
-	notes: String,
+	child_id: Number,
+	activity_date: String,
+	note: String,
+	media_url: String,
+	media_type: String,
+	media_status: String,
 	created_at: String,
 	updated_at: String,
 	synced: Number
 }, sharedOptions);
-var DailyPaymentTransactionModel = mongoose.models["sync_daily_payment_transactions"] || mongoose.model("sync_daily_payment_transactions", dailyPaymentTransactionSchema);
+var ChildActivityModel = mongoose.models["sync_child_activities"] || mongoose.model("sync_child_activities", childActivitySchema);
 var SYNC_ENTITIES = [
 	{
 		name: "children",
@@ -29096,14 +29205,14 @@ var SYNC_ENTITIES = [
 		table: "notifications"
 	},
 	{
-		name: "daily_payments",
-		model: DailyPaymentModel,
-		table: "daily_payments"
+		name: "child_illness_cases",
+		model: ChildIllnessCaseModel,
+		table: "child_illness_cases"
 	},
 	{
-		name: "daily_payment_transactions",
-		model: DailyPaymentTransactionModel,
-		table: "daily_payment_transactions"
+		name: "child_activities",
+		model: ChildActivityModel,
+		table: "child_activities"
 	}
 ];
 //#endregion
@@ -29577,12 +29686,12 @@ function calculateDashboard(payments, expenses, salaries, targetProfitPct) {
 		gap
 	};
 }
-function checkAuth$2() {
+function checkAuth$5() {
 	if (!getCurrentUser()) throw new Error("UNAUTHORIZED: يجب تسجيل الدخول أولاً / Unauthorized");
 }
 ipcMain.handle("dashboard:get", async (_event, { month, year }) => {
 	try {
-		checkAuth$2();
+		checkAuth$5();
 		const db = getDb();
 		if (!month || !year) throw new Error("Month and year are required");
 		const targetProfitRow = db.prepare("SELECT value FROM settings WHERE key = 'target_profit_pct'").get();
@@ -29793,7 +29902,7 @@ ipcMain.handle("salaryTypes:delete", async (_event, { id }) => {
 //#region electron/ipc/serviceDefinitionsIPC.ts
 ipcMain.handle("serviceDefinitions:list", async () => {
 	try {
-		checkAuth$7();
+		checkAuth$10();
 		return getDb().prepare("SELECT * FROM service_definitions ORDER BY is_custom ASC, name ASC").all();
 	} catch (error) {
 		throw new Error(error.message || "Failed to list service definitions");
@@ -29853,7 +29962,7 @@ ipcMain.handle("serviceDefinitions:delete", async (_event, { id }) => {
 //#region electron/ipc/sessionsIPC.ts
 ipcMain.handle("sessions:list", async (_event, args) => {
 	try {
-		checkAuth$7();
+		checkAuth$10();
 		const db = getDb();
 		const { from, to } = args || {};
 		let query = `
@@ -29946,7 +30055,7 @@ ipcMain.handle("sessions:delete", async (_event, { id }) => {
 });
 ipcMain.handle("sessions:salaryCredit", async (_event, { session_id }) => {
 	try {
-		checkAuth$7();
+		checkAuth$10();
 		const db = getDb();
 		const payable = !!db.prepare(`
       SELECT 1 FROM attendance_records
@@ -29994,7 +30103,7 @@ ipcMain.handle("sessions:assignTeachers", async (_event, { session_id, employee_
 });
 ipcMain.handle("sessions:childrenForDay", async (_event, { day_of_week }) => {
 	try {
-		checkAuth$7();
+		checkAuth$10();
 		return getDb().prepare(`SELECT id, name, lesson_days FROM children WHERE is_active = 1 AND lesson_days IS NOT NULL AND lesson_days != '[]' AND lesson_days != ''`).all().filter((c) => {
 			try {
 				return JSON.parse(c.lesson_days).includes(Number(day_of_week));
@@ -30011,7 +30120,7 @@ ipcMain.handle("sessions:childrenForDay", async (_event, { day_of_week }) => {
 });
 ipcMain.handle("sessions:proRateCalc", async (_event, args) => {
 	try {
-		checkAuth$7();
+		checkAuth$10();
 		const db = getDb();
 		let reg_date = args.reg_date;
 		let pricePerSession = args.price_per_session ?? 0;
@@ -30077,7 +30186,7 @@ function insertNotification(db, entry) {
 }
 ipcMain.handle("notifications:list", async (_event, args) => {
 	try {
-		checkAuth$7();
+		checkAuth$10();
 		const user = getCurrentUser();
 		const db = getDb();
 		const sql = args?.unreadOnly === true ? "SELECT * FROM notifications WHERE user_id = ? AND read_at IS NULL ORDER BY created_at DESC" : "SELECT * FROM notifications WHERE user_id = ? ORDER BY created_at DESC";
@@ -30088,7 +30197,7 @@ ipcMain.handle("notifications:list", async (_event, args) => {
 });
 ipcMain.handle("notifications:markRead", async (_event, args) => {
 	try {
-		checkAuth$7();
+		checkAuth$10();
 		const user = getCurrentUser();
 		const db = getDb();
 		const now = (/* @__PURE__ */ new Date()).toISOString();
@@ -30148,7 +30257,7 @@ function recalculateAttendancePayment(db, params) {
 }
 ipcMain.handle("attendance:getSheet", async (_event, { session_id }) => {
 	try {
-		checkAuth$7();
+		checkAuth$10();
 		const db = getDb();
 		const session = db.prepare("SELECT session_date FROM scheduled_sessions WHERE id = ?").get(session_id);
 		let dayOfWeek = null;
@@ -30247,7 +30356,7 @@ ipcMain.handle("attendance:getSheet", async (_event, { session_id }) => {
 });
 ipcMain.handle("attendance:record", async (_event, args) => {
 	try {
-		checkAuth$7();
+		checkAuth$10();
 		const db = getDb();
 		const user = getCurrentUser();
 		const isAdmin = user?.role === "admin";
@@ -30333,7 +30442,7 @@ ipcMain.handle("attendance:record", async (_event, args) => {
 });
 ipcMain.handle("attendance:delete", async (_event, { session_id, child_ids }) => {
 	try {
-		checkAuth$7();
+		checkAuth$10();
 		const db = getDb();
 		const items = (Array.isArray(child_ids) ? child_ids : []).map((it) => typeof it === "object" ? {
 			child_id: it.child_id,
@@ -30470,7 +30579,7 @@ ipcMain.handle("attendance:getSummary", async (_event, { employee_id, month, yea
 });
 ipcMain.handle("attendance:requestEdit", async (_event, args) => {
 	try {
-		checkAuth$7();
+		checkAuth$10();
 		const user = getCurrentUser();
 		if (user.role === "admin") throw new Error("Admins edit attendance directly and do not need to submit an edit request");
 		const db = getDb();
@@ -30512,7 +30621,7 @@ ipcMain.handle("attendance:requestEdit", async (_event, args) => {
 });
 ipcMain.handle("attendance:listEditRequests", async (_event, args) => {
 	try {
-		checkAuth$7();
+		checkAuth$10();
 		const user = getCurrentUser();
 		const db = getDb();
 		const status = args?.status;
@@ -30616,7 +30725,7 @@ ipcMain.handle("attendance:getAuditLog", async (_event, { attendance_record_id }
 //#region electron/ipc/paymentMethodsIPC.ts
 ipcMain.handle("paymentMethods:list", async () => {
 	try {
-		checkAuth$7();
+		checkAuth$10();
 		return getDb().prepare(`SELECT * FROM payment_methods ORDER BY name`).all();
 	} catch (e) {
 		throw new Error(e.message || "Failed to list payment methods");
@@ -30662,11 +30771,11 @@ ipcMain.handle("paymentMethods:delete", async (_event, { id }) => {
 });
 //#endregion
 //#region electron/ipc/deductionsIPC.ts
-function checkAuth$1() {
+function checkAuth$4() {
 	if (!getCurrentUser()) throw new Error("UNAUTHORIZED: يجب تسجيل الدخول أولاً / Unauthorized");
 }
 ipcMain.handle("deductions:list", async (_event, { employee_id, month, year }) => {
-	checkAuth$1();
+	checkAuth$4();
 	return getDb().prepare("SELECT * FROM employee_deductions WHERE employee_id = ? AND month = ? AND year = ? ORDER BY created_at ASC").all(employee_id, month, Number(year));
 });
 ipcMain.handle("deductions:add", async (_event, { employee_id, month, year, reason, amount }) => {
@@ -30688,7 +30797,7 @@ ipcMain.handle("deductions:remove", async (_event, { id }) => {
 //#region electron/ipc/serviceTeachersIPC.ts
 ipcMain.handle("serviceTeachers:list", async (_event, { service_id }) => {
 	try {
-		checkAuth$7();
+		checkAuth$10();
 		return getDb().prepare(`
       SELECT e.id, e.name, e.role
       FROM service_teachers st
@@ -30801,308 +30910,295 @@ ipcMain.handle("payroll:report", async (_event, { month, year }) => {
 	}
 });
 //#endregion
-//#region electron/ipc/dailyPaymentsIPC.ts
+//#region electron/ipc/transactionsIPC.ts
+function checkAuth$3() {
+	if (!getCurrentUser()) throw new Error("UNAUTHORIZED: يجب تسجيل الدخول أولاً / Unauthorized");
+}
+function weekBounds(dateStr) {
+	const date = new Date(dateStr);
+	const daysSinceSaturday = (date.getDay() + 1) % 7;
+	const from = new Date(date);
+	from.setDate(date.getDate() - daysSinceSaturday);
+	const to = new Date(from);
+	to.setDate(from.getDate() + 6);
+	return {
+		from: from.toISOString().slice(0, 10),
+		to: to.toISOString().slice(0, 10)
+	};
+}
+function monthBounds(dateStr) {
+	const date = new Date(dateStr);
+	const from = new Date(date.getFullYear(), date.getMonth(), 1);
+	const to = new Date(date.getFullYear(), date.getMonth() + 1, 0);
+	return {
+		from: from.toISOString().slice(0, 10),
+		to: to.toISOString().slice(0, 10)
+	};
+}
+ipcMain.handle("transactions:list", async (_event, args) => {
+	try {
+		checkAuth$3();
+		const { range, date, childId } = args || {};
+		let { from, to } = args || {};
+		if (range === "day") {
+			if (!date) throw new Error("date is required for range=day");
+			from = date;
+			to = date;
+		} else if (range === "week") {
+			if (!date) throw new Error("date is required for range=week");
+			({from, to} = weekBounds(date));
+		} else if (range === "month") {
+			if (!date) throw new Error("date is required for range=month");
+			({from, to} = monthBounds(date));
+		} else if (range === "custom") {
+			if (!from || !to) throw new Error("from and to are required for range=custom");
+		} else throw new Error("Invalid range: must be one of day, week, month, custom");
+		const db = getDb();
+		const conditions = ["pt.paid_date BETWEEN ? AND ?"];
+		const params = [from, to];
+		if (childId) {
+			conditions.push("p.child_id = ?");
+			params.push(childId);
+		}
+		return db.prepare(`
+      SELECT
+        pt.id,
+        p.child_id,
+        c.name as child_name,
+        p.service as service_name,
+        pt.amount,
+        'payment' as type,
+        pt.paid_date as date
+      FROM payment_transactions pt
+      JOIN payments p ON p.id = pt.payment_id
+      JOIN children c ON c.id = p.child_id
+      WHERE ${conditions.join(" AND ")}
+      ORDER BY date DESC, pt.id DESC
+    `).all(...params);
+	} catch (error) {
+		console.error("Failed to list transactions:", error);
+		throw new Error(error.message || "Failed to list transactions");
+	}
+});
+//#endregion
+//#region electron/ipc/childIllnessCasesIPC.ts
+function checkAuth$2() {
+	if (!getCurrentUser()) throw new Error("UNAUTHORIZED: يجب تسجيل الدخول أولاً / Unauthorized");
+}
+ipcMain.handle("childIllnessCases:getOpen", async (_event, { child_id }) => {
+	try {
+		checkAuth$2();
+		if (!child_id) throw new Error("child_id is required");
+		return getDb().prepare("SELECT * FROM child_illness_cases WHERE child_id = ? AND status = 'open' ORDER BY opened_at DESC LIMIT 1").get(child_id) ?? null;
+	} catch (error) {
+		console.error("Failed to get open illness case:", error);
+		throw new Error(error.message || "Failed to get open illness case");
+	}
+});
+ipcMain.handle("childIllnessCases:list", async (_event, { child_id }) => {
+	try {
+		checkAuth$2();
+		if (!child_id) throw new Error("child_id is required");
+		return getDb().prepare("SELECT * FROM child_illness_cases WHERE child_id = ? ORDER BY opened_at DESC").all(child_id);
+	} catch (error) {
+		console.error("Failed to list illness cases:", error);
+		throw new Error(error.message || "Failed to list illness cases");
+	}
+});
+ipcMain.handle("childIllnessCases:create", async (_event, { child_id, description, opened_at }) => {
+	try {
+		checkAuth$2();
+		if (!child_id) throw new Error("child_id is required");
+		const db = getDb();
+		if (db.prepare("SELECT id FROM child_illness_cases WHERE child_id = ? AND status = 'open'").get(child_id)) throw new Error("يوجد بالفعل حالة مرضية مفتوحة لهذا الطفل / An open illness case already exists for this child");
+		const now = (/* @__PURE__ */ new Date()).toISOString();
+		const result = db.prepare(`
+      INSERT INTO child_illness_cases (child_id, status, description, opened_at, created_at, updated_at, synced)
+      VALUES (?, 'open', ?, ?, ?, ?, 0)
+    `).run(child_id, description ?? null, opened_at || now.slice(0, 10), now, now);
+		return db.prepare("SELECT * FROM child_illness_cases WHERE id = ?").get(result.lastInsertRowid);
+	} catch (error) {
+		console.error("Failed to create illness case:", error);
+		throw new Error(error.message || "Failed to create illness case");
+	}
+});
+ipcMain.handle("childIllnessCases:resolve", async (_event, { id, resolved_at }) => {
+	try {
+		checkAuth$2();
+		if (!id) throw new Error("id is required");
+		const db = getDb();
+		const now = (/* @__PURE__ */ new Date()).toISOString();
+		db.prepare(`
+      UPDATE child_illness_cases
+      SET status = 'resolved', resolved_at = ?, updated_at = ?, synced = 0
+      WHERE id = ?
+    `).run(resolved_at || now.slice(0, 10), now, id);
+		return db.prepare("SELECT * FROM child_illness_cases WHERE id = ?").get(id);
+	} catch (error) {
+		console.error("Failed to resolve illness case:", error);
+		throw new Error(error.message || "Failed to resolve illness case");
+	}
+});
+//#endregion
+//#region electron/ipc/childActivitiesIPC.ts
+function checkAuth$1() {
+	if (!getCurrentUser()) throw new Error("UNAUTHORIZED: يجب تسجيل الدخول أولاً / Unauthorized");
+}
+ipcMain.handle("childActivities:list", async (_event, { child_id }) => {
+	try {
+		checkAuth$1();
+		if (!child_id) throw new Error("child_id is required");
+		return getDb().prepare("SELECT * FROM child_activities WHERE child_id = ? ORDER BY activity_date DESC, id DESC").all(child_id);
+	} catch (error) {
+		console.error("Failed to list child activities:", error);
+		throw new Error(error.message || "Failed to list child activities");
+	}
+});
+ipcMain.handle("childActivities:create", async (_event, { child_id, activity_date, note, media_data_url, media_type }) => {
+	try {
+		checkAuth$1();
+		if (!child_id) throw new Error("child_id is required");
+		if (!note && !media_data_url) throw new Error("يجب إضافة ملاحظة أو وسائط / An activity needs a note or media");
+		const db = getDb();
+		if (db.prepare("SELECT id FROM child_illness_cases WHERE child_id = ? AND status = 'open'").get(child_id)) throw new Error("لا يمكن إضافة نشاط بينما توجد حالة مرضية مفتوحة / Cannot add an activity while an illness case is open");
+		let mediaUrl = null;
+		let mediaStatus = null;
+		if (media_data_url) try {
+			const folder = `nursery/children/${child_id}/activities`;
+			mediaUrl = (media_type === "video" ? await uploadVideo(media_data_url, folder) : await uploadImage(media_data_url, folder)).url;
+			mediaStatus = "uploaded";
+		} catch (uploadError) {
+			console.error("Activity media upload failed, saving note without media:", uploadError);
+			mediaStatus = "failed";
+		}
+		const now = (/* @__PURE__ */ new Date()).toISOString();
+		const result = db.prepare(`
+      INSERT INTO child_activities (child_id, activity_date, note, media_url, media_type, media_status, created_at, updated_at, synced)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
+    `).run(child_id, activity_date || now.slice(0, 10), note ?? null, mediaUrl, media_data_url ? media_type ?? "photo" : null, mediaStatus, now, now);
+		return db.prepare("SELECT * FROM child_activities WHERE id = ?").get(result.lastInsertRowid);
+	} catch (error) {
+		console.error("Failed to create child activity:", error);
+		throw new Error(error.message || "Failed to create child activity");
+	}
+});
+ipcMain.handle("childActivities:delete", async (_event, { id }) => {
+	try {
+		requireAdmin();
+		if (!id) throw new Error("id is required");
+		getDb().prepare("DELETE FROM child_activities WHERE id = ?").run(id);
+		return { success: true };
+	} catch (error) {
+		console.error("Failed to delete child activity:", error);
+		throw new Error(error.message || "Failed to delete child activity");
+	}
+});
+//#endregion
+//#region electron/ipc/calendarIPC.ts
 function checkAuth() {
 	if (!getCurrentUser()) throw new Error("UNAUTHORIZED: يجب تسجيل الدخول أولاً / Unauthorized");
 }
-ipcMain.handle("daily_payments:get", async (_event, { billing_date }) => {
-	try {
-		checkAuth();
-		const db = getDb();
-		if (!billing_date) throw new Error("Billing date is required");
-		const payments = db.prepare(`
-      SELECT p.*, c.name as child_name, c.guardian as child_guardian, c.guardian_phone as child_guardian_phone, c.is_active as child_is_active,
-             (SELECT COUNT(*) FROM daily_payment_transactions WHERE daily_payment_id = p.id) as transaction_count
-      FROM daily_payments p
-      JOIN children c ON p.child_id = c.id
-      WHERE p.billing_date = ?
-      ORDER BY c.name ASC
-    `).all(billing_date);
-		let totalInvoiced = 0;
-		let totalCollected = 0;
-		let arrears = 0;
-		const childMap = /* @__PURE__ */ new Map();
-		for (const p of payments) {
-			totalInvoiced += p.total;
-			totalCollected += p.paid;
-			if (p.balance > 0) arrears += p.balance;
-			if (!childMap.has(p.child_id)) childMap.set(p.child_id, {
-				child_id: p.child_id,
-				child_name: p.child_name,
-				child_guardian: p.child_guardian,
-				child_guardian_phone: p.child_guardian_phone,
-				child_is_active: p.child_is_active ?? 1,
-				services: [],
-				totalInvoiced: 0,
-				totalCollected: 0,
-				balance: 0,
-				status: "unpaid"
+function buildMonthEntries(db, year, month) {
+	const daysInMonth = new Date(year, month, 0).getDate();
+	const entries = [];
+	const enrollments = db.prepare(`
+    SELECT cs.id as service_row_id, cs.child_id, c.name as child_name, cs.service, cs.teacher_id,
+           e.name as teacher_name, cs.lesson_days
+    FROM child_services cs
+    JOIN children c ON c.id = cs.child_id
+    LEFT JOIN employees e ON e.id = cs.teacher_id
+    WHERE cs.lesson_days IS NOT NULL AND cs.lesson_days != '' AND cs.lesson_days != '[]'
+      AND c.is_active = 1
+  `).all();
+	for (let d = 1; d <= daysInMonth; d++) {
+		const date = new Date(year, month - 1, d);
+		const iso = date.toISOString().slice(0, 10);
+		const weekday = date.getDay();
+		for (const en of enrollments) {
+			let days;
+			try {
+				days = JSON.parse(en.lesson_days);
+			} catch {
+				continue;
+			}
+			if (!days.includes(weekday)) continue;
+			entries.push({
+				date: iso,
+				user_id: en.child_id,
+				user_name: en.child_name,
+				user_type: "child",
+				service_id: en.service_row_id,
+				service_name: en.service,
+				teacher_id: en.teacher_id ?? null,
+				teacher_name: en.teacher_name ?? null,
+				session_id: null
 			});
-			const rollUp = childMap.get(p.child_id);
-			rollUp.services.push(p);
-			rollUp.totalInvoiced += p.total;
-			rollUp.totalCollected += p.paid;
-			rollUp.balance += p.balance;
 		}
-		for (const rollUp of childMap.values()) {
-			rollUp.status = calculateChildStatusRollup(rollUp.services);
-			rollUp.totalInvoiced = Number(rollUp.totalInvoiced.toFixed(2));
-			rollUp.totalCollected = Number(rollUp.totalCollected.toFixed(2));
-			rollUp.balance = Number(rollUp.balance.toFixed(2));
-		}
-		return {
-			payments,
-			byChild: Array.from(childMap.values()).sort((a, b) => a.child_name.localeCompare(b.child_name)),
-			summary: {
-				totalInvoiced: Number(totalInvoiced.toFixed(2)),
-				totalCollected: Number(totalCollected.toFixed(2)),
-				arrears: Number(arrears.toFixed(2))
-			}
-		};
-	} catch (error) {
-		console.error("Failed to get daily payments:", error);
-		throw new Error(error.message || "Failed to get daily payments");
 	}
-});
-ipcMain.handle("daily_payments:generate", async (_event, { billing_date }) => {
-	try {
-		checkAuth();
-		const db = getDb();
-		if (!billing_date) throw new Error("Billing date is required");
-		const activeEnrollments = db.prepare(`
-      SELECT cs.*
-      FROM child_services cs
-      JOIN children c ON cs.child_id = c.id
-      WHERE c.is_active = 1 AND cs.unit = 'يوم'
-    `).all();
-		let createdCount = 0;
-		const now = (/* @__PURE__ */ new Date()).toISOString();
-		const dateObj = new Date(billing_date);
-		const month = [
-			"يناير",
-			"فبراير",
-			"مارس",
-			"أبريل",
-			"مايو",
-			"يونيو",
-			"يوليو",
-			"أغسطس",
-			"سبتمبر",
-			"أكتوبر",
-			"نوفمبر",
-			"ديسمبر"
-		][dateObj.getMonth()];
-		const year = dateObj.getFullYear();
-		const checkStmt = db.prepare("SELECT id FROM daily_payments WHERE child_id = ? AND service_id = ? AND billing_date = ?");
-		const insertStmt = db.prepare(`
-      INSERT INTO daily_payments (
-        child_id, service_id, billing_date, month, year, service, unit, quantity, price, total, paid, balance, status, notes, created_at, updated_at, synced
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, 0)
-    `);
-		db.transaction(() => {
-			for (const enrollment of activeEnrollments) if (!checkStmt.get(enrollment.child_id, enrollment.id, billing_date)) {
-				const quantity = 1;
-				const price = enrollment.price;
-				const total = quantity * price;
-				const balance = total;
-				insertStmt.run(enrollment.child_id, enrollment.id, billing_date, month, year, enrollment.service, enrollment.unit, quantity, price, total, balance, "unpaid", "", now, now);
-				createdCount++;
-			}
-		})();
-		return { created: createdCount };
-	} catch (error) {
-		console.error("Failed to generate daily payments:", error);
-		throw new Error(error.message || "Failed to generate daily payments");
+	const from = `${year}-${String(month).padStart(2, "0")}-01`;
+	const to = `${year}-${String(month).padStart(2, "0")}-${String(daysInMonth).padStart(2, "0")}`;
+	const sessions = db.prepare(`
+    SELECT ss.id, ss.session_date, ss.service_id, sd.name as service_name
+    FROM scheduled_sessions ss
+    LEFT JOIN service_definitions sd ON sd.id = ss.service_id
+    WHERE ss.session_date BETWEEN ? AND ?
+  `).all(from, to);
+	const teacherStmt = db.prepare(`
+    SELECT st.employee_id, e.name as employee_name
+    FROM session_teachers st
+    JOIN employees e ON e.id = st.employee_id
+    WHERE st.session_id = ?
+  `);
+	for (const session of sessions) {
+		const teachers = teacherStmt.all(session.id);
+		if (teachers.length === 0) entries.push({
+			date: session.session_date,
+			user_id: session.id,
+			user_name: session.service_name || "Session",
+			user_type: "teacher",
+			service_id: session.service_id,
+			service_name: session.service_name,
+			teacher_id: null,
+			teacher_name: null,
+			session_id: session.id
+		});
+		else for (const t of teachers) entries.push({
+			date: session.session_date,
+			user_id: t.employee_id,
+			user_name: t.employee_name,
+			user_type: "teacher",
+			service_id: session.service_id,
+			service_name: session.service_name,
+			teacher_id: t.employee_id,
+			teacher_name: t.employee_name,
+			session_id: session.id
+		});
 	}
-});
-ipcMain.handle("daily_payments:update", async (_event, { id, quantity, paid, notes, payment_method_id }) => {
-	try {
-		checkAuth();
-		const user = getCurrentUser();
-		const db = getDb();
-		const now = (/* @__PURE__ */ new Date()).toISOString();
-		const payment = db.prepare("SELECT * FROM daily_payments WHERE id = ?").get(id);
-		if (!payment) throw new Error("Daily Payment not found");
-		if (quantity !== void 0 && quantity !== payment.quantity) {
-			if (user?.role !== "admin") throw new Error("FORBIDDEN: Only admin can change quantity");
-		}
-		const finalQuantity = quantity !== void 0 ? quantity : payment.quantity;
-		const finalPaid = paid !== void 0 ? paid : payment.paid;
-		const finalNotes = notes !== void 0 ? notes : payment.notes;
-		let finalMethodId = payment.payment_method_id;
-		let finalMethodName = payment.payment_method_name;
-		if (payment_method_id !== void 0) {
-			finalMethodId = payment_method_id;
-			if (payment_method_id === null) finalMethodName = null;
-			else {
-				const method = db.prepare("SELECT name FROM payment_methods WHERE id = ?").get(payment_method_id);
-				if (method) finalMethodName = method.name;
-			}
-		}
-		const { total, balance, status } = calculatePayment(finalQuantity, payment.price, finalPaid);
-		db.prepare(`
-      UPDATE daily_payments
-      SET quantity = ?, total = ?, paid = ?, balance = ?, status = ?, notes = ?, payment_method_id = ?, payment_method_name = ?, updated_at = ?, synced = 0
-      WHERE id = ?
-    `).run(finalQuantity, total, finalPaid, balance, status, finalNotes, finalMethodId, finalMethodName, now, id);
-		return db.prepare(`
-      SELECT p.*, c.name as child_name, c.guardian as child_guardian, c.guardian_phone as child_guardian_phone, c.is_active as child_is_active
-      FROM daily_payments p
-      JOIN children c ON p.child_id = c.id
-      WHERE p.id = ?
-    `).get(id);
-	} catch (error) {
-		console.error("Failed to update daily payment:", error);
-		throw new Error(error.message || "Failed to update daily payment");
-	}
-});
-ipcMain.handle("daily_payments:bulkPay", async (_event, { ids, payment_method_id }) => {
-	try {
-		checkAuth();
-		if (!ids || !ids.length) throw new Error("No IDs provided for bulk pay");
-		const db = getDb();
-		const now = (/* @__PURE__ */ new Date()).toISOString();
-		let updatedCount = 0;
-		let finalMethodName = null;
-		if (payment_method_id) {
-			const method = db.prepare("SELECT name FROM payment_methods WHERE id = ?").get(payment_method_id);
-			if (method) finalMethodName = method.name;
-		}
-		const updateStmt = db.prepare(`
-      UPDATE daily_payments
-      SET paid = total, balance = 0, status = 'paid', payment_method_id = ?, payment_method_name = ?, updated_at = ?, synced = 0
-      WHERE id = ? AND status != 'paid'
-    `);
-		db.transaction(() => {
-			for (const id of ids) {
-				const result = updateStmt.run(payment_method_id ?? null, finalMethodName, now, id);
-				updatedCount += Number(result.changes);
-			}
-		})();
-		return { updated: updatedCount };
-	} catch (error) {
-		console.error("Failed to bulk pay daily payments:", error);
-		throw new Error(error.message || "Failed to bulk pay daily payments");
-	}
-});
-ipcMain.handle("daily_payments:deleteBulk", async (_event, { ids }) => {
-	try {
-		requireAdmin();
-		if (!ids || !ids.length) return {
-			ok: true,
-			deleted: 0
-		};
-		const db = getDb();
-		const placeholders = ids.map(() => "?").join(",");
-		return {
-			ok: true,
-			deleted: db.prepare(`DELETE FROM daily_payments WHERE id IN (${placeholders})`).run(...ids).changes
-		};
-	} catch (error) {
-		console.error("Failed to bulk delete daily payments:", error);
-		throw new Error(error.message || "Failed to bulk delete daily payments");
-	}
-});
-ipcMain.handle("daily_payments:deleteAll", async (_event, { billing_date }) => {
-	try {
-		requireAdmin();
-		if (!billing_date) throw new Error("Billing date is required");
-		return {
-			ok: true,
-			deleted: getDb().prepare("DELETE FROM daily_payments WHERE billing_date = ?").run(billing_date).changes
-		};
-	} catch (error) {
-		console.error("Failed to delete all daily payments:", error);
-		throw new Error(error.message || "Failed to delete all daily payments");
-	}
-});
-ipcMain.handle("daily_payments:deleteForChild", async (_event, { child_id, billing_date }) => {
-	try {
-		requireAdmin();
-		if (!child_id || !billing_date) throw new Error("Child ID and billing date are required");
-		getDb().prepare("DELETE FROM daily_payments WHERE child_id = ? AND billing_date = ?").run(child_id, billing_date);
-		return { ok: true };
-	} catch (error) {
-		console.error("Failed to delete daily payments for child:", error);
-		throw new Error(error.message || "Failed to delete daily payments for child");
-	}
-});
-function recomputeDailyPaymentFromTransactions(db, dailyPaymentId) {
-	const payment = db.prepare("SELECT * FROM daily_payments WHERE id = ?").get(dailyPaymentId);
-	if (!payment) return;
-	const paid = Number((db.prepare("SELECT COALESCE(SUM(amount), 0) as s FROM daily_payment_transactions WHERE daily_payment_id = ?").get(dailyPaymentId).s ?? 0).toFixed(2));
-	const last = db.prepare("SELECT payment_method_id, payment_method_name FROM daily_payment_transactions WHERE daily_payment_id = ? ORDER BY paid_date DESC, id DESC LIMIT 1").get(dailyPaymentId);
-	const { total, balance, status } = calculatePayment(payment.quantity, payment.price, paid);
-	db.prepare(`
-    UPDATE daily_payments SET paid = ?, total = ?, balance = ?, status = ?,
-      payment_method_id = ?, payment_method_name = ?, updated_at = ?, synced = 0
-    WHERE id = ?
-  `).run(paid, total, balance, status, last?.payment_method_id ?? null, last?.payment_method_name ?? null, (/* @__PURE__ */ new Date()).toISOString(), dailyPaymentId);
+	return entries;
 }
-ipcMain.handle("daily_payments:listTransactions", async (_event, { payment_id }) => {
+ipcMain.handle("calendar:getMonth", async (_event, { year, month }) => {
 	try {
 		checkAuth();
-		const db = getDb();
-		if (!payment_id) throw new Error("Payment ID is required");
-		return db.prepare("SELECT * FROM daily_payment_transactions WHERE daily_payment_id = ? ORDER BY paid_date ASC, id ASC").all(payment_id);
+		if (!year || !month) throw new Error("year and month are required");
+		return buildMonthEntries(getDb(), Number(year), Number(month));
 	} catch (error) {
-		console.error("Failed to list daily payment transactions:", error);
-		throw new Error(error.message || "Failed to list daily payment transactions");
+		console.error("Failed to get calendar month:", error);
+		throw new Error(error.message || "Failed to get calendar month");
 	}
 });
-ipcMain.handle("daily_payments:addTransaction", async (_event, { payment_id, amount, payment_method_id = null, paid_date = null, notes = null }) => {
+ipcMain.handle("calendar:getDay", async (_event, { date }) => {
 	try {
 		checkAuth();
+		if (!date) throw new Error("date is required");
 		const db = getDb();
-		if (!payment_id) throw new Error("Payment ID is required");
-		const amt = Number(amount);
-		if (!amt || amt <= 0) throw new Error("المبلغ يجب أن يكون أكبر من صفر / Amount must be greater than zero");
-		const payment = db.prepare("SELECT * FROM daily_payments WHERE id = ?").get(payment_id);
-		if (!payment) throw new Error("سجل الدفع اليومي غير موجود / Daily payment record not found");
-		const resolveMethodName = (id) => {
-			if (id == null) return null;
-			return db.prepare("SELECT name FROM payment_methods WHERE id = ?").get(id)?.name ?? null;
-		};
-		const now = (/* @__PURE__ */ new Date()).toISOString();
-		const date = paid_date || now.slice(0, 10);
-		db.transaction(() => {
-			if (db.prepare("SELECT COUNT(*) as c FROM daily_payment_transactions WHERE daily_payment_id = ?").get(payment_id).c === 0 && Number(payment.paid) > 0) db.prepare(`
-          INSERT INTO daily_payment_transactions (daily_payment_id, amount, payment_method_id, payment_method_name, paid_date, notes, created_at, updated_at, synced)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
-        `).run(payment_id, Number(payment.paid), payment.payment_method_id ?? null, payment.payment_method_name ?? null, (payment.updated_at || payment.created_at || now).slice(0, 10), "رصيد سابق / Previous balance", now, now);
-			db.prepare(`
-        INSERT INTO daily_payment_transactions (daily_payment_id, amount, payment_method_id, payment_method_name, paid_date, notes, created_at, updated_at, synced)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
-      `).run(payment_id, amt, payment_method_id, resolveMethodName(payment_method_id), date, notes, now, now);
-			recomputeDailyPaymentFromTransactions(db, payment_id);
-		})();
+		const d = new Date(date);
 		return {
-			payment: db.prepare("SELECT p.*, c.name as child_name, c.guardian as child_guardian, c.guardian_phone as child_guardian_phone FROM daily_payments p JOIN children c ON p.child_id = c.id WHERE p.id = ?").get(payment_id),
-			transactions: db.prepare("SELECT * FROM daily_payment_transactions WHERE daily_payment_id = ? ORDER BY paid_date ASC, id ASC").all(payment_id)
+			date,
+			entries: buildMonthEntries(db, d.getFullYear(), d.getMonth() + 1).filter((e) => e.date === date)
 		};
 	} catch (error) {
-		console.error("Failed to add daily payment transaction:", error);
-		throw new Error(error.message || "Failed to add daily payment transaction");
-	}
-});
-ipcMain.handle("daily_payments:deleteTransaction", async (_event, { id }) => {
-	try {
-		checkAuth();
-		const db = getDb();
-		if (!id) throw new Error("Transaction ID is required");
-		const tx = db.prepare("SELECT daily_payment_id FROM daily_payment_transactions WHERE id = ?").get(id);
-		if (!tx) throw new Error("العملية غير موجودة / Transaction not found");
-		db.transaction(() => {
-			db.prepare("DELETE FROM daily_payment_transactions WHERE id = ?").run(id);
-			recomputeDailyPaymentFromTransactions(db, tx.daily_payment_id);
-		})();
-		return {
-			payment: db.prepare("SELECT p.*, c.name as child_name, c.guardian as child_guardian, c.guardian_phone as child_guardian_phone FROM daily_payments p JOIN children c ON p.child_id = c.id WHERE p.id = ?").get(tx.daily_payment_id),
-			transactions: db.prepare("SELECT * FROM daily_payment_transactions WHERE daily_payment_id = ? ORDER BY paid_date ASC, id ASC").all(tx.daily_payment_id)
-		};
-	} catch (error) {
-		console.error("Failed to delete daily payment transaction:", error);
-		throw new Error(error.message || "Failed to delete daily payment transaction");
+		console.error("Failed to get calendar day:", error);
+		throw new Error(error.message || "Failed to get calendar day");
 	}
 });
 //#endregion

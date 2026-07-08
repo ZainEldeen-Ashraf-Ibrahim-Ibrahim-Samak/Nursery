@@ -1,5 +1,6 @@
 import { useEffect, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useNavigate } from 'react-router-dom'
 import { useCalendarStore } from '../../store/useCalendarStore.js'
 import { Card } from '../../components/ui/Card.js'
 import { Button } from '../../components/ui/Button.js'
@@ -8,6 +9,7 @@ import { Alert } from '../../components/ui/Alert.js'
 export default function Calendar() {
   const { i18n } = useTranslation()
   const isAr = i18n.language === 'ar'
+  const navigate = useNavigate()
   const {
     year, month, entries, selectedDate, dayEntries, isLoading, error,
     setMonth, fetchMonth, selectDay, clearSelection,
@@ -81,7 +83,12 @@ export default function Calendar() {
           ) : (
             <ul className="divide-y divide-slate-100">
               {dayEntries.map((e, i) => (
-                <li key={i} className="px-4 py-3 flex items-center justify-between text-sm">
+                <li
+                  key={i}
+                  onClick={() => e.session_id && navigate(`/sessions?session=${e.session_id}`)}
+                  className={`px-4 py-3 flex items-center justify-between text-sm ${e.session_id ? 'cursor-pointer hover:bg-slate-50' : ''}`}
+                  title={e.session_id ? (isAr ? 'فتح كشف الحضور' : 'Open attendance sheet') : undefined}
+                >
                   <span className="font-medium text-slate-800">{e.user_name}</span>
                   <span className="text-slate-600">{e.service_name || '-'}</span>
                   <span className="text-slate-500">{e.teacher_name || (isAr ? 'بدون معلم' : 'No teacher')}</span>

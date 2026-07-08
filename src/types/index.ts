@@ -149,6 +149,7 @@ export interface CalendarEntry {
   service_name: string | null
   teacher_id: number | null
   teacher_name: string | null
+  session_id: number | null
 }
 
 export interface PaymentTransaction {

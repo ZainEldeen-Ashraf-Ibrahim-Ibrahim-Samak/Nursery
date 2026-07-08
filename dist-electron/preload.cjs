@@ -29,7 +29,8 @@ electron.contextBridge.exposeInMainWorld("api", {
 		previewTeacherCost: (teacher_id, lesson_days) => electron.ipcRenderer.invoke("childServices:previewTeacherCost", {
 			teacher_id,
 			lesson_days
-		})
+		}),
+		getTimetable: (child_id) => electron.ipcRenderer.invoke("childServices:getTimetable", { child_id })
 	},
 	serviceTeachers: {
 		list: (service_id) => electron.ipcRenderer.invoke("serviceTeachers:list", { service_id }),
@@ -59,17 +60,24 @@ electron.contextBridge.exposeInMainWorld("api", {
 		deleteBulk: (ids) => electron.ipcRenderer.invoke("payments:deleteBulk", { ids }),
 		deleteAll: (args) => electron.ipcRenderer.invoke("payments:deleteAll", args)
 	},
-	dailyPayments: {
-		get: (args) => electron.ipcRenderer.invoke("daily_payments:get", args),
-		generate: (args) => electron.ipcRenderer.invoke("daily_payments:generate", args),
-		update: (args) => electron.ipcRenderer.invoke("daily_payments:update", args),
-		bulkPay: (args) => electron.ipcRenderer.invoke("daily_payments:bulkPay", args),
-		deleteBulk: (args) => electron.ipcRenderer.invoke("daily_payments:deleteBulk", args),
-		deleteAll: (args) => electron.ipcRenderer.invoke("daily_payments:deleteAll", args),
-		deleteForChild: (args) => electron.ipcRenderer.invoke("daily_payments:deleteForChild", args),
-		listTransactions: (payment_id) => electron.ipcRenderer.invoke("daily_payments:listTransactions", { payment_id }),
-		addTransaction: (args) => electron.ipcRenderer.invoke("daily_payments:addTransaction", args),
-		deleteTransaction: (id) => electron.ipcRenderer.invoke("daily_payments:deleteTransaction", { id })
+	transactions: { list: (args) => electron.ipcRenderer.invoke("transactions:list", args) },
+	childIllnessCases: {
+		getOpen: (child_id) => electron.ipcRenderer.invoke("childIllnessCases:getOpen", { child_id }),
+		list: (child_id) => electron.ipcRenderer.invoke("childIllnessCases:list", { child_id }),
+		create: (args) => electron.ipcRenderer.invoke("childIllnessCases:create", args),
+		resolve: (args) => electron.ipcRenderer.invoke("childIllnessCases:resolve", args)
+	},
+	childActivities: {
+		list: (child_id) => electron.ipcRenderer.invoke("childActivities:list", { child_id }),
+		create: (args) => electron.ipcRenderer.invoke("childActivities:create", args),
+		delete: (id) => electron.ipcRenderer.invoke("childActivities:delete", { id })
+	},
+	calendar: {
+		getMonth: (year, month) => electron.ipcRenderer.invoke("calendar:getMonth", {
+			year,
+			month
+		}),
+		getDay: (date) => electron.ipcRenderer.invoke("calendar:getDay", { date })
 	},
 	employees: {
 		get: () => electron.ipcRenderer.invoke("employees:get"),

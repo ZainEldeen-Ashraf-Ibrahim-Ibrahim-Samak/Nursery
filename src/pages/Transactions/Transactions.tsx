@@ -1,9 +1,10 @@
-import { useEffect } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useTransactionsStore, type TransactionRange } from '../../store/useTransactionsStore.js'
 import { Select } from '../../components/ui/Select.js'
 import { Input } from '../../components/ui/Input.js'
 import { Alert } from '../../components/ui/Alert.js'
+import { Button } from '../../components/ui/Button.js'
 
 export default function Transactions() {
   const { i18n } = useTranslation()
@@ -12,6 +13,12 @@ export default function Transactions() {
     range, date, from, to, transactions, isLoading, error,
     setRange, setDate, setFrom, setTo, fetchTransactions,
   } = useTransactionsStore()
+
+  // Client-side refinement over the fetched date-range results — search by child name and
+  // narrow by service/type, since the backend only knows how to slice by date.
+  const [search, setSearch] = useState('')
+  const [serviceFilter, setServiceFilter] = useState('')
+  const [typeFilter, setTypeFilter] = useState('')
 
   useEffect(() => {
     fetchTransactions()
@@ -31,7 +38,39 @@ export default function Transactions() {
     return isAr ? 'مستحق' : 'Charge'
   }
 
-  const total = transactions.reduce((sum, t) => sum + Number(t.amount || 0), 0)
+  const serviceOptions = useMemo(() => {
+    const names = Array.from(new Set(transactions.map((t) => t.service_name).filter(Boolean)))
+    return [
+      { value: '', label: isAr ? 'كل الخدمات' : 'All services' },
+      ...names.map((name) => ({ value: name, label: name })),
+    ]
+  }, [transactions, isAr])
+
+  const typeOptions = [
+    { value: '', label: isAr ? 'كل الأنواع' : 'All types' },
+    { value: 'payment', label: isAr ? 'دفعة' : 'Payment' },
+    { value: 'charge', label: isAr ? 'مستحق' : 'Charge' },
+    { value: 'refund', label: isAr ? 'استرداد' : 'Refund' },
+  ]
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    return transactions.filter((t) => {
+      if (q && !t.child_name?.toLowerCase().includes(q)) return false
+      if (serviceFilter && t.service_name !== serviceFilter) return false
+      if (typeFilter && t.type !== typeFilter) return false
+      return true
+    })
+  }, [transactions, search, serviceFilter, typeFilter])
+
+  const hasActiveFilters = search !== '' || serviceFilter !== '' || typeFilter !== ''
+  const clearFilters = () => {
+    setSearch('')
+    setServiceFilter('')
+    setTypeFilter('')
+  }
+
+  const total = filtered.reduce((sum, t) => sum + Number(t.amount || 0), 0)
 
   return (
     <div className="p-6 space-y-6">
@@ -56,6 +95,30 @@ export default function Transactions() {
         )}
       </div>
 
+      <div className="flex flex-wrap items-end gap-4 bg-white border border-slate-200/80 p-4 rounded-lg shadow-sm">
+        <Input
+          label={isAr ? 'بحث باسم الطفل' : 'Search by child name'}
+          placeholder={isAr ? 'اكتب اسم الطفل...' : 'Type a child name...'}
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+        <Select
+          label={isAr ? 'الخدمة' : 'Service'}
+          value={serviceFilter}
+          onChange={(e) => setServiceFilter(e.target.value)}
+          options={serviceOptions}
+        />
+        <Select
+          label={isAr ? 'النوع' : 'Type'}
+          value={typeFilter}
+          onChange={(e) => setTypeFilter(e.target.value)}
+          options={typeOptions}
+        />
+        {hasActiveFilters && (
+          <Button variant="outline" onClick={clearFilters}>{isAr ? 'مسح الفلاتر' : 'Clear filters'}</Button>
+        )}
+      </div>
+
       {error && <Alert variant="danger">{error}</Alert>}
 
       <div className="bg-white border border-slate-200/80 rounded-lg shadow-sm overflow-x-auto">
@@ -72,10 +135,14 @@ export default function Transactions() {
           <tbody className="divide-y divide-slate-100">
             {isLoading ? (
               <tr><td colSpan={5} className="px-4 py-6 text-center text-slate-500">{isAr ? 'جارٍ التحميل...' : 'Loading...'}</td></tr>
-            ) : transactions.length === 0 ? (
-              <tr><td colSpan={5} className="px-4 py-6 text-center text-slate-500">{isAr ? 'لا توجد معاملات في هذه الفترة' : 'No transactions in this period'}</td></tr>
+            ) : filtered.length === 0 ? (
+              <tr><td colSpan={5} className="px-4 py-6 text-center text-slate-500">
+                {transactions.length === 0
+                  ? (isAr ? 'لا توجد معاملات في هذه الفترة' : 'No transactions in this period')
+                  : (isAr ? 'لا توجد نتائج مطابقة للفلاتر' : 'No transactions match the current filters')}
+              </td></tr>
             ) : (
-              transactions.map((t) => (
+              filtered.map((t) => (
                 <tr key={t.id}>
                   <td className="px-4 py-2 text-sm text-slate-900">{t.child_name}</td>
                   <td className="px-4 py-2 text-sm text-slate-700">{t.service_name}</td>
@@ -86,7 +153,7 @@ export default function Transactions() {
               ))
             )}
           </tbody>
-          {transactions.length > 0 && (
+          {filtered.length > 0 && (
             <tfoot>
               <tr>
                 <td colSpan={3} className="px-4 py-2 text-sm font-semibold text-slate-900">{isAr ? 'الإجمالي' : 'Total'}</td>

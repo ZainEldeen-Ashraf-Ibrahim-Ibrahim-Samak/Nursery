@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useSessionsStore } from '../../store/useSessionsStore.js'
 import { useAttendanceStore } from '../../store/useAttendanceStore.js'
 import { useAuthStore } from '../../store/useAuthStore.js'
@@ -16,6 +16,7 @@ export default function SessionsList() {
   const { i18n } = useTranslation()
   const isAr = i18n.language === 'ar'
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const { sessions, isLoading, error, fetchSessions, addSession, updateSession, deleteSession, clearError } = useSessionsStore()
   const { sheet, isLoading: sheetLoading, error: sheetError, fetchSheet, recordBulk, clearError: clearSheetError } = useAttendanceStore()
   const currentUser = useAuthStore((s) => s.user)
@@ -135,6 +136,23 @@ export default function SessionsList() {
     setAttendanceHasTeacherOnly(false)
     setTeacherFilterId('')
   }
+
+  // Support deep-linking here from the Calendar page (?session=<id>) — clicking a scheduled
+  // session there should open its attendance sheet directly instead of just landing on the list.
+  useEffect(() => {
+    const sessionParam = searchParams.get('session')
+    if (!sessionParam) return
+    const sessionId = Number(sessionParam)
+    if (!Number.isNaN(sessionId)) {
+      openAttendance(sessionId)
+    }
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev)
+      next.delete('session')
+      return next
+    }, { replace: true })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams])
 
   const editKey = (rec: AttendanceRecord) => `${rec.child_id}:${rec.teacher_id ?? 'none'}`
 

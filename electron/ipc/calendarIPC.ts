@@ -18,6 +18,10 @@ interface CalendarEntry {
   service_name: string | null
   teacher_id: number | null
   teacher_name: string | null
+  // Set only for entries derived from an actual scheduled_sessions row — lets the UI open that
+  // session's attendance sheet on click. Recurring child_services timetable slots have no
+  // corresponding session (they're a schedule, not a taken attendance record), so this is null there.
+  session_id: number | null
 }
 
 // Aggregates schedule data at read time from child_services (lesson_days/teacher_id) and
@@ -61,6 +65,7 @@ function buildMonthEntries(db: any, year: number, month: number): CalendarEntry[
         service_name: en.service,
         teacher_id: en.teacher_id ?? null,
         teacher_name: en.teacher_name ?? null,
+        session_id: null,
       })
     }
   }
@@ -95,6 +100,7 @@ function buildMonthEntries(db: any, year: number, month: number): CalendarEntry[
         service_name: session.service_name,
         teacher_id: null,
         teacher_name: null,
+        session_id: session.id,
       })
     } else {
       for (const t of teachers) {
@@ -107,6 +113,7 @@ function buildMonthEntries(db: any, year: number, month: number): CalendarEntry[
           service_name: session.service_name,
           teacher_id: t.employee_id,
           teacher_name: t.employee_name,
+          session_id: session.id,
         })
       }
     }
