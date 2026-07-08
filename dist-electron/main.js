@@ -22574,7 +22574,7 @@ ipcMain.handle("payments:get", async (_event, { month, year }) => {
         (SELECT COUNT(*) FROM payment_transactions pt WHERE pt.payment_id = p.id) as transaction_count
       FROM payments p
       JOIN children c ON p.child_id = c.id
-      WHERE p.month = ? AND p.year = ?
+      WHERE p.month = ? AND p.year = ? AND p.unit != 'يوم'
       ORDER BY c.name ASC
     `).all(month, year);
 		let totalInvoiced = 0;
@@ -22632,7 +22632,7 @@ ipcMain.handle("payments:generate", async (_event, { month, year }) => {
       SELECT cs.*, c.extra_lessons, c.session_price, c.sessions_baseline, c.reg_date
       FROM child_services cs
       JOIN children c ON cs.child_id = c.id
-      WHERE c.is_active = 1
+      WHERE c.is_active = 1 AND cs.unit != 'يوم'
     `).all();
 		let createdCount = 0;
 		const now = (/* @__PURE__ */ new Date()).toISOString();

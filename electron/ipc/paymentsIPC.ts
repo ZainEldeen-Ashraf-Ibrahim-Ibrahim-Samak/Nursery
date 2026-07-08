@@ -51,12 +51,13 @@ ipcMain.handle('payments:get', async (_event, { month, year }) => {
     }
     
     // Fetch payments joined with children names and status
+    // Exclude daily-unit (يوم) services — they belong to Daily Billing, not Monthly Billing
     const payments = db.prepare(`
       SELECT p.*, c.name as child_name, c.guardian as child_guardian, c.guardian_phone as child_guardian_phone, c.is_active as child_is_active,
         (SELECT COUNT(*) FROM payment_transactions pt WHERE pt.payment_id = p.id) as transaction_count
       FROM payments p
       JOIN children c ON p.child_id = c.id
-      WHERE p.month = ? AND p.year = ?
+      WHERE p.month = ? AND p.year = ? AND p.unit != 'يوم'
       ORDER BY c.name ASC
     `).all(month, year) as Payment[]
     
@@ -128,11 +129,12 @@ ipcMain.handle('payments:generate', async (_event, { month, year }) => {
     }
     
     // Fetch active enrollments + child extra session data
+    // Exclude daily-unit (يوم) services — these are billed exclusively via Daily Billing to avoid double-charging
     const activeEnrollments = db.prepare(`
       SELECT cs.*, c.extra_lessons, c.session_price, c.sessions_baseline, c.reg_date
       FROM child_services cs
       JOIN children c ON cs.child_id = c.id
-      WHERE c.is_active = 1
+      WHERE c.is_active = 1 AND cs.unit != 'يوم'
     `).all() as any[]
 
     let createdCount = 0
