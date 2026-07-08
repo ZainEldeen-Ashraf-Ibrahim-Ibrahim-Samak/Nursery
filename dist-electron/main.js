@@ -28378,6 +28378,7 @@ ipcMain.handle("storage:clear", async (_event, { confirm }) => {
 				db.prepare("DELETE FROM notifications").run();
 				db.prepare("DELETE FROM imported_snapshots").run();
 				db.prepare("DELETE FROM employees").run();
+				db.prepare("DELETE FROM daily_payment_transactions").run();
 				db.prepare("DELETE FROM daily_payments").run();
 			})();
 		} finally {
@@ -28951,6 +28952,23 @@ var dailyPaymentSchema = new Schema({
 	synced: Number
 }, sharedOptions);
 var DailyPaymentModel = mongoose.models["sync_daily_payments"] || mongoose.model("sync_daily_payments", dailyPaymentSchema);
+var dailyPaymentTransactionSchema = new Schema({
+	id: {
+		type: Number,
+		required: true,
+		unique: true
+	},
+	daily_payment_id: Number,
+	amount: Number,
+	payment_method_id: Number,
+	payment_method_name: String,
+	paid_date: String,
+	notes: String,
+	created_at: String,
+	updated_at: String,
+	synced: Number
+}, sharedOptions);
+var DailyPaymentTransactionModel = mongoose.models["sync_daily_payment_transactions"] || mongoose.model("sync_daily_payment_transactions", dailyPaymentTransactionSchema);
 var SYNC_ENTITIES = [
 	{
 		name: "children",
@@ -29081,6 +29099,11 @@ var SYNC_ENTITIES = [
 		name: "daily_payments",
 		model: DailyPaymentModel,
 		table: "daily_payments"
+	},
+	{
+		name: "daily_payment_transactions",
+		model: DailyPaymentTransactionModel,
+		table: "daily_payment_transactions"
 	}
 ];
 //#endregion
