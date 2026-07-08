@@ -123,6 +123,49 @@ ipcMain.handle('childServices:previewTeacherCost', async (_event, { teacher_id, 
   }
 })
 
+// Feature 009: child details timetable — derived from existing child_services columns
+// (teacher_id, lesson_days) rather than a new table (research.md #4).
+ipcMain.handle('childServices:getTimetable', async (_event, { child_id }) => {
+  try {
+    checkAuth()
+    if (!child_id) throw new Error('child_id is required')
+    const db = getDb()
+
+    const enrollments = db.prepare(`
+      SELECT cs.id as service_row_id, cs.service, cs.teacher_id, cs.lesson_days, e.name as teacher_name
+      FROM child_services cs
+      LEFT JOIN employees e ON e.id = cs.teacher_id
+      WHERE cs.child_id = ?
+    `).all(child_id) as any[]
+
+    const slots: { service_row_id: number; service: string; day: number; teacher_id: number | null; teacher_name: string | null }[] = []
+    for (const en of enrollments) {
+      let days: number[] = []
+      if (en.lesson_days) {
+        try {
+          days = JSON.parse(en.lesson_days)
+        } catch {
+          days = []
+        }
+      }
+      for (const day of days) {
+        slots.push({
+          service_row_id: en.service_row_id,
+          service: en.service,
+          day,
+          teacher_id: en.teacher_id ?? null,
+          teacher_name: en.teacher_name ?? null,
+        })
+      }
+    }
+
+    return slots
+  } catch (error: any) {
+    console.error('Failed to get child timetable:', error)
+    throw new Error(error.message || 'Failed to get child timetable')
+  }
+})
+
 ipcMain.handle('childServices:remove', async (_event, { id }) => {
   try {
     requireAdmin()

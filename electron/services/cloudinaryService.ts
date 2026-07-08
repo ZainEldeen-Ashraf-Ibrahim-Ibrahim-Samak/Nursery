@@ -62,3 +62,45 @@ export async function uploadImage(dataUrl: string, folder = 'nursery/children'):
   const body: any = await res.json()
   return { url: body.secure_url as string, publicId: body.public_id as string }
 }
+
+/**
+ * Upload a video (data URL or remote URL) to Cloudinary via a signed REST request,
+ * identical in shape to `uploadImage` but targeting the `/video/upload` endpoint with
+ * `resource_type=video` (feature 009 — child activity/diary media).
+ */
+export async function uploadVideo(dataUrl: string, folder = 'nursery/children'): Promise<UploadedImage> {
+  const config = getCloudinaryConfig()
+  if (!config) {
+    throw new Error('Cloudinary is not configured / لم يتم إعداد Cloudinary')
+  }
+  if (!dataUrl) {
+    throw new Error('No video provided / لا يوجد فيديو')
+  }
+
+  const timestamp = Math.floor(Date.now() / 1000)
+  const signature = signParams({ folder, timestamp }, config.apiSecret)
+
+  const form = new FormData()
+  form.append('file', dataUrl)
+  form.append('api_key', config.apiKey)
+  form.append('timestamp', String(timestamp))
+  form.append('folder', folder)
+  form.append('signature', signature)
+
+  const endpoint = `https://api.cloudinary.com/v1_1/${config.cloudName}/video/upload`
+  const res = await fetch(endpoint, { method: 'POST', body: form })
+
+  if (!res.ok) {
+    let detail = ''
+    try {
+      const body: any = await res.json()
+      detail = body?.error?.message ? `: ${body.error.message}` : ''
+    } catch {
+      // ignore body parse errors
+    }
+    throw new Error(`Cloudinary video upload failed (${res.status})${detail}`)
+  }
+
+  const body: any = await res.json()
+  return { url: body.secure_url as string, publicId: body.public_id as string }
+}

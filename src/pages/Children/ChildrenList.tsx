@@ -290,7 +290,14 @@ export default function ChildrenList() {
           >
             {t('statement')}
           </Button>
-          
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => navigate(`/children/${child.id}/details`)}
+          >
+            {i18n.language === 'ar' ? 'التفاصيل' : 'Details'}
+          </Button>
+
           {isAdmin && (
             <>
               <Button

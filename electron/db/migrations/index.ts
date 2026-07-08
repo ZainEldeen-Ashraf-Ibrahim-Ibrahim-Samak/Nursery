@@ -944,6 +944,60 @@ const migrations: Migration[] = [
         CREATE INDEX IF NOT EXISTS idx_daily_payment_tx_payment ON daily_payment_transactions(daily_payment_id);
       `)
     }
+  },
+  {
+    // Feature 009: illness case tracking — presence of an 'open' row suppresses the
+    // "Add Activity" diary action on the child details page.
+    name: '036_child_illness_cases',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS child_illness_cases (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          child_id INTEGER NOT NULL REFERENCES children(id) ON DELETE CASCADE,
+          status TEXT NOT NULL CHECK(status IN ('open','resolved')),
+          description TEXT,
+          opened_at TEXT NOT NULL,
+          resolved_at TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          synced INTEGER DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_illness_cases_child_status ON child_illness_cases(child_id, status);
+      `)
+    }
+  },
+  {
+    // Feature 009: child activity/media diary entries (photo/video hosted on Cloudinary).
+    name: '037_child_activities',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS child_activities (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          child_id INTEGER NOT NULL REFERENCES children(id) ON DELETE CASCADE,
+          activity_date TEXT NOT NULL,
+          note TEXT,
+          media_url TEXT,
+          media_type TEXT CHECK(media_type IN ('photo','video')),
+          media_status TEXT CHECK(media_status IN ('uploaded','failed')),
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          synced INTEGER DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_child_activities_child_date ON child_activities(child_id, activity_date);
+      `)
+    }
+  },
+  {
+    // Feature 009: Daily Billing is being replaced by the Transactions tab (derived from the
+    // existing `payments` table). Per spec Clarifications, historical daily-billing data is
+    // discarded outright rather than migrated.
+    name: '038_drop_daily_payments',
+    up: (db) => {
+      db.exec(`
+        DROP TABLE IF EXISTS daily_payment_transactions;
+        DROP TABLE IF EXISTS daily_payments;
+      `)
+    }
   }
 ]
 

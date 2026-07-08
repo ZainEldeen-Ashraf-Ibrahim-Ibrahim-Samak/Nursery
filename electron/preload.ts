@@ -31,6 +31,7 @@ const api = {
     remove: (args: { id: number }) => ipcRenderer.invoke('childServices:remove', args),
     previewTeacherCost: (teacher_id: number, lesson_days: number[]) =>
       ipcRenderer.invoke('childServices:previewTeacherCost', { teacher_id, lesson_days }) as Promise<{ remaining_sessions: number; expected_cost: number; teacher_session_rate: number }>,
+    getTimetable: (child_id: number) => ipcRenderer.invoke('childServices:getTimetable', { child_id }),
   },
 
   // Service Teachers
@@ -68,17 +69,30 @@ const api = {
     deleteAll: (args: { month: string; year: number }) => ipcRenderer.invoke('payments:deleteAll', args) as Promise<{ ok: boolean; deleted: number }>,
   },
 
-  dailyPayments: {
-    get: (args: { billing_date: string }) => ipcRenderer.invoke('daily_payments:get', args),
-    generate: (args: { billing_date: string }) => ipcRenderer.invoke('daily_payments:generate', args),
-    update: (args: { id: number; quantity?: number; paid?: number; notes?: string; payment_method_id?: number | null }) => ipcRenderer.invoke('daily_payments:update', args),
-    bulkPay: (args: { ids: number[]; payment_method_id?: number | null }) => ipcRenderer.invoke('daily_payments:bulkPay', args),
-    deleteBulk: (args: { ids: number[] }) => ipcRenderer.invoke('daily_payments:deleteBulk', args),
-    deleteAll: (args: { billing_date: string }) => ipcRenderer.invoke('daily_payments:deleteAll', args),
-    deleteForChild: (args: { child_id: number; billing_date: string }) => ipcRenderer.invoke('daily_payments:deleteForChild', args),
-    listTransactions: (payment_id: number) => ipcRenderer.invoke('daily_payments:listTransactions', { payment_id }),
-    addTransaction: (args: { payment_id: number; amount: number; payment_method_id?: number | null; paid_date?: string | null; notes?: string | null }) => ipcRenderer.invoke('daily_payments:addTransaction', args),
-    deleteTransaction: (id: number) => ipcRenderer.invoke('daily_payments:deleteTransaction', { id }),
+  // Transactions (feature 009 — replaces Daily Billing)
+  transactions: {
+    list: (args: { range: 'day' | 'week' | 'month' | 'custom'; date?: string; from?: string; to?: string; childId?: number }) =>
+      ipcRenderer.invoke('transactions:list', args),
+  },
+
+  // Child illness cases + activity/media diary (feature 009)
+  childIllnessCases: {
+    getOpen: (child_id: number) => ipcRenderer.invoke('childIllnessCases:getOpen', { child_id }),
+    list: (child_id: number) => ipcRenderer.invoke('childIllnessCases:list', { child_id }),
+    create: (args: { child_id: number; description?: string; opened_at?: string }) => ipcRenderer.invoke('childIllnessCases:create', args),
+    resolve: (args: { id: number; resolved_at?: string }) => ipcRenderer.invoke('childIllnessCases:resolve', args),
+  },
+  childActivities: {
+    list: (child_id: number) => ipcRenderer.invoke('childActivities:list', { child_id }),
+    create: (args: { child_id: number; activity_date?: string; note?: string; media_data_url?: string; media_type?: 'photo' | 'video' }) =>
+      ipcRenderer.invoke('childActivities:create', args),
+    delete: (id: number) => ipcRenderer.invoke('childActivities:delete', { id }),
+  },
+
+  // Shared Calendar page (feature 009)
+  calendar: {
+    getMonth: (year: number, month: number) => ipcRenderer.invoke('calendar:getMonth', { year, month }),
+    getDay: (date: string) => ipcRenderer.invoke('calendar:getDay', { date }),
   },
 
   // Salaries

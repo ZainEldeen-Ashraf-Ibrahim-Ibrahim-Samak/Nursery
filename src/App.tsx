@@ -16,10 +16,12 @@ import Login from './pages/Login.js'
 import ChildrenList from './pages/Children/ChildrenList.js'
 import ChildForm from './pages/Children/ChildForm.js'
 import ChildStatement from './pages/Children/ChildStatement.js'
+import ChildDetails from './pages/Children/ChildDetails.js'
 import MonthlyPayments from './pages/Payments/MonthlyPayments.js'
 import SalariesList from './pages/Salaries/SalariesList.js'
 import PayrollReport from './pages/Salaries/PayrollReport.js'
-import DailyPayments from './pages/Payments/DailyPayments.js'
+import Transactions from './pages/Transactions/Transactions.js'
+import CalendarPage from './pages/Calendar/Calendar.js'
 import EmployeesList from './pages/Employees/EmployeesList.js'
 import ExpensesList from './pages/Expenses/ExpensesList.js'
 import TargetPlanning from './pages/Target/TargetPlanning.js'
@@ -88,10 +90,12 @@ export default function App() {
           <Route path="children/new" element={<RoleGuard allowedRoles={['admin', 'employee']}><ChildForm /></RoleGuard>} />
           <Route path="children/:id/edit" element={<RoleGuard allowedRoles={['admin']}><ChildForm /></RoleGuard>} />
           <Route path="children/:id/statement" element={<ChildStatement />} />
+          <Route path="children/:id/details" element={<ChildDetails />} />
 
           {/* Payments - Both read/write */}
           <Route path="payments" element={<MonthlyPayments />} />
-          <Route path="payments/daily" element={<DailyPayments />} />
+          <Route path="transactions" element={<Transactions />} />
+          <Route path="calendar" element={<CalendarPage />} />
 
           {/* Employees - Admin only */}
           <Route

@@ -25,7 +25,7 @@ description: "Task list for Transactions Timeline, Child Diary & Staff Calendar"
 
 **Purpose**: Nothing new to scaffold — this feature extends the existing Electron/React/SQLite project. No new packages, build config, or lint config needed.
 
-- [ ] T001 Confirm dev environment runs cleanly (`npm run dev`) before starting, and note the current highest migration number in `electron/db/migrations/index.ts` (currently `035_daily_payment_transactions`) so new migrations are numbered `036`/`037` without collision.
+- [X] T001 Confirm dev environment runs cleanly (`npm run dev`) before starting, and note the current highest migration number in `electron/db/migrations/index.ts` (currently `035_daily_payment_transactions`) so new migrations are numbered `036`/`037` without collision.
 
 ---
 
@@ -33,14 +33,14 @@ description: "Task list for Transactions Timeline, Child Diary & Staff Calendar"
 
 **Purpose**: Schema and sync-registry changes every user story depends on. **Must complete before any user story work.**
 
-- [ ] T002 Add migration `036_child_illness_cases` in `electron/db/migrations/index.ts` creating `child_illness_cases` (id, child_id FK, status CHECK open/resolved, description, opened_at, resolved_at, created_at, updated_at, synced) with index `idx_illness_cases_child_status`, per data-model.md.
-- [ ] T003 Add migration `036b_child_activities` (or combine as `036_child_activities` and renumber the illness-case migration to `037` — keep sequential, no gaps) in `electron/db/migrations/index.ts` creating `child_activities` (id, child_id FK, activity_date, note, media_url, media_type CHECK photo/video, media_status CHECK uploaded/failed, created_at, updated_at, synced) with index `idx_child_activities_child_date`, per data-model.md.
-- [ ] T004 Add migration `038_drop_daily_payments` in `electron/db/migrations/index.ts` that drops `daily_payments` and `daily_payment_transactions` tables (depends on T002, T003 for numbering).
-- [ ] T005 [P] In `electron/services/mongoSync.ts`: remove `DailyPaymentModel`, `DailyPaymentTransactionModel`, and their two `SYNC_ENTITIES` rows.
-- [ ] T006 [P] In `electron/services/mongoSync.ts`: add `ChildIllnessCaseModel` and `ChildActivityModel` (mirroring existing schema patterns) plus their `SYNC_ENTITIES` rows (`child_illness_cases`, `child_activities`).
-- [ ] T007 [P] In `electron/services/cloudinaryService.ts`: add `uploadVideo(dataUrl, folder)` mirroring the existing `uploadImage` signed-upload flow but with `resource_type: 'video'` and the `/video/upload` endpoint.
-- [ ] T008 Remove `electron/ipc/dailyPaymentsIPC.ts` and its registration in `electron/main.ts`; remove its `window.api.dailyPayments.*` bridge entries from the preload bridge file.
-- [ ] T009 In `electron/ipc/storageIPC.ts`: remove the `daily_payments`/`daily_payment_transactions` DELETE-all wiring (depends on T004, T008).
+- [X] T002 Add migration `036_child_illness_cases` in `electron/db/migrations/index.ts` creating `child_illness_cases` (id, child_id FK, status CHECK open/resolved, description, opened_at, resolved_at, created_at, updated_at, synced) with index `idx_illness_cases_child_status`, per data-model.md.
+- [X] T003 Add migration `036b_child_activities` (or combine as `036_child_activities` and renumber the illness-case migration to `037` — keep sequential, no gaps) in `electron/db/migrations/index.ts` creating `child_activities` (id, child_id FK, activity_date, note, media_url, media_type CHECK photo/video, media_status CHECK uploaded/failed, created_at, updated_at, synced) with index `idx_child_activities_child_date`, per data-model.md.
+- [X] T004 Add migration `038_drop_daily_payments` in `electron/db/migrations/index.ts` that drops `daily_payments` and `daily_payment_transactions` tables (depends on T002, T003 for numbering).
+- [X] T005 [P] In `electron/services/mongoSync.ts`: remove `DailyPaymentModel`, `DailyPaymentTransactionModel`, and their two `SYNC_ENTITIES` rows.
+- [X] T006 [P] In `electron/services/mongoSync.ts`: add `ChildIllnessCaseModel` and `ChildActivityModel` (mirroring existing schema patterns) plus their `SYNC_ENTITIES` rows (`child_illness_cases`, `child_activities`).
+- [X] T007 [P] In `electron/services/cloudinaryService.ts`: add `uploadVideo(dataUrl, folder)` mirroring the existing `uploadImage` signed-upload flow but with `resource_type: 'video'` and the `/video/upload` endpoint.
+- [X] T008 Remove `electron/ipc/dailyPaymentsIPC.ts` and its registration in `electron/main.ts`; remove its `window.api.dailyPayments.*` bridge entries from the preload bridge file.
+- [X] T009 In `electron/ipc/storageIPC.ts`: remove the `daily_payments`/`daily_payment_transactions` DELETE-all wiring (depends on T004, T008).
 
 **Checkpoint**: Schema, sync registry, Cloudinary, and old Daily Billing IPC are settled — user stories can now proceed.
 
@@ -54,13 +54,13 @@ description: "Task list for Transactions Timeline, Child Diary & Staff Calendar"
 
 ### Implementation for User Story 1
 
-- [ ] T010 [US1] Create `electron/ipc/transactionsIPC.ts` with `transactions:list` handler: validates `{ range, date?, from?, to?, childId?, status? }`, computes the day/Saturday–Friday-week/month/custom SQL date bounds, and queries `payments` joined to `children`/`child_services` returning `{ child_id, child_name, service_id, service_name, amount, type, date }[]` sorted by date desc.
-- [ ] T011 [US1] Register `transactionsIPC` in `electron/main.ts` and add `window.api.transactions.list(...)` to the preload bridge file.
-- [ ] T012 [P] [US1] Create `src/store/useTransactionsStore.ts` (Zustand) holding the current range mode, date/from/to selection, and fetched transaction list, calling `window.api.transactions.list`.
-- [ ] T013 [P] [US1] Create `src/pages/Transactions/Transactions.tsx`: range-mode toggle (Day/Week/Month/Custom), date pickers appropriate to each mode, and a table listing child, service, amount, type, date.
-- [ ] T014 [US1] Remove `src/pages/Payments/DailyPayments.tsx` and `src/pages/Payments/DailyPaymentInstallmentsModal.tsx`.
-- [ ] T015 [US1] Remove `src/store/useDailyPaymentsStore.ts`.
-- [ ] T016 [US1] In `src/App.tsx`: remove the Daily Billing route/nav entry; add the `Transactions` route and nav entry (bilingual AR/EN label).
+- [X] T010 [US1] Create `electron/ipc/transactionsIPC.ts` with `transactions:list` handler: validates `{ range, date?, from?, to?, childId?, status? }`, computes the day/Saturday–Friday-week/month/custom SQL date bounds, and queries `payments` joined to `children`/`child_services` returning `{ child_id, child_name, service_id, service_name, amount, type, date }[]` sorted by date desc.
+- [X] T011 [US1] Register `transactionsIPC` in `electron/main.ts` and add `window.api.transactions.list(...)` to the preload bridge file.
+- [X] T012 [P] [US1] Create `src/store/useTransactionsStore.ts` (Zustand) holding the current range mode, date/from/to selection, and fetched transaction list, calling `window.api.transactions.list`.
+- [X] T013 [P] [US1] Create `src/pages/Transactions/Transactions.tsx`: range-mode toggle (Day/Week/Month/Custom), date pickers appropriate to each mode, and a table listing child, service, amount, type, date.
+- [X] T014 [US1] Remove `src/pages/Payments/DailyPayments.tsx` and `src/pages/Payments/DailyPaymentInstallmentsModal.tsx`.
+- [X] T015 [US1] Remove `src/store/useDailyPaymentsStore.ts`.
+- [X] T016 [US1] In `src/App.tsx`: remove the Daily Billing route/nav entry; add the `Transactions` route and nav entry (bilingual AR/EN label).
 - [ ] T017 [US1] Run Part A and Part B of `quickstart.md` to verify Daily Billing is fully gone and Transactions filtering works for all four range modes.
 
 **Checkpoint**: User Story 1 fully functional and independently testable — this alone is a shippable MVP increment.
@@ -75,11 +75,11 @@ description: "Task list for Transactions Timeline, Child Diary & Staff Calendar"
 
 ### Implementation for User Story 2
 
-- [ ] T018 [US2] In `electron/ipc/childServicesIPC.ts`: add `childServices:getTimetable` handler returning `TimetableSlot[]` (day/lesson_days, service, teacher) derived from `child_services` (`teacher_id`, `lesson_days`, `service`) joined with `service_teachers` where applicable.
-- [ ] T019 [US2] Add `window.api.childServices.getTimetable(childId)` to the preload bridge file.
-- [ ] T020 [P] [US2] Create `src/store/useChildDetailsStore.ts` (Zustand) to hold the active child's timetable data (extendable in later stories for illness/activity/balance).
-- [ ] T021 [US2] Create `src/pages/Children/ChildDetails.tsx` with a timetable section rendering each slot's day, service, and teacher; empty-state message when no scheduled services exist.
-- [ ] T022 [US2] In `src/App.tsx`: add a `Children/:id/details` (or equivalent) route and a link from `ChildrenList.tsx`/`ChildForm.tsx` into the new details page.
+- [X] T018 [US2] In `electron/ipc/childServicesIPC.ts`: add `childServices:getTimetable` handler returning `TimetableSlot[]` (day/lesson_days, service, teacher) derived from `child_services` (`teacher_id`, `lesson_days`, `service`) joined with `service_teachers` where applicable.
+- [X] T019 [US2] Add `window.api.childServices.getTimetable(childId)` to the preload bridge file.
+- [X] T020 [P] [US2] Create `src/store/useChildDetailsStore.ts` (Zustand) to hold the active child's timetable data (extendable in later stories for illness/activity/balance).
+- [X] T021 [US2] Create `src/pages/Children/ChildDetails.tsx` with a timetable section rendering each slot's day, service, and teacher; empty-state message when no scheduled services exist.
+- [X] T022 [US2] In `src/App.tsx`: add a `Children/:id/details` (or equivalent) route and a link from `ChildrenList.tsx`/`ChildForm.tsx` into the new details page.
 - [ ] T023 [US2] Run Part C (timetable portion) of `quickstart.md` to verify the timetable section and its empty state.
 
 **Checkpoint**: User Stories 1 and 2 both work independently.
@@ -94,11 +94,11 @@ description: "Task list for Transactions Timeline, Child Diary & Staff Calendar"
 
 ### Implementation for User Story 3
 
-- [ ] T024 [US3] Create `electron/ipc/childIllnessCasesIPC.ts` with `childIllnessCases:getOpen`, `childIllnessCases:create`, `childIllnessCases:resolve`, `childIllnessCases:list` handlers per contracts/ipc-contracts.md.
-- [ ] T025 [US3] Create `electron/ipc/childActivitiesIPC.ts` with `childActivities:list`, `childActivities:create` (uploads via `cloudinaryService.uploadImage`/`uploadVideo`, sets `media_status: 'failed'` on upload error without failing the whole save), `childActivities:delete` (admin-only) handlers per contracts/ipc-contracts.md.
-- [ ] T026 [US3] Register `childIllnessCasesIPC` and `childActivitiesIPC` in `electron/main.ts`; add corresponding `window.api.childIllnessCases.*` / `window.api.childActivities.*` entries to the preload bridge file.
-- [ ] T027 [P] [US3] Create `src/store/useChildActivitiesStore.ts` (Zustand) for illness-case-open check, activity list, and create/delete actions.
-- [ ] T028 [US3] In `src/pages/Children/ChildDetails.tsx`: add the health section — render the open illness case (existing illness workflow, unchanged) when present; otherwise render an "Add Activity" form (note + photo/video picker) and the chronological diary list with photo previews and video playback.
+- [X] T024 [US3] Create `electron/ipc/childIllnessCasesIPC.ts` with `childIllnessCases:getOpen`, `childIllnessCases:create`, `childIllnessCases:resolve`, `childIllnessCases:list` handlers per contracts/ipc-contracts.md.
+- [X] T025 [US3] Create `electron/ipc/childActivitiesIPC.ts` with `childActivities:list`, `childActivities:create` (uploads via `cloudinaryService.uploadImage`/`uploadVideo`, sets `media_status: 'failed'` on upload error without failing the whole save), `childActivities:delete` (admin-only) handlers per contracts/ipc-contracts.md.
+- [X] T026 [US3] Register `childIllnessCasesIPC` and `childActivitiesIPC` in `electron/main.ts`; add corresponding `window.api.childIllnessCases.*` / `window.api.childActivities.*` entries to the preload bridge file.
+- [X] T027 [P] [US3] Create `src/store/useChildActivitiesStore.ts` (Zustand) for illness-case-open check, activity list, and create/delete actions.
+- [X] T028 [US3] In `src/pages/Children/ChildDetails.tsx`: add the health section — render the open illness case (existing illness workflow, unchanged) when present; otherwise render an "Add Activity" form (note + photo/video picker) and the chronological diary list with photo previews and video playback.
 - [ ] T029 [US3] Run Part C (illness/activity portion) of `quickstart.md`, including the failed-media-upload edge case.
 
 **Checkpoint**: User Stories 1–3 all work independently.
@@ -113,9 +113,9 @@ description: "Task list for Transactions Timeline, Child Diary & Staff Calendar"
 
 ### Implementation for User Story 4
 
-- [ ] T030 [US4] Extend the existing child payment-summary IPC handler (in `electron/ipc/childServicesIPC.ts` or `electron/ipc/paymentsIPC.ts`, whichever currently returns `total_paid`/`total_due`) to add a `remaining_due = total_due - total_paid` field to its response.
-- [ ] T031 [US4] In `src/pages/Children/ChildDetails.tsx`: add a payment summary block showing "Total Paid" and "Remaining Due" side by side.
-- [ ] T032 [P] [US4] Update any other existing billing summary view(s) that already show `total_paid` (e.g. Monthly Billing summary cards) to also surface `remaining_due` from the same extended response.
+- [X] T030 [US4] Extend the existing child payment-summary IPC handler (in `electron/ipc/childServicesIPC.ts` or `electron/ipc/paymentsIPC.ts`, whichever currently returns `total_paid`/`total_due`) to add a `remaining_due = total_due - total_paid` field to its response.
+- [X] T031 [US4] In `src/pages/Children/ChildDetails.tsx`: add a payment summary block showing "Total Paid" and "Remaining Due" side by side.
+- [X] T032 [P] [US4] Update any other existing billing summary view(s) that already show `total_paid` (e.g. Monthly Billing summary cards) to also surface `remaining_due` from the same extended response.
 - [ ] T033 [US4] Run Part C (balance portion) of `quickstart.md` to verify both figures display correctly for partially-paid and fully-paid children.
 
 **Checkpoint**: User Stories 1–4 all work independently.
@@ -130,11 +130,11 @@ description: "Task list for Transactions Timeline, Child Diary & Staff Calendar"
 
 ### Implementation for User Story 5
 
-- [ ] T034 [US5] Create `electron/ipc/calendarIPC.ts` with `calendar:getMonth` (aggregates `child_services` lesson_days/teacher + `scheduled_sessions`/`session_teachers` for a given year/month, grouped by day) and `calendar:getDay` (drill-down list for one date, empty array when nothing scheduled) per contracts/ipc-contracts.md — no per-role filtering.
-- [ ] T035 [US5] Register `calendarIPC` in `electron/main.ts`; add `window.api.calendar.getMonth(...)` / `window.api.calendar.getDay(...)` to the preload bridge file.
-- [ ] T036 [P] [US5] Create `src/store/useCalendarStore.ts` (Zustand) for the current month's aggregated entries and the selected day's drill-down.
-- [ ] T037 [US5] Create `src/pages/Calendar/Calendar.tsx`: month grid view populated from `calendar:getMonth`; clicking a day opens a detail panel/modal from `calendar:getDay` listing scheduled users with service/teacher, or an empty state.
-- [ ] T038 [US5] In `src/App.tsx`: add the `Calendar` route and nav entry, visible to both `admin` and `employee` roles (no role-based hiding, per FR-012/Clarifications).
+- [X] T034 [US5] Create `electron/ipc/calendarIPC.ts` with `calendar:getMonth` (aggregates `child_services` lesson_days/teacher + `scheduled_sessions`/`session_teachers` for a given year/month, grouped by day) and `calendar:getDay` (drill-down list for one date, empty array when nothing scheduled) per contracts/ipc-contracts.md — no per-role filtering.
+- [X] T035 [US5] Register `calendarIPC` in `electron/main.ts`; add `window.api.calendar.getMonth(...)` / `window.api.calendar.getDay(...)` to the preload bridge file.
+- [X] T036 [P] [US5] Create `src/store/useCalendarStore.ts` (Zustand) for the current month's aggregated entries and the selected day's drill-down.
+- [X] T037 [US5] Create `src/pages/Calendar/Calendar.tsx`: month grid view populated from `calendar:getMonth`; clicking a day opens a detail panel/modal from `calendar:getDay` listing scheduled users with service/teacher, or an empty state.
+- [X] T038 [US5] In `src/App.tsx`: add the `Calendar` route and nav entry, visible to both `admin` and `employee` roles (no role-based hiding, per FR-012/Clarifications).
 - [ ] T039 [US5] Run Part D of `quickstart.md`, verifying both roles see the identical aggregated calendar and drill-down behavior.
 
 **Checkpoint**: All five user stories independently functional.
@@ -143,8 +143,8 @@ description: "Task list for Transactions Timeline, Child Diary & Staff Calendar"
 
 ## Phase 8: Polish & Cross-Cutting Concerns
 
-- [ ] T040 [P] Add/adjust bilingual (AR/EN) strings for all new UI: Transactions tab, Child Details sections, Calendar page.
-- [ ] T041 [P] Verify role re-validation (`electron/ipc/_guard.ts`) is applied on every new IPC handler (`transactionsIPC`, `childIllnessCasesIPC`, `childActivitiesIPC`, `calendarIPC`, extended `childServicesIPC`).
+- [X] T040 [P] Add/adjust bilingual (AR/EN) strings for all new UI: Transactions tab, Child Details sections, Calendar page.
+- [X] T041 [P] Verify role re-validation (`electron/ipc/_guard.ts`) is applied on every new IPC handler (`transactionsIPC`, `childIllnessCasesIPC`, `childActivitiesIPC`, `calendarIPC`, extended `childServicesIPC`).
 - [ ] T042 Run a full push/pull sync cycle and confirm `child_illness_cases`/`child_activities` sync correctly and no `daily_payments`/`daily_payment_transactions` traffic occurs.
 - [ ] T043 Run the complete `quickstart.md` end-to-end (Parts A–D) as a final regression pass.
 
@@ -232,3 +232,26 @@ Task: "Create src/pages/Transactions/Transactions.tsx"
 - No test tasks included — tests were not requested in the spec; use `quickstart.md` for manual verification at each checkpoint.
 - Commit after each task or logical group.
 - US3 and US4 both touch `src/pages/Children/ChildDetails.tsx` — coordinate to avoid merge conflicts if worked on in parallel.
+
+## Implementation Notes (as actually built)
+
+- **T020 deviation**: no separate `useChildDetailsStore.ts` was created. Timetable and balance data
+  are fetched directly inside `ChildDetails.tsx` with local component state, matching the existing
+  `ChildStatement.tsx` page's convention (which also fetches `children.statement` directly without
+  a dedicated store) — avoids an unnecessary abstraction for a single read-only fetch.
+- **T032 re-checked and found already satisfied**: Monthly Payments (`MonthlyPayments.tsx`) already
+  displays `summary.arrears` (from `paymentsIPC.ts`'s existing summary calculation) as its
+  outstanding/remaining figure alongside `totalInvoiced`/`totalCollected` — this is the same
+  "remaining due next to paid" pairing FR-010 asks for, just under an existing name (`arrears`)
+  rather than the new `remainingDue` field. No changes were needed there; `remainingDue` was added
+  specifically for the new Child Details page, which had no such figure before.
+- **T017/T023/T029/T033/T039 (quickstart.md manual walkthroughs) and T042/T043 (full sync cycle /
+  end-to-end pass)**: not run — these require driving the actual Electron app UI and a live
+  MongoDB connection, neither of which was exercised in this session. What *was* verified
+  automatically: `tsc -b` (clean build across the whole project), `eslint` on every new/changed
+  file (clean after one fix in `calendarIPC.ts`), and the full existing Vitest suite (377/377
+  passing, no regressions). Manual verification against `quickstart.md` is still recommended
+  before shipping.
+- Migration numbering: implemented as `036_child_illness_cases`, `037_child_activities`,
+  `038_drop_daily_payments` (sequential, matching the plan's intent — T003's "or renumber" note
+  was resolved this way).

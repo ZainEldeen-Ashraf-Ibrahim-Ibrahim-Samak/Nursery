@@ -591,51 +591,40 @@ const notificationSchema = new Schema({
 export const NotificationModel: Model<any> = mongoose.models['sync_notifications'] ||
   mongoose.model('sync_notifications', notificationSchema)
 
-// ── Daily Payments ───────────────────────────────────────────────────────────────
+// ── Child Illness Cases (feature 009) ───────────────────────────────────────────
 
-const dailyPaymentSchema = new Schema({
+const childIllnessCaseSchema = new Schema({
   id: { type: Number, required: true, unique: true },
   child_id: Number,
-  service_id: Number,
-  billing_date: String,
-  month: String,
-  year: Number,
-  service: String,
-  unit: String,
-  quantity: Number,
-  price: Number,
-  total: Number,
-  paid: Number,
-  balance: Number,
   status: String,
-  notes: String,
-  payment_method_id: Number,
-  payment_method_name: String,
+  description: String,
+  opened_at: String,
+  resolved_at: String,
   created_at: String,
   updated_at: String,
   synced: Number
 }, sharedOptions)
 
-export const DailyPaymentModel: Model<any> = mongoose.models['sync_daily_payments'] ||
-  mongoose.model('sync_daily_payments', dailyPaymentSchema)
+export const ChildIllnessCaseModel: Model<any> = mongoose.models['sync_child_illness_cases'] ||
+  mongoose.model('sync_child_illness_cases', childIllnessCaseSchema)
 
-// ── Daily Payment Transactions (partial payments / installments) ───────────────
+// ── Child Activities / Diary (feature 009, media hosted on Cloudinary) ─────────
 
-const dailyPaymentTransactionSchema = new Schema({
+const childActivitySchema = new Schema({
   id: { type: Number, required: true, unique: true },
-  daily_payment_id: Number,
-  amount: Number,
-  payment_method_id: Number,
-  payment_method_name: String,
-  paid_date: String,
-  notes: String,
+  child_id: Number,
+  activity_date: String,
+  note: String,
+  media_url: String,
+  media_type: String,
+  media_status: String,
   created_at: String,
   updated_at: String,
   synced: Number
 }, sharedOptions)
 
-export const DailyPaymentTransactionModel: Model<any> = mongoose.models['sync_daily_payment_transactions'] ||
-  mongoose.model('sync_daily_payment_transactions', dailyPaymentTransactionSchema)
+export const ChildActivityModel: Model<any> = mongoose.models['sync_child_activities'] ||
+  mongoose.model('sync_child_activities', childActivitySchema)
 
 // ── Entity registry ───────────────────────────────────────────────────────────
 
@@ -669,6 +658,6 @@ export const SYNC_ENTITIES: {
   { name: 'attendance_edit_requests', model: AttendanceEditRequestModel, table: 'attendance_edit_requests' },
   { name: 'attendance_audit_log', model: AttendanceAuditLogModel, table: 'attendance_audit_log' },
   { name: 'notifications', model: NotificationModel, table: 'notifications' },
-  { name: 'daily_payments', model: DailyPaymentModel, table: 'daily_payments' },
-  { name: 'daily_payment_transactions', model: DailyPaymentTransactionModel, table: 'daily_payment_transactions' },
+  { name: 'child_illness_cases', model: ChildIllnessCaseModel, table: 'child_illness_cases' },
+  { name: 'child_activities', model: ChildActivityModel, table: 'child_activities' },
 ]

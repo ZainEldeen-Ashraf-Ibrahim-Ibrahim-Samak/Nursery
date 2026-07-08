@@ -95,34 +95,60 @@ export interface Payment {
   transaction_count?: number
 }
 
-export interface DailyPayment {
+// Feature 009: financial "transaction" row shown in the Transactions tab (replaces the removed
+// Daily Billing entity) — derived read-time from payments/payment_transactions, not a table.
+export interface Transaction {
   id: number
   child_id: number
-  service_id?: number | null
-  billing_date: string
-  month: string
-  year: number
-  service: string
-  unit: string
-  quantity: number
-  price: number
-  total: number
-  paid: number
-  balance: number
-  status: PaymentStatus
-  notes?: string | null
-  payment_method_id?: number | null
-  payment_method_name?: string | null
+  child_name: string
+  service_name: string
+  amount: number
+  type: 'charge' | 'payment' | 'refund'
+  date: string
+}
+
+export interface ChildIllnessCase {
+  id: number
+  child_id: number
+  status: 'open' | 'resolved'
+  description?: string | null
+  opened_at: string
+  resolved_at?: string | null
   created_at: string
   updated_at: string
   synced: number
+}
 
-  // Optional join fields for UI
-  child_name?: string
-  child_guardian?: string
-  child_guardian_phone?: string
-  child_is_active?: number
-  transaction_count?: number
+export interface ChildActivity {
+  id: number
+  child_id: number
+  activity_date: string
+  note?: string | null
+  media_url?: string | null
+  media_type?: 'photo' | 'video' | null
+  media_status?: 'uploaded' | 'failed' | null
+  created_at: string
+  updated_at: string
+  synced: number
+}
+
+export interface TimetableSlot {
+  service_row_id: number
+  service: string
+  day: number // 0=Sun..6=Sat
+  teacher_id: number | null
+  teacher_name: string | null
+}
+
+export interface CalendarEntry {
+  date: string
+  user_id: number
+  user_name: string
+  user_type: 'child' | 'teacher'
+  service_id: number | null
+  service_name: string | null
+  teacher_id: number | null
+  teacher_name: string | null
 }
 
 export interface PaymentTransaction {
@@ -138,18 +164,6 @@ export interface PaymentTransaction {
   synced: number
 }
 
-export interface DailyPaymentTransaction {
-  id: number
-  daily_payment_id: number
-  amount: number
-  payment_method_id?: number | null
-  payment_method_name?: string | null
-  paid_date?: string | null
-  notes?: string | null
-  created_at: string
-  updated_at: string
-  synced: number
-}
 
 export interface EmployeeRole {
   id: number

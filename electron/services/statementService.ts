@@ -138,7 +138,11 @@ export function getChildStatement(child: any, existingPayments: any[], currentDa
       activeMonths: statementMonths.length,
       totalInvoiced: Number(totalInvoiced.toFixed(2)),
       totalCollected: Number(totalCollected.toFixed(2)),
-      totalBalance: Number(totalBalance.toFixed(2))
+      totalBalance: Number(totalBalance.toFixed(2)),
+      // FR-010: explicit alias for "Remaining Due" alongside "Total Paid" (totalCollected).
+      // Equal to totalBalance (total invoiced - total collected) — kept as its own field so
+      // UI code doesn't need to know totalBalance IS the remaining-due figure.
+      remainingDue: Number(totalBalance.toFixed(2))
     }
   }
 }
