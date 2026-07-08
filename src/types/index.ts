@@ -144,7 +144,7 @@ export interface CalendarEntry {
   date: string
   user_id: number
   user_name: string
-  user_type: 'child' | 'teacher'
+  user_type: 'child' | 'teacher' | 'session'
   service_id: number | null
   service_name: string | null
   teacher_id: number | null

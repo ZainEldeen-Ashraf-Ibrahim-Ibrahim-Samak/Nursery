@@ -31156,7 +31156,7 @@ function buildMonthEntries(db, year, month) {
 			date: session.session_date,
 			user_id: session.id,
 			user_name: session.service_name || "Session",
-			user_type: "teacher",
+			user_type: "session",
 			service_id: session.service_id,
 			service_name: session.service_name,
 			teacher_id: null,

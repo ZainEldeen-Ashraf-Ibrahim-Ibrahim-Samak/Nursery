@@ -13,7 +13,7 @@ interface CalendarEntry {
   date: string
   user_id: number
   user_name: string
-  user_type: 'child' | 'teacher'
+  user_type: 'child' | 'teacher' | 'session'
   service_id: number | null
   service_name: string | null
   teacher_id: number | null
@@ -98,11 +98,13 @@ function buildMonthEntries(db: any, year: number, month: number): CalendarEntry[
   for (const session of sessions) {
     const teachers = teacherStmt.all(session.id) as any[]
     if (teachers.length === 0) {
+      // No teacher assigned yet — user_id here is the session id, not an employee id, so this
+      // is not a 'teacher' entry; give it its own type so the UI doesn't mistake it for one.
       entries.push({
         date: session.session_date,
         user_id: session.id,
         user_name: session.service_name || 'Session',
-        user_type: 'teacher',
+        user_type: 'session',
         service_id: session.service_id,
         service_name: session.service_name,
         teacher_id: null,
