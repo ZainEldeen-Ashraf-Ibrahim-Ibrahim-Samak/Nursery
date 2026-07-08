@@ -15750,6 +15750,42 @@ var migrations = [
 				db.exec(`CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, read_at);`);
 			} catch {}
 		}
+	},
+	{
+		name: "034_daily_payments",
+		up: (db) => {
+			db.exec(`
+        CREATE TABLE IF NOT EXISTS daily_payments (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          child_id INTEGER NOT NULL,
+          service_id INTEGER,
+          billing_date TEXT NOT NULL,
+          month TEXT NOT NULL,
+          year INTEGER NOT NULL,
+          service TEXT NOT NULL,
+          unit TEXT NOT NULL,
+          quantity REAL DEFAULT 1,
+          price REAL NOT NULL,
+          total REAL NOT NULL,
+          paid REAL DEFAULT 0,
+          balance REAL NOT NULL,
+          status TEXT NOT NULL,
+          notes TEXT,
+          payment_method_id INTEGER,
+          payment_method_name TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          synced INTEGER DEFAULT 0,
+          FOREIGN KEY (child_id) REFERENCES children(id) ON DELETE CASCADE,
+          UNIQUE (child_id, service_id, billing_date)
+        );
+      `);
+			try {
+				db.exec(`CREATE INDEX IF NOT EXISTS idx_daily_payments_date ON daily_payments(billing_date);`);
+				db.exec(`CREATE INDEX IF NOT EXISTS idx_daily_payments_child ON daily_payments(child_id, billing_date);`);
+				db.exec(`CREATE INDEX IF NOT EXISTS idx_daily_payments_synced ON daily_payments(synced);`);
+			} catch {}
+		}
 	}
 ];
 function runMigrations(db) {
@@ -21804,7 +21840,7 @@ function requireAdmin() {
 	if (!user) throw new Error("UNAUTHORIZED: يجب تسجيل الدخول أولاً / Unauthorized");
 	if (user.role !== "admin") throw new Error("FORBIDDEN: غير مسموح بالوصول لغير المسؤولين / Forbidden");
 }
-function checkAuth$6() {
+function checkAuth$7() {
 	if (!getCurrentUser()) throw new Error("UNAUTHORIZED: يجب تسجيل الدخول أولاً / Unauthorized");
 }
 //#endregion
@@ -22106,7 +22142,7 @@ function getChildStatement(child, existingPayments, currentDate) {
 }
 //#endregion
 //#region electron/ipc/childrenIPC.ts
-function checkAuth$5() {
+function checkAuth$6() {
 	if (!getCurrentUser()) throw new Error("UNAUTHORIZED: يجب تسجيل الدخول أولاً / Unauthorized");
 }
 var GUARDIAN_PHONE_RE = /^(?:\+?2)?01[0-9]{9}$/;
@@ -22136,7 +22172,7 @@ function buildLessonFields(src) {
 }
 ipcMain.handle("children:get", async (_event, { search, service, activeOnly }) => {
 	try {
-		checkAuth$5();
+		checkAuth$6();
 		const db = getDb();
 		let query = "SELECT * FROM children WHERE 1=1";
 		const params = [];
@@ -22161,7 +22197,7 @@ ipcMain.handle("children:get", async (_event, { search, service, activeOnly }) =
 });
 ipcMain.handle("children:add", async (_event, childInput) => {
 	try {
-		checkAuth$5();
+		checkAuth$6();
 		const db = getDb();
 		const { name, guardian, guardian_phone, child_phone, national_id, reg_date, notes, services } = childInput;
 		const enrollments = services || (childInput.service ? [{
@@ -22325,7 +22361,7 @@ ipcMain.handle("children:deactivate", async (_event, { id }) => {
 });
 ipcMain.handle("children:statement", async (_event, { childId }) => {
 	try {
-		checkAuth$5();
+		checkAuth$6();
 		if (!childId) throw new Error("Child ID is required");
 		const db = getDb();
 		const child = db.prepare("SELECT * FROM children WHERE id = ?").get(childId);
@@ -22364,12 +22400,12 @@ function applyCloudTombstones(db, cloudTombstones) {
 }
 //#endregion
 //#region electron/ipc/childServicesIPC.ts
-function checkAuth$4() {
+function checkAuth$5() {
 	if (!getCurrentUser()) throw new Error("UNAUTHORIZED: يجب تسجيل الدخول أولاً / Unauthorized");
 }
 ipcMain.handle("childServices:list", async (_event, { childId }) => {
 	try {
-		checkAuth$4();
+		checkAuth$5();
 		const db = getDb();
 		if (!childId) throw new Error("childId is required");
 		return db.prepare("SELECT * FROM child_services WHERE child_id = ?").all(childId);
@@ -22418,7 +22454,7 @@ ipcMain.handle("childServices:update", async (_event, { id, patch }) => {
 });
 ipcMain.handle("childServices:previewTeacherCost", async (_event, { teacher_id, lesson_days }) => {
 	try {
-		checkAuth$4();
+		checkAuth$5();
 		const db = getDb();
 		let rate = db.prepare("SELECT teacher_session_rate FROM employees WHERE id = ?").get(teacher_id)?.teacher_session_rate ?? null;
 		if (rate == null) {
@@ -22505,12 +22541,12 @@ function calculateChildStatusRollup(payments) {
 	if (allUnpaid) return "unpaid";
 	return "partial";
 }
-function checkAuth$3() {
+function checkAuth$4() {
 	if (!getCurrentUser()) throw new Error("UNAUTHORIZED: يجب تسجيل الدخول أولاً / Unauthorized");
 }
 ipcMain.handle("payments:get", async (_event, { month, year }) => {
 	try {
-		checkAuth$3();
+		checkAuth$4();
 		const db = getDb();
 		if (!month || !year) throw new Error("Month and year are required");
 		const payments = db.prepare(`
@@ -22569,7 +22605,7 @@ ipcMain.handle("payments:get", async (_event, { month, year }) => {
 });
 ipcMain.handle("payments:generate", async (_event, { month, year }) => {
 	try {
-		checkAuth$3();
+		checkAuth$4();
 		const db = getDb();
 		if (!month || !year) throw new Error("Month and year are required");
 		const activeEnrollments = db.prepare(`
@@ -22668,7 +22704,7 @@ ipcMain.handle("payments:generate", async (_event, { month, year }) => {
 });
 ipcMain.handle("payments:update", async (_event, { id, quantity, paid, notes, payment_method_id }) => {
 	try {
-		checkAuth$3();
+		checkAuth$4();
 		const db = getDb();
 		if (!id) throw new Error("Payment ID is required");
 		const payment = db.prepare("SELECT * FROM payments WHERE id = ?").get(id);
@@ -22704,7 +22740,7 @@ ipcMain.handle("payments:update", async (_event, { id, quantity, paid, notes, pa
 });
 ipcMain.handle("payments:bulkPay", async (_event, { ids, payment_method_id }) => {
 	try {
-		checkAuth$3();
+		checkAuth$4();
 		const db = getDb();
 		if (!ids || !Array.isArray(ids) || ids.length === 0) throw new Error("Payment IDs array is required");
 		let methodName = null;
@@ -22745,7 +22781,7 @@ function recomputePaymentFromTransactions(db, paymentId) {
 }
 ipcMain.handle("payments:listTransactions", async (_event, { payment_id }) => {
 	try {
-		checkAuth$3();
+		checkAuth$4();
 		const db = getDb();
 		if (!payment_id) throw new Error("Payment ID is required");
 		return db.prepare("SELECT * FROM payment_transactions WHERE payment_id = ? ORDER BY paid_date ASC, id ASC").all(payment_id);
@@ -22756,7 +22792,7 @@ ipcMain.handle("payments:listTransactions", async (_event, { payment_id }) => {
 });
 ipcMain.handle("payments:addTransaction", async (_event, { payment_id, amount, payment_method_id = null, paid_date = null, notes = null }) => {
 	try {
-		checkAuth$3();
+		checkAuth$4();
 		const db = getDb();
 		if (!payment_id) throw new Error("Payment ID is required");
 		const amt = Number(amount);
@@ -22791,7 +22827,7 @@ ipcMain.handle("payments:addTransaction", async (_event, { payment_id, amount, p
 });
 ipcMain.handle("payments:deleteTransaction", async (_event, { id }) => {
 	try {
-		checkAuth$3();
+		checkAuth$4();
 		const db = getDb();
 		if (!id) throw new Error("Transaction ID is required");
 		const tx = db.prepare("SELECT payment_id FROM payment_transactions WHERE id = ?").get(id);
@@ -27921,7 +27957,7 @@ function buildPrintPreviewHtml(reportType, params) {
 }
 //#endregion
 //#region electron/ipc/exportIPC.ts
-function checkAuth$2() {
+function checkAuth$3() {
 	const user = getCurrentUser();
 	if (!user) throw new Error("UNAUTHORIZED: يجب تسجيل الدخول أولاً / Unauthorized");
 	return user;
@@ -27966,7 +28002,7 @@ ipcMain.handle("export:full", async (_event, { year, format, lang }) => {
 });
 ipcMain.handle("export:month", async (_event, { month, year, format, lang }) => {
 	try {
-		checkAuth$2();
+		checkAuth$3();
 		const filename = lang === "ar" ? `مطالبات_${month}_${year}.${format}` : `billing_${month}_${year}.${format}`;
 		return await executeExport("month", {
 			month,
@@ -27981,7 +28017,7 @@ ipcMain.handle("export:month", async (_event, { month, year, format, lang }) => 
 });
 ipcMain.handle("export:child", async (_event, { childId, format, lang }) => {
 	try {
-		checkAuth$2();
+		checkAuth$3();
 		const filename = lang === "ar" ? `كشف_حساب_طفل_${childId}.${format}` : `child_statement_${childId}.${format}`;
 		return await executeExport("child", {
 			childId,
@@ -27995,7 +28031,7 @@ ipcMain.handle("export:child", async (_event, { childId, format, lang }) => {
 });
 ipcMain.handle("export:childReport", async (_event, { childId, format, lang }) => {
 	try {
-		checkAuth$2();
+		checkAuth$3();
 		const filename = lang === "ar" ? `تقرير_طفل_شامل_${childId}.${format}` : `child_report_${childId}.${format}`;
 		return await executeExport("childReport", {
 			childId,
@@ -28067,7 +28103,7 @@ ipcMain.handle("export:expenses", async (_event, { year, format, lang }) => {
 ipcMain.handle("print:preview", async (_event, args) => {
 	try {
 		if (args.reportType === "payroll" || args.reportType === "expenses") requireAdmin();
-		else checkAuth$2();
+		else checkAuth$3();
 		return { html: buildPrintPreviewHtml(args.reportType, args) };
 	} catch (error) {
 		console.error("Failed to build print preview:", error);
@@ -28148,38 +28184,207 @@ async function uploadImage(dataUrl, folder = "nursery/children") {
 	};
 }
 //#endregion
-//#region electron/services/mongoSync.ts
-var mongoSync_exports = /* @__PURE__ */ __exportAll({
-	AttendanceAuditLogModel: () => AttendanceAuditLogModel,
-	AttendanceConflictModel: () => AttendanceConflictModel,
-	AttendanceEditRequestModel: () => AttendanceEditRequestModel,
-	AttendanceRecordModel: () => AttendanceRecordModel,
-	ChildModel: () => ChildModel,
-	ChildServiceModel: () => ChildServiceModel,
-	EmployeeDeductionModel: () => EmployeeDeductionModel,
-	EmployeeModel: () => EmployeeModel,
-	EmployeeRoleModel: () => EmployeeRoleModel,
-	ExpenseModel: () => ExpenseModel,
-	ImportedSnapshotModel: () => ImportedSnapshotModel,
-	NotificationModel: () => NotificationModel,
-	PaymentMethodModel: () => PaymentMethodModel,
-	PaymentModel: () => PaymentModel,
-	PaymentTransactionModel: () => PaymentTransactionModel,
-	SYNC_ENTITIES: () => SYNC_ENTITIES,
-	SalaryPaymentModel: () => SalaryPaymentModel,
-	SalaryTypeModel: () => SalaryTypeModel,
-	ScheduledSessionModel: () => ScheduledSessionModel,
-	ServiceDefinitionModel: () => ServiceDefinitionModel,
-	ServiceTeacherModel: () => ServiceTeacherModel,
-	SessionTeacherModel: () => SessionTeacherModel,
-	SettingModel: () => SettingModel,
-	TeacherPaymentModel: () => TeacherPaymentModel,
-	TombstoneModel: () => TombstoneModel,
-	UserModel: () => UserModel,
-	connectMongo: () => connectMongo,
-	disconnectMongo: () => disconnectMongo,
-	getConnectionStatus: () => getConnectionStatus
+//#region electron/ipc/storageIPC.ts
+/**
+* storage:uploadPhoto { dataUrl, folder? }
+* Uploads a child photo to Cloudinary from the main process (signed request;
+* the API secret never reaches the renderer). Auth-level — employees may add
+* children with photos (feature 004). Returns { url, publicId }. Throws when
+* Cloudinary is unconfigured/unreachable; the renderer then saves the child
+* without a photo (offline-safe, FR-004a).
+*/
+ipcMain.handle("storage:uploadPhoto", async (_event, { dataUrl, folder }) => {
+	if (!getCurrentUser()) throw new Error("UNAUTHORIZED: يجب تسجيل الدخول أولاً / Unauthorized");
+	return uploadImage(dataUrl, folder);
 });
+/**
+* storage:stats
+* Returns counts for all major tables and database file size.
+* Admin only.
+*/
+ipcMain.handle("storage:stats", async () => {
+	try {
+		requireAdmin();
+		const db = getDb();
+		const counts = {
+			users: db.prepare("SELECT COUNT(*) as c FROM users").get().c,
+			children: db.prepare("SELECT COUNT(*) as c FROM children").get().c,
+			payments: db.prepare("SELECT COUNT(*) as c FROM payments").get().c,
+			employees: db.prepare("SELECT COUNT(*) as c FROM employees").get().c,
+			salary_payments: db.prepare("SELECT COUNT(*) as c FROM salary_payments").get().c,
+			expenses: db.prepare("SELECT COUNT(*) as c FROM expenses").get().c
+		};
+		let sizeBytes = 0;
+		try {
+			const dbPath = path.join(app.getPath("userData"), "nursery.db");
+			if (fs.existsSync(dbPath)) sizeBytes = fs.statSync(dbPath).size;
+		} catch {}
+		return {
+			counts,
+			sizeBytes
+		};
+	} catch (error) {
+		console.error("storage:stats error:", error);
+		throw new Error(error.message || "Failed to retrieve storage stats");
+	}
+});
+/**
+* storage:backup
+* Opens a save dialog and copies the current DB file to the chosen path.
+* Admin only.
+*/
+ipcMain.handle("storage:backup", async (event) => {
+	try {
+		requireAdmin();
+		const report = progressReporter(event, "backup");
+		const dbPath = path.join(app.getPath("userData"), "nursery.db");
+		const timestamp = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-").slice(0, 19);
+		const result = await dialog.showSaveDialog({
+			defaultPath: `nursery-backup-${timestamp}.db`,
+			filters: [{
+				name: "SQLite Database",
+				extensions: ["db"]
+			}]
+		});
+		if (result.canceled || !result.filePath) throw new Error("Backup cancelled");
+		report(1, 3, "checkpoint");
+		getDb().checkpoint();
+		report(2, 3, "copying");
+		fs.copyFileSync(dbPath, result.filePath);
+		report(3, 3, "done");
+		return { path: result.filePath };
+	} catch (error) {
+		console.error("storage:backup error:", error);
+		throw new Error(error.message || "Failed to backup database");
+	}
+});
+/**
+* storage:restore
+* Opens a file picker and replaces the current DB with the selected backup.
+* Admin only.
+*/
+ipcMain.handle("storage:restore", async (event, { path: restorePath }) => {
+	try {
+		requireAdmin();
+		const report = progressReporter(event, "restore");
+		let sourcePath = restorePath;
+		if (!sourcePath) {
+			const result = await dialog.showOpenDialog({
+				properties: ["openFile"],
+				filters: [{
+					name: "SQLite Database",
+					extensions: ["db"]
+				}]
+			});
+			if (result.canceled || result.filePaths.length === 0) throw new Error("Restore cancelled");
+			sourcePath = result.filePaths[0];
+		}
+		if (!fs.existsSync(sourcePath)) throw new Error("Backup file not found");
+		const dbPath = path.join(app.getPath("userData"), "nursery.db");
+		report(1, 3, "safety backup");
+		const backupPath = `${dbPath}.pre-restore-${Date.now()}.bak`;
+		fs.copyFileSync(dbPath, backupPath);
+		report(2, 3, "restoring");
+		closeDb();
+		fs.copyFileSync(sourcePath, dbPath);
+		initDb();
+		report(3, 3, "done");
+		return {
+			ok: true,
+			restoredFrom: sourcePath
+		};
+	} catch (error) {
+		console.error("storage:restore error:", error);
+		throw new Error(error.message || "Failed to restore database");
+	}
+});
+/**
+* storage:import
+* Opens an Excel workbook file picker and imports data from the original workbook format.
+* Admin only.
+*/
+ipcMain.handle("storage:import", async (event, args) => {
+	try {
+		requireAdmin();
+		let filePath = args?.path;
+		if (!filePath) {
+			const result = await dialog.showOpenDialog({
+				properties: ["openFile"],
+				filters: [{
+					name: "Excel Workbook",
+					extensions: ["xlsx", "xls"]
+				}]
+			});
+			if (result.canceled || result.filePaths.length === 0) throw new Error("Import cancelled");
+			filePath = result.filePaths[0];
+		}
+		const { importFromWorkbook } = await import("./importService-Dkj_OKsM.js");
+		return { imported: await importFromWorkbook(filePath, progressReporter(event, "import")) };
+	} catch (error) {
+		console.error("storage:import error:", error);
+		throw new Error(error.message || "Failed to import workbook");
+	}
+});
+/**
+* storage:clear
+* Truncates all data tables. Requires explicit confirm:true.
+* Admin only.
+*/
+ipcMain.handle("storage:clear", async (_event, { confirm }) => {
+	try {
+		requireAdmin();
+		if (!confirm) throw new Error("Explicit confirmation required to clear data");
+		const db = getDb();
+		db.pragma("foreign_keys = OFF");
+		try {
+			db.transaction(() => {
+				db.prepare("DELETE FROM payments").run();
+				db.prepare("DELETE FROM payment_transactions").run();
+				db.prepare("DELETE FROM salary_payments").run();
+				db.prepare("DELETE FROM employee_deductions").run();
+				db.prepare("DELETE FROM expenses").run();
+				db.prepare("DELETE FROM sync_log").run();
+				db.prepare("DELETE FROM tombstones").run();
+				db.prepare("DELETE FROM child_services").run();
+				db.prepare("DELETE FROM children").run();
+				db.prepare("DELETE FROM session_teachers").run();
+				db.prepare("DELETE FROM scheduled_sessions").run();
+				db.prepare("DELETE FROM service_teachers").run();
+				db.prepare("DELETE FROM attendance_records").run();
+				db.prepare("DELETE FROM attendance_conflicts").run();
+				db.prepare("DELETE FROM teacher_payments").run();
+				db.prepare("DELETE FROM attendance_edit_requests").run();
+				db.prepare("DELETE FROM attendance_audit_log").run();
+				db.prepare("DELETE FROM notifications").run();
+				db.prepare("DELETE FROM imported_snapshots").run();
+				db.prepare("DELETE FROM employees").run();
+				db.prepare("DELETE FROM daily_payments").run();
+			})();
+		} finally {
+			db.pragma("foreign_keys = ON");
+		}
+		return { ok: true };
+	} catch (error) {
+		console.error("storage:clear error:", error);
+		throw new Error(error.message || "Failed to clear data");
+	}
+});
+/**
+* storage:audit
+* Returns last 50 sync log entries (audit log).
+* Admin only.
+*/
+ipcMain.handle("storage:audit", async () => {
+	try {
+		requireAdmin();
+		return getDb().prepare("SELECT id, action, table_name AS entity_type, record_id, status, error, synced_at AS created_at FROM sync_log ORDER BY id DESC LIMIT 50").all();
+	} catch (error) {
+		console.error("storage:audit error:", error);
+		throw new Error(error.message || "Failed to retrieve audit log");
+	}
+});
+//#endregion
+//#region electron/services/mongoSync.ts
 /**
 * mongoSync.ts — Mongoose models for cloud sync collections.
 *
@@ -28699,6 +28904,33 @@ var notificationSchema = new Schema({
 	synced: Number
 }, sharedOptions);
 var NotificationModel = mongoose.models["sync_notifications"] || mongoose.model("sync_notifications", notificationSchema);
+var dailyPaymentSchema = new Schema({
+	id: {
+		type: Number,
+		required: true,
+		unique: true
+	},
+	child_id: Number,
+	service_id: Number,
+	billing_date: String,
+	month: String,
+	year: Number,
+	service: String,
+	unit: String,
+	quantity: Number,
+	price: Number,
+	total: Number,
+	paid: Number,
+	balance: Number,
+	status: String,
+	notes: String,
+	payment_method_id: Number,
+	payment_method_name: String,
+	created_at: String,
+	updated_at: String,
+	synced: Number
+}, sharedOptions);
+var DailyPaymentModel = mongoose.models["sync_daily_payments"] || mongoose.model("sync_daily_payments", dailyPaymentSchema);
 var SYNC_ENTITIES = [
 	{
 		name: "children",
@@ -28824,6 +29056,11 @@ var SYNC_ENTITIES = [
 		name: "notifications",
 		model: NotificationModel,
 		table: "notifications"
+	},
+	{
+		name: "daily_payments",
+		model: DailyPaymentModel,
+		table: "daily_payments"
 	}
 ];
 //#endregion
@@ -29252,244 +29489,6 @@ ipcMain.handle("sync:auto-sync", async (_event, { enabled, intervalMinutes = 30 
 	}
 });
 //#endregion
-//#region electron/ipc/storageIPC.ts
-/**
-* storage:uploadPhoto { dataUrl, folder? }
-* Uploads a child photo to Cloudinary from the main process (signed request;
-* the API secret never reaches the renderer). Auth-level — employees may add
-* children with photos (feature 004). Returns { url, publicId }. Throws when
-* Cloudinary is unconfigured/unreachable; the renderer then saves the child
-* without a photo (offline-safe, FR-004a).
-*/
-ipcMain.handle("storage:uploadPhoto", async (_event, { dataUrl, folder }) => {
-	if (!getCurrentUser()) throw new Error("UNAUTHORIZED: يجب تسجيل الدخول أولاً / Unauthorized");
-	return uploadImage(dataUrl, folder);
-});
-/**
-* storage:stats
-* Returns counts for all major tables and database file size.
-* Admin only.
-*/
-ipcMain.handle("storage:stats", async () => {
-	try {
-		requireAdmin();
-		const db = getDb();
-		const counts = {
-			users: db.prepare("SELECT COUNT(*) as c FROM users").get().c,
-			children: db.prepare("SELECT COUNT(*) as c FROM children").get().c,
-			payments: db.prepare("SELECT COUNT(*) as c FROM payments").get().c,
-			employees: db.prepare("SELECT COUNT(*) as c FROM employees").get().c,
-			salary_payments: db.prepare("SELECT COUNT(*) as c FROM salary_payments").get().c,
-			expenses: db.prepare("SELECT COUNT(*) as c FROM expenses").get().c
-		};
-		let sizeBytes = 0;
-		try {
-			const dbPath = path.join(app.getPath("userData"), "nursery.db");
-			if (fs.existsSync(dbPath)) sizeBytes = fs.statSync(dbPath).size;
-		} catch {}
-		return {
-			counts,
-			sizeBytes
-		};
-	} catch (error) {
-		console.error("storage:stats error:", error);
-		throw new Error(error.message || "Failed to retrieve storage stats");
-	}
-});
-/**
-* storage:backup
-* Opens a save dialog and copies the current DB file to the chosen path.
-* Admin only.
-*/
-ipcMain.handle("storage:backup", async (event) => {
-	try {
-		requireAdmin();
-		const report = progressReporter(event, "backup");
-		const dbPath = path.join(app.getPath("userData"), "nursery.db");
-		const timestamp = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-").slice(0, 19);
-		const result = await dialog.showSaveDialog({
-			defaultPath: `nursery-backup-${timestamp}.db`,
-			filters: [{
-				name: "SQLite Database",
-				extensions: ["db"]
-			}]
-		});
-		if (result.canceled || !result.filePath) throw new Error("Backup cancelled");
-		report(1, 3, "checkpoint");
-		getDb().checkpoint();
-		report(2, 3, "copying");
-		fs.copyFileSync(dbPath, result.filePath);
-		report(3, 3, "done");
-		return { path: result.filePath };
-	} catch (error) {
-		console.error("storage:backup error:", error);
-		throw new Error(error.message || "Failed to backup database");
-	}
-});
-/**
-* storage:restore
-* Opens a file picker and replaces the current DB with the selected backup.
-* Admin only.
-*/
-ipcMain.handle("storage:restore", async (event, { path: restorePath }) => {
-	try {
-		requireAdmin();
-		const report = progressReporter(event, "restore");
-		let sourcePath = restorePath;
-		if (!sourcePath) {
-			const result = await dialog.showOpenDialog({
-				properties: ["openFile"],
-				filters: [{
-					name: "SQLite Database",
-					extensions: ["db"]
-				}]
-			});
-			if (result.canceled || result.filePaths.length === 0) throw new Error("Restore cancelled");
-			sourcePath = result.filePaths[0];
-		}
-		if (!fs.existsSync(sourcePath)) throw new Error("Backup file not found");
-		const dbPath = path.join(app.getPath("userData"), "nursery.db");
-		report(1, 3, "safety backup");
-		const backupPath = `${dbPath}.pre-restore-${Date.now()}.bak`;
-		fs.copyFileSync(dbPath, backupPath);
-		report(2, 3, "restoring");
-		closeDb();
-		fs.copyFileSync(sourcePath, dbPath);
-		initDb();
-		report(3, 3, "done");
-		return {
-			ok: true,
-			restoredFrom: sourcePath
-		};
-	} catch (error) {
-		console.error("storage:restore error:", error);
-		throw new Error(error.message || "Failed to restore database");
-	}
-});
-/**
-* storage:import
-* Opens an Excel workbook file picker and imports data from the original workbook format.
-* Admin only.
-*/
-ipcMain.handle("storage:import", async (event, args) => {
-	try {
-		requireAdmin();
-		let filePath = args?.path;
-		if (!filePath) {
-			const result = await dialog.showOpenDialog({
-				properties: ["openFile"],
-				filters: [{
-					name: "Excel Workbook",
-					extensions: ["xlsx", "xls"]
-				}]
-			});
-			if (result.canceled || result.filePaths.length === 0) throw new Error("Import cancelled");
-			filePath = result.filePaths[0];
-		}
-		const { importFromWorkbook } = await import("./importService-Dkj_OKsM.js");
-		return { imported: await importFromWorkbook(filePath, progressReporter(event, "import")) };
-	} catch (error) {
-		console.error("storage:import error:", error);
-		throw new Error(error.message || "Failed to import workbook");
-	}
-});
-/**
-* storage:clear
-* Truncates all data tables. Requires explicit confirm:true.
-* Admin only.
-*/
-ipcMain.handle("storage:clear", async (_event, { confirm }) => {
-	try {
-		requireAdmin();
-		if (!confirm) throw new Error("Explicit confirmation required to clear data");
-		const db = getDb();
-		db.pragma("foreign_keys = OFF");
-		try {
-			db.transaction(() => {
-				db.prepare("DELETE FROM payments").run();
-				db.prepare("DELETE FROM payment_transactions").run();
-				db.prepare("DELETE FROM salary_payments").run();
-				db.prepare("DELETE FROM employee_deductions").run();
-				db.prepare("DELETE FROM expenses").run();
-				db.prepare("DELETE FROM sync_log").run();
-				db.prepare("DELETE FROM tombstones").run();
-				db.prepare("DELETE FROM child_services").run();
-				db.prepare("DELETE FROM children").run();
-				db.prepare("DELETE FROM session_teachers").run();
-				db.prepare("DELETE FROM scheduled_sessions").run();
-				db.prepare("DELETE FROM service_teachers").run();
-				db.prepare("DELETE FROM attendance_records").run();
-				db.prepare("DELETE FROM attendance_conflicts").run();
-				db.prepare("DELETE FROM teacher_payments").run();
-				db.prepare("DELETE FROM attendance_edit_requests").run();
-				db.prepare("DELETE FROM attendance_audit_log").run();
-				db.prepare("DELETE FROM notifications").run();
-				db.prepare("DELETE FROM imported_snapshots").run();
-				db.prepare("DELETE FROM employees").run();
-			})();
-		} finally {
-			db.pragma("foreign_keys = ON");
-		}
-		try {
-			const mongoUri = getMongoUri();
-			if (mongoUri && process.env.NODE_ENV !== "test") {
-				const { getConnectionStatus, connectMongo, disconnectMongo, SYNC_ENTITIES } = await Promise.resolve().then(() => mongoSync_exports);
-				const status = getConnectionStatus();
-				let tempConnected = false;
-				if (!status.connected) {
-					console.log("[storage:clear] MongoDB not connected; attempting temporary connection to clear cloud collections...");
-					await connectMongo(mongoUri);
-					tempConnected = true;
-				}
-				const clearedEntities = [
-					"children",
-					"child_services",
-					"payments",
-					"employees",
-					"salary_payments",
-					"expenses",
-					"imported_snapshots",
-					"tombstones",
-					"scheduled_sessions",
-					"session_teachers",
-					"attendance_records",
-					"attendance_conflicts",
-					"employee_deductions",
-					"payment_transactions",
-					"service_teachers",
-					"teacher_payments"
-				];
-				console.log("[storage:clear] Clearing MongoDB collections...");
-				for (const entity of SYNC_ENTITIES) if (clearedEntities.includes(entity.name)) await entity.model.deleteMany({});
-				if (tempConnected) {
-					console.log("[storage:clear] Disconnecting temporary MongoDB connection...");
-					await disconnectMongo();
-				}
-			}
-		} catch (mongoError) {
-			console.warn("[storage:clear] Failed to clear MongoDB collections:", mongoError.message);
-		}
-		return { ok: true };
-	} catch (error) {
-		console.error("storage:clear error:", error);
-		throw new Error(error.message || "Failed to clear data");
-	}
-});
-/**
-* storage:audit
-* Returns last 50 sync log entries (audit log).
-* Admin only.
-*/
-ipcMain.handle("storage:audit", async () => {
-	try {
-		requireAdmin();
-		return getDb().prepare("SELECT id, action, table_name AS entity_type, record_id, status, error, synced_at AS created_at FROM sync_log ORDER BY id DESC LIMIT 50").all();
-	} catch (error) {
-		console.error("storage:audit error:", error);
-		throw new Error(error.message || "Failed to retrieve audit log");
-	}
-});
-//#endregion
 //#region electron/ipc/dashboardIPC.ts
 var arabicMonths = [
 	"يناير",
@@ -29535,12 +29534,12 @@ function calculateDashboard(payments, expenses, salaries, targetProfitPct) {
 		gap
 	};
 }
-function checkAuth$1() {
+function checkAuth$2() {
 	if (!getCurrentUser()) throw new Error("UNAUTHORIZED: يجب تسجيل الدخول أولاً / Unauthorized");
 }
 ipcMain.handle("dashboard:get", async (_event, { month, year }) => {
 	try {
-		checkAuth$1();
+		checkAuth$2();
 		const db = getDb();
 		if (!month || !year) throw new Error("Month and year are required");
 		const targetProfitRow = db.prepare("SELECT value FROM settings WHERE key = 'target_profit_pct'").get();
@@ -29751,7 +29750,7 @@ ipcMain.handle("salaryTypes:delete", async (_event, { id }) => {
 //#region electron/ipc/serviceDefinitionsIPC.ts
 ipcMain.handle("serviceDefinitions:list", async () => {
 	try {
-		checkAuth$6();
+		checkAuth$7();
 		return getDb().prepare("SELECT * FROM service_definitions ORDER BY is_custom ASC, name ASC").all();
 	} catch (error) {
 		throw new Error(error.message || "Failed to list service definitions");
@@ -29811,7 +29810,7 @@ ipcMain.handle("serviceDefinitions:delete", async (_event, { id }) => {
 //#region electron/ipc/sessionsIPC.ts
 ipcMain.handle("sessions:list", async (_event, args) => {
 	try {
-		checkAuth$6();
+		checkAuth$7();
 		const db = getDb();
 		const { from, to } = args || {};
 		let query = `
@@ -29904,7 +29903,7 @@ ipcMain.handle("sessions:delete", async (_event, { id }) => {
 });
 ipcMain.handle("sessions:salaryCredit", async (_event, { session_id }) => {
 	try {
-		checkAuth$6();
+		checkAuth$7();
 		const db = getDb();
 		const payable = !!db.prepare(`
       SELECT 1 FROM attendance_records
@@ -29952,7 +29951,7 @@ ipcMain.handle("sessions:assignTeachers", async (_event, { session_id, employee_
 });
 ipcMain.handle("sessions:childrenForDay", async (_event, { day_of_week }) => {
 	try {
-		checkAuth$6();
+		checkAuth$7();
 		return getDb().prepare(`SELECT id, name, lesson_days FROM children WHERE is_active = 1 AND lesson_days IS NOT NULL AND lesson_days != '[]' AND lesson_days != ''`).all().filter((c) => {
 			try {
 				return JSON.parse(c.lesson_days).includes(Number(day_of_week));
@@ -29969,7 +29968,7 @@ ipcMain.handle("sessions:childrenForDay", async (_event, { day_of_week }) => {
 });
 ipcMain.handle("sessions:proRateCalc", async (_event, args) => {
 	try {
-		checkAuth$6();
+		checkAuth$7();
 		const db = getDb();
 		let reg_date = args.reg_date;
 		let pricePerSession = args.price_per_session ?? 0;
@@ -30035,7 +30034,7 @@ function insertNotification(db, entry) {
 }
 ipcMain.handle("notifications:list", async (_event, args) => {
 	try {
-		checkAuth$6();
+		checkAuth$7();
 		const user = getCurrentUser();
 		const db = getDb();
 		const sql = args?.unreadOnly === true ? "SELECT * FROM notifications WHERE user_id = ? AND read_at IS NULL ORDER BY created_at DESC" : "SELECT * FROM notifications WHERE user_id = ? ORDER BY created_at DESC";
@@ -30046,7 +30045,7 @@ ipcMain.handle("notifications:list", async (_event, args) => {
 });
 ipcMain.handle("notifications:markRead", async (_event, args) => {
 	try {
-		checkAuth$6();
+		checkAuth$7();
 		const user = getCurrentUser();
 		const db = getDb();
 		const now = (/* @__PURE__ */ new Date()).toISOString();
@@ -30106,7 +30105,7 @@ function recalculateAttendancePayment(db, params) {
 }
 ipcMain.handle("attendance:getSheet", async (_event, { session_id }) => {
 	try {
-		checkAuth$6();
+		checkAuth$7();
 		const db = getDb();
 		const session = db.prepare("SELECT session_date FROM scheduled_sessions WHERE id = ?").get(session_id);
 		let dayOfWeek = null;
@@ -30205,7 +30204,7 @@ ipcMain.handle("attendance:getSheet", async (_event, { session_id }) => {
 });
 ipcMain.handle("attendance:record", async (_event, args) => {
 	try {
-		checkAuth$6();
+		checkAuth$7();
 		const db = getDb();
 		const user = getCurrentUser();
 		const isAdmin = user?.role === "admin";
@@ -30291,7 +30290,7 @@ ipcMain.handle("attendance:record", async (_event, args) => {
 });
 ipcMain.handle("attendance:delete", async (_event, { session_id, child_ids }) => {
 	try {
-		checkAuth$6();
+		checkAuth$7();
 		const db = getDb();
 		const items = (Array.isArray(child_ids) ? child_ids : []).map((it) => typeof it === "object" ? {
 			child_id: it.child_id,
@@ -30428,7 +30427,7 @@ ipcMain.handle("attendance:getSummary", async (_event, { employee_id, month, yea
 });
 ipcMain.handle("attendance:requestEdit", async (_event, args) => {
 	try {
-		checkAuth$6();
+		checkAuth$7();
 		const user = getCurrentUser();
 		if (user.role === "admin") throw new Error("Admins edit attendance directly and do not need to submit an edit request");
 		const db = getDb();
@@ -30470,7 +30469,7 @@ ipcMain.handle("attendance:requestEdit", async (_event, args) => {
 });
 ipcMain.handle("attendance:listEditRequests", async (_event, args) => {
 	try {
-		checkAuth$6();
+		checkAuth$7();
 		const user = getCurrentUser();
 		const db = getDb();
 		const status = args?.status;
@@ -30574,7 +30573,7 @@ ipcMain.handle("attendance:getAuditLog", async (_event, { attendance_record_id }
 //#region electron/ipc/paymentMethodsIPC.ts
 ipcMain.handle("paymentMethods:list", async () => {
 	try {
-		checkAuth$6();
+		checkAuth$7();
 		return getDb().prepare(`SELECT * FROM payment_methods ORDER BY name`).all();
 	} catch (e) {
 		throw new Error(e.message || "Failed to list payment methods");
@@ -30620,11 +30619,11 @@ ipcMain.handle("paymentMethods:delete", async (_event, { id }) => {
 });
 //#endregion
 //#region electron/ipc/deductionsIPC.ts
-function checkAuth() {
+function checkAuth$1() {
 	if (!getCurrentUser()) throw new Error("UNAUTHORIZED: يجب تسجيل الدخول أولاً / Unauthorized");
 }
 ipcMain.handle("deductions:list", async (_event, { employee_id, month, year }) => {
-	checkAuth();
+	checkAuth$1();
 	return getDb().prepare("SELECT * FROM employee_deductions WHERE employee_id = ? AND month = ? AND year = ? ORDER BY created_at ASC").all(employee_id, month, Number(year));
 });
 ipcMain.handle("deductions:add", async (_event, { employee_id, month, year, reason, amount }) => {
@@ -30646,7 +30645,7 @@ ipcMain.handle("deductions:remove", async (_event, { id }) => {
 //#region electron/ipc/serviceTeachersIPC.ts
 ipcMain.handle("serviceTeachers:list", async (_event, { service_id }) => {
 	try {
-		checkAuth$6();
+		checkAuth$7();
 		return getDb().prepare(`
       SELECT e.id, e.name, e.role
       FROM service_teachers st
@@ -30756,6 +30755,232 @@ ipcMain.handle("payroll:report", async (_event, { month, year }) => {
     `).all(monthKey);
 	} catch (error) {
 		throw new Error(error.message || "Failed to generate payroll report");
+	}
+});
+//#endregion
+//#region electron/ipc/dailyPaymentsIPC.ts
+function checkAuth() {
+	if (!getCurrentUser()) throw new Error("UNAUTHORIZED: يجب تسجيل الدخول أولاً / Unauthorized");
+}
+ipcMain.handle("daily_payments:get", async (_event, { billing_date }) => {
+	try {
+		checkAuth();
+		const db = getDb();
+		if (!billing_date) throw new Error("Billing date is required");
+		const payments = db.prepare(`
+      SELECT p.*, c.name as child_name, c.guardian as child_guardian, c.guardian_phone as child_guardian_phone, c.is_active as child_is_active
+      FROM daily_payments p
+      JOIN children c ON p.child_id = c.id
+      WHERE p.billing_date = ?
+      ORDER BY c.name ASC
+    `).all(billing_date);
+		let totalInvoiced = 0;
+		let totalCollected = 0;
+		let arrears = 0;
+		const childMap = /* @__PURE__ */ new Map();
+		for (const p of payments) {
+			totalInvoiced += p.total;
+			totalCollected += p.paid;
+			if (p.balance > 0) arrears += p.balance;
+			if (!childMap.has(p.child_id)) childMap.set(p.child_id, {
+				child_id: p.child_id,
+				child_name: p.child_name,
+				child_guardian: p.child_guardian,
+				child_guardian_phone: p.child_guardian_phone,
+				child_is_active: p.child_is_active ?? 1,
+				services: [],
+				totalInvoiced: 0,
+				totalCollected: 0,
+				balance: 0,
+				status: "unpaid"
+			});
+			const rollUp = childMap.get(p.child_id);
+			rollUp.services.push(p);
+			rollUp.totalInvoiced += p.total;
+			rollUp.totalCollected += p.paid;
+			rollUp.balance += p.balance;
+		}
+		for (const rollUp of childMap.values()) {
+			rollUp.status = calculateChildStatusRollup(rollUp.services);
+			rollUp.totalInvoiced = Number(rollUp.totalInvoiced.toFixed(2));
+			rollUp.totalCollected = Number(rollUp.totalCollected.toFixed(2));
+			rollUp.balance = Number(rollUp.balance.toFixed(2));
+		}
+		return {
+			payments,
+			byChild: Array.from(childMap.values()).sort((a, b) => a.child_name.localeCompare(b.child_name)),
+			summary: {
+				totalInvoiced: Number(totalInvoiced.toFixed(2)),
+				totalCollected: Number(totalCollected.toFixed(2)),
+				arrears: Number(arrears.toFixed(2))
+			}
+		};
+	} catch (error) {
+		console.error("Failed to get daily payments:", error);
+		throw new Error(error.message || "Failed to get daily payments");
+	}
+});
+ipcMain.handle("daily_payments:generate", async (_event, { billing_date }) => {
+	try {
+		checkAuth();
+		const db = getDb();
+		if (!billing_date) throw new Error("Billing date is required");
+		const activeEnrollments = db.prepare(`
+      SELECT cs.*
+      FROM child_services cs
+      JOIN children c ON cs.child_id = c.id
+      WHERE c.is_active = 1 AND cs.unit = 'يوم'
+    `).all();
+		let createdCount = 0;
+		const now = (/* @__PURE__ */ new Date()).toISOString();
+		const dateObj = new Date(billing_date);
+		const month = [
+			"يناير",
+			"فبراير",
+			"مارس",
+			"أبريل",
+			"مايو",
+			"يونيو",
+			"يوليو",
+			"أغسطس",
+			"سبتمبر",
+			"أكتوبر",
+			"نوفمبر",
+			"ديسمبر"
+		][dateObj.getMonth()];
+		const year = dateObj.getFullYear();
+		const checkStmt = db.prepare("SELECT id FROM daily_payments WHERE child_id = ? AND service_id = ? AND billing_date = ?");
+		const insertStmt = db.prepare(`
+      INSERT INTO daily_payments (
+        child_id, service_id, billing_date, month, year, service, unit, quantity, price, total, paid, balance, status, notes, created_at, updated_at, synced
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, 0)
+    `);
+		db.transaction(() => {
+			for (const enrollment of activeEnrollments) if (!checkStmt.get(enrollment.child_id, enrollment.id, billing_date)) {
+				const quantity = 1;
+				const price = enrollment.price;
+				const total = quantity * price;
+				const balance = total;
+				insertStmt.run(enrollment.child_id, enrollment.id, billing_date, month, year, enrollment.service, enrollment.unit, quantity, price, total, balance, "unpaid", "", now, now);
+				createdCount++;
+			}
+		})();
+		return { created: createdCount };
+	} catch (error) {
+		console.error("Failed to generate daily payments:", error);
+		throw new Error(error.message || "Failed to generate daily payments");
+	}
+});
+ipcMain.handle("daily_payments:update", async (_event, { id, quantity, paid, notes, payment_method_id }) => {
+	try {
+		checkAuth();
+		const user = getCurrentUser();
+		const db = getDb();
+		const now = (/* @__PURE__ */ new Date()).toISOString();
+		const payment = db.prepare("SELECT * FROM daily_payments WHERE id = ?").get(id);
+		if (!payment) throw new Error("Daily Payment not found");
+		if (quantity !== void 0 && quantity !== payment.quantity) {
+			if (user?.role !== "admin") throw new Error("FORBIDDEN: Only admin can change quantity");
+		}
+		const finalQuantity = quantity !== void 0 ? quantity : payment.quantity;
+		const finalPaid = paid !== void 0 ? paid : payment.paid;
+		const finalNotes = notes !== void 0 ? notes : payment.notes;
+		let finalMethodId = payment.payment_method_id;
+		let finalMethodName = payment.payment_method_name;
+		if (payment_method_id !== void 0) {
+			finalMethodId = payment_method_id;
+			if (payment_method_id === null) finalMethodName = null;
+			else {
+				const method = db.prepare("SELECT name FROM payment_methods WHERE id = ?").get(payment_method_id);
+				if (method) finalMethodName = method.name;
+			}
+		}
+		const { total, balance, status } = calculatePayment(finalQuantity, payment.price, finalPaid);
+		db.prepare(`
+      UPDATE daily_payments
+      SET quantity = ?, total = ?, paid = ?, balance = ?, status = ?, notes = ?, payment_method_id = ?, payment_method_name = ?, updated_at = ?, synced = 0
+      WHERE id = ?
+    `).run(finalQuantity, total, finalPaid, balance, status, finalNotes, finalMethodId, finalMethodName, now, id);
+		return db.prepare(`
+      SELECT p.*, c.name as child_name, c.guardian as child_guardian, c.guardian_phone as child_guardian_phone, c.is_active as child_is_active
+      FROM daily_payments p
+      JOIN children c ON p.child_id = c.id
+      WHERE p.id = ?
+    `).get(id);
+	} catch (error) {
+		console.error("Failed to update daily payment:", error);
+		throw new Error(error.message || "Failed to update daily payment");
+	}
+});
+ipcMain.handle("daily_payments:bulkPay", async (_event, { ids, payment_method_id }) => {
+	try {
+		checkAuth();
+		if (!ids || !ids.length) throw new Error("No IDs provided for bulk pay");
+		const db = getDb();
+		const now = (/* @__PURE__ */ new Date()).toISOString();
+		let updatedCount = 0;
+		let finalMethodName = null;
+		if (payment_method_id) {
+			const method = db.prepare("SELECT name FROM payment_methods WHERE id = ?").get(payment_method_id);
+			if (method) finalMethodName = method.name;
+		}
+		const updateStmt = db.prepare(`
+      UPDATE daily_payments
+      SET paid = total, balance = 0, status = 'paid', payment_method_id = ?, payment_method_name = ?, updated_at = ?, synced = 0
+      WHERE id = ? AND status != 'paid'
+    `);
+		db.transaction(() => {
+			for (const id of ids) {
+				const result = updateStmt.run(payment_method_id ?? null, finalMethodName, now, id);
+				updatedCount += Number(result.changes);
+			}
+		})();
+		return { updated: updatedCount };
+	} catch (error) {
+		console.error("Failed to bulk pay daily payments:", error);
+		throw new Error(error.message || "Failed to bulk pay daily payments");
+	}
+});
+ipcMain.handle("daily_payments:deleteBulk", async (_event, { ids }) => {
+	try {
+		requireAdmin();
+		if (!ids || !ids.length) return {
+			ok: true,
+			deleted: 0
+		};
+		const db = getDb();
+		const placeholders = ids.map(() => "?").join(",");
+		return {
+			ok: true,
+			deleted: db.prepare(`DELETE FROM daily_payments WHERE id IN (${placeholders})`).run(...ids).changes
+		};
+	} catch (error) {
+		console.error("Failed to bulk delete daily payments:", error);
+		throw new Error(error.message || "Failed to bulk delete daily payments");
+	}
+});
+ipcMain.handle("daily_payments:deleteAll", async (_event, { billing_date }) => {
+	try {
+		requireAdmin();
+		if (!billing_date) throw new Error("Billing date is required");
+		return {
+			ok: true,
+			deleted: getDb().prepare("DELETE FROM daily_payments WHERE billing_date = ?").run(billing_date).changes
+		};
+	} catch (error) {
+		console.error("Failed to delete all daily payments:", error);
+		throw new Error(error.message || "Failed to delete all daily payments");
+	}
+});
+ipcMain.handle("daily_payments:deleteForChild", async (_event, { child_id, billing_date }) => {
+	try {
+		requireAdmin();
+		if (!child_id || !billing_date) throw new Error("Child ID and billing date are required");
+		getDb().prepare("DELETE FROM daily_payments WHERE child_id = ? AND billing_date = ?").run(child_id, billing_date);
+		return { ok: true };
+	} catch (error) {
+		console.error("Failed to delete daily payments for child:", error);
+		throw new Error(error.message || "Failed to delete daily payments for child");
 	}
 });
 //#endregion

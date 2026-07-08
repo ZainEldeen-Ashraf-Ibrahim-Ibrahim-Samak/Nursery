@@ -7,7 +7,8 @@ import { useBranding } from '../../hooks/useBranding.js'
 import clsx from 'clsx'
 
 export const Sidebar: React.FC = () => {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
+  const isAr = i18n.language === 'ar'
   const { user } = useAuthStore()
   const { branding } = useBranding()
   const [isChecking, setIsChecking] = React.useState(false)
