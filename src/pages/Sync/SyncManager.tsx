@@ -9,6 +9,29 @@ import { Input } from '../../components/ui/Input.js'
 import { ProgressBar } from '../../components/ui/ProgressBar.js'
 import { useProgress } from '../../hooks/useProgress.js'
 
+const getEntityName = (entity: string, isAr: boolean) => {
+  const map: Record<string, { ar: string; en: string }> = {
+    children: { ar: 'الأطفال', en: 'Children' },
+    child_services: { ar: 'خدمات الأطفال', en: 'Child Services' },
+    payments: { ar: 'دفعات الأطفال', en: 'Children Payments' },
+    employees: { ar: 'الموظفين', en: 'Employees' },
+    salary_payments: { ar: 'الرواتب', en: 'Salary Payments' },
+    expenses: { ar: 'المصروفات', en: 'Expenses' },
+    imported_snapshots: { ar: 'النسخ المستوردة', en: 'Imported Snapshots' },
+    tombstones: { ar: 'السجلات المحذوفة', en: 'Deleted Records' },
+    scheduled_sessions: { ar: 'الجلسات المجدولة', en: 'Scheduled Sessions' },
+    session_teachers: { ar: 'معلمي الجلسات', en: 'Session Teachers' },
+    attendance_records: { ar: 'سجلات الحضور', en: 'Attendance Records' },
+    attendance_conflicts: { ar: 'تعارضات الحضور', en: 'Attendance Conflicts' },
+    employee_deductions: { ar: 'خصومات الموظفين', en: 'Employee Deductions' },
+    payment_transactions: { ar: 'حركات الدفع', en: 'Payment Transactions' },
+    service_teachers: { ar: 'معلمي الخدمات', en: 'Service Teachers' },
+    teacher_payments: { ar: 'دفعات المعلمين', en: 'Teacher Payments' },
+    settings: { ar: 'الإعدادات', en: 'Settings' }
+  }
+  return map[entity] ? (isAr ? map[entity].ar : map[entity].en) : entity
+}
+
 export default function SyncManager() {
   const { i18n } = useTranslation()
   const isAr = i18n.language === 'ar'
@@ -180,9 +203,9 @@ export default function SyncManager() {
             <div className="text-sm space-y-1">
               {Object.entries(status.pending).map(([entity, count]) => (
                 <div key={entity} className="flex justify-between text-slate-600">
-                  <span>{entity}</span>
+                  <span>{getEntityName(entity, isAr)}</span>
                   <Badge variant={count > 0 ? 'warning' : 'success'}>
-                    {count > 0 ? `${count} pending` : '✅ synced'}
+                    {count > 0 ? `${count} ${isAr ? 'قيد الانتظار' : 'pending'}` : `✅ ${isAr ? 'مُتزامن' : 'synced'}`}
                   </Badge>
                 </div>
               ))}
@@ -232,10 +255,10 @@ export default function SyncManager() {
               <p className="font-bold text-emerald-700">✅ {isAr ? 'نتائج الرفع:' : 'Push Results:'}</p>
               {formatResults(lastPushResults, 'push')?.map(({ entity, count, failed }) => (
                 <div key={entity} className="flex justify-between text-slate-600">
-                  <span>{entity}</span>
+                  <span>{getEntityName(entity, isAr)}</span>
                   <span>
                     <span className="text-emerald-600 font-semibold">↑ {count}</span>
-                    {failed > 0 && <span className="text-red-500"> ({failed} failed)</span>}
+                    {failed > 0 && <span className="text-red-500"> ({failed} {isAr ? 'فشلت' : 'failed'})</span>}
                   </span>
                 </div>
               ))}
@@ -306,12 +329,12 @@ export default function SyncManager() {
               {formatResults(lastPullResults, 'pull')?.map(({ entity, count, merged, failed, skipped, errors, skipReasons }) => (
                 <div key={entity} className="space-y-0.5">
                   <div className="flex justify-between text-slate-600">
-                    <span>{entity}</span>
+                    <span>{getEntityName(entity, isAr)}</span>
                     <span>
                       <span className="text-blue-600 font-semibold">↓ {count}</span>
                       {merged > 0 && <span className="text-emerald-600"> ({merged} {isAr ? 'تم دمجها' : 'merged'})</span>}
-                      {skipped > 0 && <span className="text-slate-400"> ({skipped} skipped)</span>}
-                      {failed > 0 && <span className="text-red-500"> ({failed} failed)</span>}
+                      {skipped > 0 && <span className="text-slate-400"> ({skipped} {isAr ? 'تم تخطيها' : 'skipped'})</span>}
+                      {failed > 0 && <span className="text-red-500"> ({failed} {isAr ? 'فشلت' : 'failed'})</span>}
                     </span>
                   </div>
                   {errors.length > 0 && (
