@@ -31299,14 +31299,12 @@ app.whenReady().then(async () => {
 		}
 	});
 	createWindow();
-	if (app.isPackaged) {
-		initAutoUpdater();
-		setTimeout(() => {
-			import_main.autoUpdater.checkForUpdatesAndNotify().catch((err) => {
-				console.error("Error during automatic update check:", err);
-			});
-		}, 5e3);
-	}
+	initAutoUpdater();
+	if (app.isPackaged) setTimeout(() => {
+		import_main.autoUpdater.checkForUpdatesAndNotify().catch((err) => {
+			console.error("Error during automatic update check:", err);
+		});
+	}, 5e3);
 	app.on("activate", () => {
 		if (BrowserWindow.getAllWindows().length === 0) createWindow();
 	});
