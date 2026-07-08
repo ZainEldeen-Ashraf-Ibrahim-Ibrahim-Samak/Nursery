@@ -200,10 +200,13 @@ app.whenReady().then(async () => {
 
   createWindow()
 
-  // Auto-updater only runs in packaged production builds.
-  // In dev mode electron-updater has no feed URL and would throw.
+  // The updater:check/install/open-release-page IPC handlers must always be registered — the
+  // renderer (Sidebar, Login) calls updater:check unconditionally on every load, packaged or
+  // not — otherwise it fails with "No handler registered for 'updater:check'" in dev.
+  // Only the *automatic* background check-and-notify is skipped outside packaged builds, since
+  // electron-updater has no feed URL in dev and would throw.
+  initAutoUpdater()
   if (app.isPackaged) {
-    initAutoUpdater()
     setTimeout(() => {
       autoUpdater.checkForUpdatesAndNotify().catch((err) => {
         console.error('Error during automatic update check:', err)
