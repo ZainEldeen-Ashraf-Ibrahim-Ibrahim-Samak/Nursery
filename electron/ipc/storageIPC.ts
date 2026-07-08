@@ -6,7 +6,6 @@ import { requireAdmin } from './_guard.js'
 import { getCurrentUser } from './authIPC.js'
 import { progressReporter } from './progress.js'
 import { uploadImage } from '../services/cloudinaryService.js'
-import { getMongoUri } from './syncIPC.js'
 
 /**
  * storage:uploadPhoto { dataUrl, folder? }
@@ -227,54 +226,8 @@ ipcMain.handle('storage:clear', async (_event, { confirm }) => {
       db.pragma('foreign_keys = ON')
     }
 
-    // Clear MongoDB synced collections if a URI is available or if we are connected
-    try {
-      const mongoUri = getMongoUri()
-      if (mongoUri && process.env.NODE_ENV !== 'test') {
-        const { getConnectionStatus, connectMongo, disconnectMongo, SYNC_ENTITIES } = await import('../services/mongoSync.js')
-        const status = getConnectionStatus()
-        let tempConnected = false
-        if (!status.connected) {
-          console.log('[storage:clear] MongoDB not connected; attempting temporary connection to clear cloud collections...')
-          await connectMongo(mongoUri)
-          tempConnected = true
-        }
-
-        const clearedEntities = [
-          'children',
-          'child_services',
-          'payments',
-          'employees',
-          'salary_payments',
-          'expenses',
-          'imported_snapshots',
-          'tombstones',
-          'scheduled_sessions',
-          'session_teachers',
-          'attendance_records',
-          'attendance_conflicts',
-          'employee_deductions',
-          'payment_transactions',
-          'service_teachers',
-          'teacher_payments',
-        ]
-
-        console.log('[storage:clear] Clearing MongoDB collections...')
-        for (const entity of SYNC_ENTITIES) {
-          if (clearedEntities.includes(entity.name)) {
-            await entity.model.deleteMany({})
-          }
-        }
-
-        if (tempConnected) {
-          console.log('[storage:clear] Disconnecting temporary MongoDB connection...')
-          await disconnectMongo()
-        }
-      }
-    } catch (mongoError: any) {
-      console.warn('[storage:clear] Failed to clear MongoDB collections:', mongoError.message)
-      // Do not throw; SQLite clear succeeding is paramount, and MongoDB sync might be offline
-    }
+    // MongoDB is intentionally NOT cleared — only local SQLite data is removed.
+    // This allows the user to do a pull after clearing to restore data from the cloud.
 
     return { ok: true }
   } catch (error: any) {
