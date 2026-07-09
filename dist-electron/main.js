@@ -29334,7 +29334,7 @@ ipcMain.handle("sync:status", async () => {
 		const mongoUri = getMongoUri();
 		const lastLogRow = db.prepare("SELECT synced_at AS created_at, status, action FROM sync_log ORDER BY id DESC LIMIT 1").get();
 		const autoIntervalRow = db.prepare("SELECT value FROM settings WHERE key = 'sync_auto_interval'").get();
-		const savedInterval = Number(autoIntervalRow?.value ?? 0);
+		const savedInterval = autoIntervalRow ? Number(autoIntervalRow.value) : 1;
 		return {
 			connected,
 			error,
@@ -29342,7 +29342,7 @@ ipcMain.handle("sync:status", async () => {
 			pending,
 			lastSync: lastLogRow || null,
 			autoSyncEnabled: savedInterval > 0,
-			autoSyncIntervalMinutes: savedInterval > 0 ? savedInterval : 30
+			autoSyncIntervalMinutes: savedInterval > 0 ? savedInterval : 1
 		};
 	} catch (error) {
 		console.error("sync:status error:", error);
@@ -29595,9 +29595,9 @@ function startAutoSync(intervalMs) {
 		if (!connected) return;
 		try {
 			const pushHandler = ipcMain.listeners?.("sync:push")?.[0];
-			if (typeof pushHandler === "function") await pushHandler({});
+			if (typeof pushHandler === "function") await pushHandler({ force: true });
 			const pullHandler = ipcMain.listeners?.("sync:pull")?.[0];
-			if (typeof pullHandler === "function") await pullHandler({});
+			if (typeof pullHandler === "function") await pullHandler({ force: true });
 		} catch (err) {
 			console.error("Auto-sync error:", err);
 		}
@@ -29613,7 +29613,7 @@ function stopAutoSync() {
 * sync:auto-sync — Enable/disable auto-sync and set the interval.
 * Admin only.
 */
-ipcMain.handle("sync:auto-sync", async (_event, { enabled, intervalMinutes = 30 }) => {
+ipcMain.handle("sync:auto-sync", async (_event, { enabled, intervalMinutes = 1 }) => {
 	try {
 		requireAdmin();
 		const db = getDb();
@@ -31283,7 +31283,7 @@ app.whenReady().then(async () => {
 		console.log("Connecting to MongoDB on startup...");
 		connectMongo(resolvedMongoUri).then(() => console.log("Successfully connected to MongoDB on startup.")).catch((err) => console.error("Failed to connect to MongoDB on startup:", err.message));
 		const autoIntervalRow = db.prepare("SELECT value FROM settings WHERE key = 'sync_auto_interval'").get();
-		const savedInterval = Number(autoIntervalRow?.value ?? 0);
+		const savedInterval = autoIntervalRow ? Number(autoIntervalRow.value) : 1;
 		if (savedInterval > 0) startAutoSync(savedInterval * 60 * 1e3);
 	} catch (error) {
 		console.error("Failed to initialize database or branding assets:", error);
