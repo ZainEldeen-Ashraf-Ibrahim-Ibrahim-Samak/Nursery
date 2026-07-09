@@ -72,8 +72,8 @@ export const useSyncStore = create<SyncState>((set, get) => ({
   lastPushResults: null,
   lastPullResults: null,
   error: null,
-  autoSyncEnabled: false,
-  autoSyncIntervalMinutes: 30,
+  autoSyncEnabled: true,
+  autoSyncIntervalMinutes: 1,
 
   fetchStatus: async () => {
     set({ isLoading: true, error: null })

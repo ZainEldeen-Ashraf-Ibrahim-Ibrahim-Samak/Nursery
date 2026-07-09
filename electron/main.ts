@@ -172,9 +172,10 @@ app.whenReady().then(async () => {
       .then(() => console.log('Successfully connected to MongoDB on startup.'))
       .catch((err) => console.error('Failed to connect to MongoDB on startup:', err.message))
 
-    // Resume auto-sync if a saved interval exists (T090)
+    // Auto-sync every minute by default (force push+pull), unless the user
+    // has explicitly turned it off in Settings (sync_auto_interval = '0').
     const autoIntervalRow = db.prepare("SELECT value FROM settings WHERE key = 'sync_auto_interval'").get() as { value: string } | undefined
-    const savedInterval = Number(autoIntervalRow?.value ?? 0)
+    const savedInterval = autoIntervalRow ? Number(autoIntervalRow.value) : 1
     if (savedInterval > 0) {
       startAutoSync(savedInterval * 60 * 1000)
     }

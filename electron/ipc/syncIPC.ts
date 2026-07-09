@@ -170,7 +170,7 @@ ipcMain.handle('sync:status', async () => {
     // Saved auto-sync state so the UI reflects it after a restart instead of
     // defaulting to "Off" (the timer itself is resumed in main.ts on startup).
     const autoIntervalRow = db.prepare("SELECT value FROM settings WHERE key = 'sync_auto_interval'").get() as any
-    const savedInterval = Number(autoIntervalRow?.value ?? 0)
+    const savedInterval = autoIntervalRow ? Number(autoIntervalRow.value) : 1
 
     return {
       connected,
@@ -179,7 +179,7 @@ ipcMain.handle('sync:status', async () => {
       pending,
       lastSync: lastLogRow || null,
       autoSyncEnabled: savedInterval > 0,
-      autoSyncIntervalMinutes: savedInterval > 0 ? savedInterval : 30
+      autoSyncIntervalMinutes: savedInterval > 0 ? savedInterval : 1
     }
   } catch (error: any) {
     console.error('sync:status error:', error)
