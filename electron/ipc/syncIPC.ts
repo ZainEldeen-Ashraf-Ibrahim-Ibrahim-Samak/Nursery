@@ -488,16 +488,17 @@ export function startAutoSync(intervalMs: number): void {
     if (!connected) return
 
     try {
-      // Trigger push via ipcMain internally
+      // Trigger push via ipcMain internally (force: overwrite cloud with local so
+      // auto-sync never silently skips records the `synced` flag missed)
       const pushHandler = ipcMain.listeners?.('sync:push')?.[0]
       if (typeof pushHandler === 'function') {
-        await (pushHandler as any)({} as any)
+        await (pushHandler as any)({ force: true } as any)
       }
 
-      // Trigger pull via ipcMain internally
+      // Trigger pull via ipcMain internally (force: cloud always wins conflicts)
       const pullHandler = ipcMain.listeners?.('sync:pull')?.[0]
       if (typeof pullHandler === 'function') {
-        await (pullHandler as any)({} as any)
+        await (pullHandler as any)({ force: true } as any)
       }
     } catch (err) {
       console.error('Auto-sync error:', err)
@@ -516,7 +517,7 @@ export function stopAutoSync(): void {
  * sync:auto-sync — Enable/disable auto-sync and set the interval.
  * Admin only.
  */
-ipcMain.handle('sync:auto-sync', async (_event, { enabled, intervalMinutes = 30 }) => {
+ipcMain.handle('sync:auto-sync', async (_event, { enabled, intervalMinutes = 1 }) => {
   try {
     requireAdmin()
     const db = getDb()
