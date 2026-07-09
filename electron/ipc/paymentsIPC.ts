@@ -50,14 +50,15 @@ ipcMain.handle('payments:get', async (_event, { month, year }) => {
       throw new Error('Month and year are required')
     }
     
-    // Fetch payments joined with children names and status
-    // Exclude daily-unit (يوم) services — they belong to Daily Billing, not Monthly Billing
+    // Fetch payments joined with children names and status.
+    // Daily-unit (يوم) rows are included: since feature 009 replaced Daily Billing with the
+    // read-only Transactions view, day/hour services are billed here from attendance counts.
     const payments = db.prepare(`
       SELECT p.*, c.name as child_name, c.guardian as child_guardian, c.guardian_phone as child_guardian_phone, c.is_active as child_is_active,
         (SELECT COUNT(*) FROM payment_transactions pt WHERE pt.payment_id = p.id) as transaction_count
       FROM payments p
       JOIN children c ON p.child_id = c.id
-      WHERE p.month = ? AND p.year = ? AND p.unit != 'يوم'
+      WHERE p.month = ? AND p.year = ?
       ORDER BY c.name ASC
     `).all(month, year) as Payment[]
     
@@ -128,16 +129,18 @@ ipcMain.handle('payments:generate', async (_event, { month, year }) => {
       throw new Error('Month and year are required')
     }
     
-    // Fetch active enrollments + child extra session data
-    // Exclude daily-unit (يوم) services — these are billed exclusively via Daily Billing to avoid double-charging
+    // Fetch active enrollments + child extra session data.
+    // Day-unit (يوم) services are included: they are charged from attendance (attended +
+    // unexcused absence), since the separate Daily Billing flow was retired in feature 009.
     const activeEnrollments = db.prepare(`
       SELECT cs.*, c.extra_lessons, c.session_price, c.sessions_baseline, c.reg_date
       FROM child_services cs
       JOIN children c ON cs.child_id = c.id
-      WHERE c.is_active = 1 AND cs.unit != 'يوم'
+      WHERE c.is_active = 1
     `).all() as any[]
 
     let createdCount = 0
+    let updatedCount = 0
     const now = new Date().toISOString()
 
     const checkStmt = db.prepare('SELECT id FROM payments WHERE child_id = ? AND service_id = ? AND month = ? AND year = ?')
@@ -148,23 +151,63 @@ ipcMain.handle('payments:generate', async (_event, { month, year }) => {
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, 0)
     `)
 
+    // Counts billable attendance for a child's service within a date range: sessions where the
+    // child was attended OR absent without excuse (absent_unexcused). Excused absences are not
+    // charged. Sessions only exist on the child's selected lesson days, so the selection is
+    // respected implicitly. DISTINCT session_id guards against per-teacher duplicate rows.
+    const billableAttendanceStmt = db.prepare(`
+      SELECT COUNT(DISTINCT ar.session_id) as cnt
+      FROM attendance_records ar
+      JOIN scheduled_sessions ss ON ss.id = ar.session_id
+      LEFT JOIN service_definitions sd ON sd.id = ss.service_id
+      WHERE ar.child_id = ?
+        AND ss.session_date >= ? AND ss.session_date <= ?
+        AND ar.status IN ('attended', 'absent_unexcused')
+        AND (ss.service_id IS NULL OR sd.name = ?)
+    `)
+
     const transaction = db.transaction(() => {
       for (const enrollment of activeEnrollments) {
-        const existing = checkStmt.get(enrollment.child_id, enrollment.id, month, year)
-        if (!existing) {
-          const arabicMonthNames = ['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر']
-          const monthIndex = arabicMonthNames.indexOf(month)
-          const payYear = Number(year)
-          const daysInMonth = monthIndex !== -1 ? new Date(payYear, monthIndex + 1, 0).getDate() : 30
+        const arabicMonthNames = ['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر']
+        const monthIndex = arabicMonthNames.indexOf(month)
+        const payYear = Number(year)
+        const daysInMonth = monthIndex !== -1 ? new Date(payYear, monthIndex + 1, 0).getDate() : 30
+        const monthPad2 = monthIndex !== -1 ? String(monthIndex + 1).padStart(2, '0') : '01'
+        const monthStartStr = `${payYear}-${monthPad2}-01`
+        const monthEndStr = `${payYear}-${monthPad2}-${String(daysInMonth).padStart(2, '0')}`
 
+        const countBillableAttendance = () => {
+          const row = billableAttendanceStmt.get(enrollment.child_id, monthStartStr, monthEndStr, enrollment.service) as any
+          return Number(row?.cnt) || 0
+        }
+
+        const existing = checkStmt.get(enrollment.child_id, enrollment.id, month, year) as any
+        if (existing && (enrollment.unit === 'يوم' || enrollment.unit === 'ساعة')) {
+          // Attendance-driven units: refresh the quantity on regeneration so charges track
+          // attendance recorded after the row was first created. Paid amounts are preserved;
+          // total/balance/status are recomputed from the new quantity.
+          const current = db.prepare('SELECT * FROM payments WHERE id = ?').get(existing.id) as any
+          const newQuantity = countBillableAttendance()
+          if (current && current.quantity !== newQuantity) {
+            const { total, balance, status } = calculatePayment(newQuantity, current.price, current.paid)
+            db.prepare(`
+              UPDATE payments SET quantity = ?, total = ?, balance = ?, status = ?, updated_at = ?, synced = 0
+              WHERE id = ?
+            `).run(newQuantity, total, balance, status, now, existing.id)
+            updatedCount++
+          }
+        }
+        if (!existing) {
           // Determine quantity based on unit type
           let quantity: number
           if (enrollment.unit === 'شهر') {
             quantity = 1
           } else if (enrollment.unit === 'يوم') {
-            quantity = daysInMonth
+            // charge only days the child actually attended or was absent without excuse
+            quantity = countBillableAttendance()
           } else if (enrollment.unit === 'ساعة') {
-            quantity = 1  // hourly rate — user sets actual hours manually
+            // one hour per billable attendance; admin can adjust actual hours manually
+            quantity = countBillableAttendance()
           } else if (enrollment.unit === 'جلسة') {
             // count scheduled sessions in this month
             const monthPad = monthIndex !== -1 ? String(monthIndex + 1).padStart(2, '0') : '01'
@@ -187,13 +230,9 @@ ipcMain.handle('payments:generate', async (_event, { month, year }) => {
               if (enrollment.unit === 'شهر') {
                 // pro-rate price for monthly service
                 proratedCalc = Math.round((enrollment.price * daysRemaining) / daysInMonth)
-              } else if (enrollment.unit === 'يوم') {
-                // reduce quantity to remaining days
-                quantity = daysRemaining
-                proratedCalc = Math.round(enrollment.price * daysRemaining)
-              } else if (enrollment.unit === 'ساعة') {
-                // hourly — user sets hours manually, no auto pro-rate
-                quantity = 1
+              } else if (enrollment.unit === 'يوم' || enrollment.unit === 'ساعة') {
+                // attendance-driven units: quantity already counts only billable attendance,
+                // which cannot predate registration — no extra pro-rating needed
               } else if (enrollment.unit === 'جلسة') {
                 // count sessions from reg_date to end of month
                 const regDateStr = enrollment.reg_date
@@ -268,7 +307,7 @@ ipcMain.handle('payments:generate', async (_event, { month, year }) => {
     })
 
     transaction()
-    return { created: createdCount }
+    return { created: createdCount, updated: updatedCount }
   } catch (error: any) {
     console.error('Failed to generate payments:', error)
     throw new Error(error.message || 'Failed to generate payments')
