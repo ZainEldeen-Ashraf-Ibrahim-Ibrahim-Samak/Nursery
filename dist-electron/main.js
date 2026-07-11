@@ -31341,26 +31341,42 @@ app.whenReady().then(async () => {
 });
 function initAutoUpdater() {
 	import_main.autoUpdater.logger = console;
+	const CHECK_COOLDOWN_MS = 600 * 1e3;
+	let lastCheckAt = 0;
+	let lastOutcome = null;
+	let rateLimitRetryTimer = null;
 	import_main.autoUpdater.on("checking-for-update", () => {
+		lastCheckAt = Date.now();
 		mainWindow?.webContents.send("updater:status", { event: "checking-for-update" });
 	});
 	import_main.autoUpdater.on("update-available", (info) => {
-		mainWindow?.webContents.send("updater:status", {
+		lastOutcome = {
 			event: "update-available",
 			info
-		});
+		};
+		mainWindow?.webContents.send("updater:status", lastOutcome);
 	});
 	import_main.autoUpdater.on("update-not-available", (info) => {
-		mainWindow?.webContents.send("updater:status", {
+		lastOutcome = {
 			event: "update-not-available",
 			info
-		});
+		};
+		mainWindow?.webContents.send("updater:status", lastOutcome);
 	});
 	let _updateRetried = false;
 	import_main.autoUpdater.on("error", (err) => {
 		const msg = err.message || "";
 		const isRateLimit = msg.includes("429") || msg.includes("Too Many Requests");
 		const isNetworkError = !isRateLimit && (msg.includes("ERR_HTTP2") || msg.includes("net::") || msg.includes("ECONNRESET") || msg.includes("ETIMEDOUT"));
+		if (isRateLimit) {
+			console.warn("[updater] GitHub rate limit (429); will retry after cooldown");
+			mainWindow?.webContents.send("updater:status", { event: "update-not-available" });
+			if (!rateLimitRetryTimer) rateLimitRetryTimer = setTimeout(() => {
+				rateLimitRetryTimer = null;
+				import_main.autoUpdater.checkForUpdates().catch(() => {});
+			}, CHECK_COOLDOWN_MS);
+			return;
+		}
 		if (isNetworkError && !_updateRetried) {
 			_updateRetried = true;
 			setTimeout(() => import_main.autoUpdater.downloadUpdate().catch(() => {}), 3e3);
@@ -31368,8 +31384,8 @@ function initAutoUpdater() {
 		}
 		mainWindow?.webContents.send("updater:status", {
 			event: "error",
-			error: isRateLimit ? "429" : msg,
-			errorCode: isRateLimit ? "rate_limit" : isNetworkError ? "network" : "unknown"
+			error: msg,
+			errorCode: isNetworkError ? "network" : "unknown"
 		});
 	});
 	import_main.autoUpdater.on("download-progress", (progressObj) => {
@@ -31390,6 +31406,13 @@ function initAutoUpdater() {
 		});
 	});
 	ipcMain.handle("updater:check", async () => {
+		if (lastOutcome && Date.now() - lastCheckAt < CHECK_COOLDOWN_MS) {
+			mainWindow?.webContents.send("updater:status", lastOutcome);
+			return {
+				success: true,
+				cached: true
+			};
+		}
 		try {
 			return {
 				success: true,

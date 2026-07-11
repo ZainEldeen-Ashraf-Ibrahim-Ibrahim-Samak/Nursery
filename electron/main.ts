@@ -225,16 +225,27 @@ app.whenReady().then(async () => {
 function initAutoUpdater() {
   autoUpdater.logger = console
 
+  // GitHub throttles unauthenticated requests per IP; re-checking within this window just burns
+  // quota and comes back as 429. Real checks are limited to one per window — inside it, manual
+  // "check for updates" clicks replay the last known outcome instead of hitting GitHub again.
+  const CHECK_COOLDOWN_MS = 10 * 60 * 1000
+  let lastCheckAt = 0
+  let lastOutcome: { event: string; info?: any } | null = null
+  let rateLimitRetryTimer: NodeJS.Timeout | null = null
+
   autoUpdater.on('checking-for-update', () => {
+    lastCheckAt = Date.now()
     mainWindow?.webContents.send('updater:status', { event: 'checking-for-update' })
   })
 
   autoUpdater.on('update-available', (info) => {
-    mainWindow?.webContents.send('updater:status', { event: 'update-available', info })
+    lastOutcome = { event: 'update-available', info }
+    mainWindow?.webContents.send('updater:status', lastOutcome)
   })
 
   autoUpdater.on('update-not-available', (info) => {
-    mainWindow?.webContents.send('updater:status', { event: 'update-not-available', info })
+    lastOutcome = { event: 'update-not-available', info }
+    mainWindow?.webContents.send('updater:status', lastOutcome)
   })
 
   let _updateRetried = false
@@ -242,6 +253,20 @@ function initAutoUpdater() {
     const msg = err.message || ''
     const isRateLimit = msg.includes('429') || msg.includes('Too Many Requests')
     const isNetworkError = !isRateLimit && (msg.includes('ERR_HTTP2') || msg.includes('net::') || msg.includes('ECONNRESET') || msg.includes('ETIMEDOUT'))
+
+    if (isRateLimit) {
+      // Transient GitHub throttling — nothing the user can act on, so resolve the banner
+      // quietly (no sticky error) and retry once in the background after the cooldown.
+      console.warn('[updater] GitHub rate limit (429); will retry after cooldown')
+      mainWindow?.webContents.send('updater:status', { event: 'update-not-available' })
+      if (!rateLimitRetryTimer) {
+        rateLimitRetryTimer = setTimeout(() => {
+          rateLimitRetryTimer = null
+          autoUpdater.checkForUpdates().catch(() => {})
+        }, CHECK_COOLDOWN_MS)
+      }
+      return
+    }
 
     if (isNetworkError && !_updateRetried) {
       _updateRetried = true
@@ -251,8 +276,8 @@ function initAutoUpdater() {
 
     mainWindow?.webContents.send('updater:status', {
       event: 'error',
-      error: isRateLimit ? '429' : msg,
-      errorCode: isRateLimit ? 'rate_limit' : isNetworkError ? 'network' : 'unknown',
+      error: msg,
+      errorCode: isNetworkError ? 'network' : 'unknown',
     })
   })
 
@@ -273,6 +298,12 @@ function initAutoUpdater() {
   })
 
   ipcMain.handle('updater:check', async () => {
+    // Within the cooldown, answer from the last real check so repeated clicks on
+    // "check for updates" can't hammer GitHub into rate-limiting us.
+    if (lastOutcome && Date.now() - lastCheckAt < CHECK_COOLDOWN_MS) {
+      mainWindow?.webContents.send('updater:status', lastOutcome)
+      return { success: true, cached: true }
+    }
     try {
       const result = await autoUpdater.checkForUpdates()
       return { success: true, result }
