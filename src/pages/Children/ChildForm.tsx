@@ -30,38 +30,36 @@ const GUARDIAN_PHONE_RE = /^(?:\+?2)?01[0-9]{9}$/
 const DAY_KEYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const
 
 /**
- * Live, read-only preview of remaining scheduled sessions this month and expected teacher
- * cost (FR-002/FR-003). Self-contained so it never writes anything and doesn't need access
- * to the parent form's state beyond the two values it depends on.
+ * Live, read-only preview of remaining scheduled sessions this month and the expected charge
+ * for this service row, using the row's selected unit price (FR-002/FR-003). Monthly units are
+ * a flat subscription, so the monthly price is shown as-is; per-day/hour/session units multiply
+ * the unit price by the remaining scheduled occurrences from today to the end of the month.
  */
-function TeacherCostPreview({ teacherId, lessonDays, isAr }: { teacherId: string; lessonDays: number[]; isAr: boolean }) {
-  const [preview, setPreview] = useState<{ remaining_sessions: number; expected_cost: number } | null>(null)
+function ServiceCostPreview({ lessonDays, unit, price, isAr }: { lessonDays: number[]; unit: UnitType; price: number; isAr: boolean }) {
+  if (lessonDays.length === 0) return null
 
-  useEffect(() => {
-    let cancelled = false
-    if (!teacherId || lessonDays.length === 0) {
-      setPreview(null)
-      return
-    }
-    window.api.childServices.previewTeacherCost(Number(teacherId), lessonDays).then((result) => {
-      if (!cancelled) setPreview(result)
-    }).catch(() => {
-      if (!cancelled) setPreview(null)
-    })
-    return () => { cancelled = true }
-  }, [teacherId, JSON.stringify(lessonDays)])
+  const today = new Date()
+  const year = today.getFullYear()
+  const month = today.getMonth()
+  const daysInMonth = new Date(year, month + 1, 0).getDate()
+  let remaining = 0
+  for (let d = today.getDate(); d <= daysInMonth; d++) {
+    if (lessonDays.includes(new Date(year, month, d).getDay())) remaining++
+  }
 
-  if (!preview) return null
+  const unitPrice = Number(price) || 0
+  const isMonthly = unit === 'شهر'
+  const expected = isMonthly ? unitPrice : Number((remaining * unitPrice).toFixed(2))
 
   return (
     <div className="bg-primary/5 border border-primary/20 rounded-lg px-3 py-2 text-xs text-slate-600 flex items-center justify-between">
       <span>
         {isAr
-          ? `الجلسات المتبقية هذا الشهر: ${preview.remaining_sessions}`
-          : `Remaining sessions this month: ${preview.remaining_sessions}`}
+          ? `الجلسات المتبقية هذا الشهر: ${remaining}${isMonthly ? '' : ` × ${unitPrice} ج.م`}`
+          : `Remaining sessions this month: ${remaining}${isMonthly ? '' : ` × ${unitPrice} EGP`}`}
       </span>
       <span className="font-bold text-slate-800">
-        {isAr ? `التكلفة المتوقعة: ${preview.expected_cost} ج.م` : `Expected cost: ${preview.expected_cost} EGP`}
+        {isAr ? `التكلفة المتوقعة: ${expected} ج.م` : `Expected cost: ${expected} EGP`}
       </span>
     </div>
   )
@@ -75,17 +73,20 @@ function TeacherCostPreview({ teacherId, lessonDays, isAr }: { teacherId: string
 function ScopedTeacherSelect({
   serviceId, allTeachers, value, onChange, noTeacherLabel
 }: { serviceId: number | undefined; allTeachers: Teacher[]; value: string; onChange: (v: string) => void; noTeacherLabel: string }) {
-  const [scoped, setScoped] = useState<Teacher[] | null>(null)
+  // Roster is keyed by the service it was fetched for, so switching services (or clearing the
+  // selection) invalidates it by derivation — no synchronous setState reset inside the effect.
+  const [roster, setRoster] = useState<{ serviceId: number; list: Teacher[] } | null>(null)
 
   useEffect(() => {
+    if (!serviceId) return
     let cancelled = false
-    if (!serviceId) { setScoped(null); return }
     window.api.serviceTeachers.list(serviceId).then((list: Teacher[]) => {
-      if (!cancelled) setScoped(list && list.length > 0 ? list : null)
-    }).catch(() => { if (!cancelled) setScoped(null) })
+      if (!cancelled) setRoster({ serviceId, list: list ?? [] })
+    }).catch(() => { if (!cancelled) setRoster({ serviceId, list: [] }) })
     return () => { cancelled = true }
   }, [serviceId])
 
+  const scoped = serviceId && roster?.serviceId === serviceId && roster.list.length > 0 ? roster.list : null
   const options = scoped ?? allTeachers
 
   return (
@@ -106,7 +107,7 @@ export default function ChildForm() {
   const { id } = useParams<{ id: string }>()
   const isEdit = !!id
 
-  const { addChild, updateChild, children, fetchChildren, error, clearError } = useChildrenStore()
+  const { addChild, updateChild, fetchChildren, error, clearError } = useChildrenStore()
   const { fetchServices, services: serviceDefs } = useServiceDefinitionsStore()
 
   // Form states
@@ -127,59 +128,58 @@ export default function ChildForm() {
   const [teachers, setTeachers] = useState<Teacher[]>([])
 
   const [formErrors, setFormErrors] = useState<Record<string, string>>({})
-  const [isLoadingChild, setIsLoadingChild] = useState(false)
+  // Starts true in edit mode so the load effect never has to set it synchronously.
+  const [isLoadingChild, setIsLoadingChild] = useState(isEdit)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [submitStep, setSubmitStep] = useState<'idle' | 'uploading' | 'saving'>('idle')
   const [photoNotice, setPhotoNotice] = useState<string | null>(null)
   const [proRateResult, setProRateResult] = useState<{ remaining_sessions: number; total_sessions: number; prorated_amount: number; days_remaining: number; days_in_month: number } | null>(null)
 
+  // Fetch service definitions (Settings → Services — the single source of truth for pricing),
+  // then auto-apply prices to service rows still at price=0. Done in the fetch callback rather
+  // than a serviceDefs-watching effect so no setState runs synchronously inside an effect body.
+  useEffect(() => {
+    fetchServices().then(() => {
+      const defs = useServiceDefinitionsStore.getState().services
+      if (defs.length === 0) return
+      setFormData(prev => ({
+        ...prev,
+        services: prev.services.map(row => {
+          if (row.price > 0) return row
+          const svcDef = defs.find(d =>
+            d.name === row.service || d.name.toLowerCase() === (row.service as string).toLowerCase()
+          )
+          let resolved = 0
+          if (svcDef) {
+            if (row.unit === 'شهر' && svcDef.price_monthly != null) resolved = svcDef.price_monthly
+            else if (row.unit === 'يوم' && svcDef.price_daily != null) resolved = svcDef.price_daily
+            else if ((row.unit === 'ساعة' || row.unit === 'جلسة') && svcDef.price_hourly != null) resolved = svcDef.price_hourly
+          }
+          return resolved > 0 ? { ...row, price: resolved } : row
+        })
+      }))
+    })
+  }, [fetchServices])
+
+  // Pro-rate calculation — uses first service row's session_price, re-runs when date/services
+  // change. Applicability is derived at render time so the effect only ever sets state from the
+  // IPC callback (never synchronously), and stale results are masked by derivation instead of a
+  // reset-to-null inside the effect.
+  const proRatePricePerSession = formData.services.reduce((acc: number, r) => acc || Number(r.session_price), 0)
+  const proRateApplicable = !isEdit && !!formData.reg_date && proRatePricePerSession > 0
+    && new Date(formData.reg_date).getDate() !== 1
+  useEffect(() => {
+    if (!proRateApplicable) return
+    let cancelled = false
+    window.api.sessions.proRateCalc({ reg_date: formData.reg_date, price_per_session: proRatePricePerSession })
+      .then((r: any) => { if (!cancelled) setProRateResult(r) })
+      .catch(() => { if (!cancelled) setProRateResult(null) })
+    return () => { cancelled = true }
+  }, [proRateApplicable, formData.reg_date, proRatePricePerSession])
+  const proRate = proRateApplicable ? proRateResult : null
+
   // Pro-rate session baseline (kept for pro-rate notice display; per-row session_price drives actual fees)
-  const sessionsBaseline = proRateResult?.total_sessions && proRateResult.total_sessions > 0 ? proRateResult.total_sessions : 8
-
-  // Fetch service definitions (Settings → Services — the single source of truth for pricing)
-  useEffect(() => {
-    fetchServices()
-  }, [])
-
-  // Auto-apply prices to service rows with price=0 once service defs finish loading
-  useEffect(() => {
-    if (serviceDefs.length === 0) return
-    setFormData(prev => ({
-      ...prev,
-      services: prev.services.map(row => {
-        if (row.price > 0) return row
-        const svcDef = serviceDefs.find(d =>
-          d.name === row.service || d.name.toLowerCase() === (row.service as string).toLowerCase()
-        )
-        let resolved = 0
-        if (svcDef) {
-          if (row.unit === 'شهر' && svcDef.price_monthly != null) resolved = svcDef.price_monthly
-          else if (row.unit === 'يوم' && svcDef.price_daily != null) resolved = svcDef.price_daily
-          else if ((row.unit === 'ساعة' || row.unit === 'جلسة') && svcDef.price_hourly != null) resolved = svcDef.price_hourly
-        }
-        return resolved > 0 ? { ...row, price: resolved } : row
-      })
-    }))
-  }, [serviceDefs])
-
-  // Pro-rate calculation — uses first service row's session_price, re-runs when date/services change
-  useEffect(() => {
-    if (isEdit) return
-    const pricePerSession = formData.services.reduce((acc: number, r) => acc || Number(r.session_price), 0)
-    if (!formData.reg_date || !pricePerSession) { setProRateResult(null); return }
-    const regDate = new Date(formData.reg_date)
-    if (regDate.getDate() === 1) { setProRateResult(null); return }
-    window.api.sessions.proRateCalc({ reg_date: formData.reg_date, price_per_session: pricePerSession })
-      .then((r: any) => setProRateResult(r))
-      .catch(() => setProRateResult(null))
-  }, [formData.reg_date, formData.services, isEdit])
-
-  // Sync baseline sessions when pro-rate calculation completes in Add mode
-  useEffect(() => {
-    if (!isEdit && proRateResult?.total_sessions && proRateResult.total_sessions > 0) {
-      setFormData(prev => ({ ...prev, sessions_baseline: proRateResult.total_sessions }))
-    }
-  }, [proRateResult?.total_sessions, isEdit])
+  const sessionsBaseline = proRate?.total_sessions && proRate.total_sessions > 0 ? proRate.total_sessions : 8
 
   // Load the teacher options (from the Employees list, feature 004)
   useEffect(() => {
@@ -197,9 +197,11 @@ export default function ChildForm() {
   // If in edit mode, load the child record
   useEffect(() => {
     if (isEdit) {
-      setIsLoadingChild(true)
       const loadChild = async () => {
-        let child = children.find((c) => c.id === Number(id))
+        // Read from the store snapshot at call time (not a subscribed `children` prop) so this
+        // effect doesn't need `children` as a dependency — re-running it on every store refresh
+        // would clobber in-progress form edits.
+        let child = useChildrenStore.getState().children.find((c) => c.id === Number(id))
         if (!child) {
           await fetchChildren()
           const currentStore = useChildrenStore.getState()
@@ -505,7 +507,7 @@ export default function ChildForm() {
 
   if (isLoadingChild) {
     return (
-      <div className="flex items-center justify-center min-h-[400px]">
+      <div className="flex items-center justify-center min-h-100">
         <svg className="animate-spin h-8 w-8 text-primary" fill="none" viewBox="0 0 24 24">
           <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
           <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
@@ -630,19 +632,19 @@ export default function ChildForm() {
           </div>
 
           {/* Pro-rated first payment notice (US6) */}
-          {!isEdit && proRateResult && (
+          {!isEdit && proRate && (
             <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm">
               <p className="font-semibold text-amber-800 mb-1">
                 {i18n.language === 'ar' ? 'دفعة أول شهر (محسوبة تناسبياً)' : 'First Month — Pro-rated Payment'}
               </p>
               <p className="text-amber-700">
                 {i18n.language === 'ar'
-                  ? `الجلسات المتبقية في الشهر: ${proRateResult.remaining_sessions} من ${proRateResult.total_sessions}`
-                  : `Remaining sessions this month: ${proRateResult.remaining_sessions} of ${proRateResult.total_sessions}`}
+                  ? `الجلسات المتبقية في الشهر: ${proRate.remaining_sessions} من ${proRate.total_sessions}`
+                  : `Remaining sessions this month: ${proRate.remaining_sessions} of ${proRate.total_sessions}`}
               </p>
               <p className="text-amber-900 font-bold mt-1">
                 {i18n.language === 'ar' ? 'المبلغ المقترح: ' : 'Suggested amount: '}
-                {new Intl.NumberFormat(i18n.language === 'ar' ? 'ar-EG' : 'en-US', { style: 'currency', currency: 'EGP', maximumFractionDigits: 0 }).format(proRateResult.prorated_amount)}
+                {new Intl.NumberFormat(i18n.language === 'ar' ? 'ar-EG' : 'en-US', { style: 'currency', currency: 'EGP', maximumFractionDigits: 0 }).format(proRate.prorated_amount)}
               </p>
             </div>
           )}
@@ -773,8 +775,8 @@ export default function ChildForm() {
                         </div>
                       </div>
 
-                      {/* Live remaining-sessions / expected teacher cost preview (FR-002/FR-003) */}
-                      <TeacherCostPreview teacherId={row.teacher_id} lessonDays={row.lesson_days} isAr={ar} />
+                      {/* Live remaining-sessions / expected service cost preview (FR-002/FR-003) */}
+                      <ServiceCostPreview lessonDays={row.lesson_days} unit={row.unit} price={Number(row.price)} isAr={ar} />
 
                       {/* Session fee summary for this row (if session_price > 0) */}
                       {Number(row.session_price) > 0 && (

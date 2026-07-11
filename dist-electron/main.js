@@ -22655,7 +22655,7 @@ ipcMain.handle("payments:get", async (_event, { month, year }) => {
         (SELECT COUNT(*) FROM payment_transactions pt WHERE pt.payment_id = p.id) as transaction_count
       FROM payments p
       JOIN children c ON p.child_id = c.id
-      WHERE p.month = ? AND p.year = ? AND p.unit != 'يوم'
+      WHERE p.month = ? AND p.year = ?
       ORDER BY c.name ASC
     `).all(month, year);
 		let totalInvoiced = 0;
@@ -22713,9 +22713,10 @@ ipcMain.handle("payments:generate", async (_event, { month, year }) => {
       SELECT cs.*, c.extra_lessons, c.session_price, c.sessions_baseline, c.reg_date
       FROM child_services cs
       JOIN children c ON cs.child_id = c.id
-      WHERE c.is_active = 1 AND cs.unit != 'يوم'
+      WHERE c.is_active = 1
     `).all();
 		let createdCount = 0;
+		let updatedCount = 0;
 		const now = (/* @__PURE__ */ new Date()).toISOString();
 		const checkStmt = db.prepare("SELECT id FROM payments WHERE child_id = ? AND service_id = ? AND month = ? AND year = ?");
 		const checkExtraStmt = db.prepare(`SELECT id FROM payments WHERE child_id = ? AND month = ? AND year = ? AND service = 'حصص إضافية'`);
@@ -22724,29 +22725,59 @@ ipcMain.handle("payments:generate", async (_event, { month, year }) => {
         child_id, service_id, month, year, service, unit, quantity, price, total, paid, balance, status, notes, created_at, updated_at, synced
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, 0)
     `);
+		const billableAttendanceStmt = db.prepare(`
+      SELECT COUNT(DISTINCT ar.session_id) as cnt
+      FROM attendance_records ar
+      JOIN scheduled_sessions ss ON ss.id = ar.session_id
+      LEFT JOIN service_definitions sd ON sd.id = ss.service_id
+      WHERE ar.child_id = ?
+        AND ss.session_date >= ? AND ss.session_date <= ?
+        AND ar.status IN ('attended', 'absent_unexcused')
+        AND (ss.service_id IS NULL OR sd.name = ?)
+    `);
 		db.transaction(() => {
 			for (const enrollment of activeEnrollments) {
-				if (!checkStmt.get(enrollment.child_id, enrollment.id, month, year)) {
-					const monthIndex = [
-						"يناير",
-						"فبراير",
-						"مارس",
-						"أبريل",
-						"مايو",
-						"يونيو",
-						"يوليو",
-						"أغسطس",
-						"سبتمبر",
-						"أكتوبر",
-						"نوفمبر",
-						"ديسمبر"
-					].indexOf(month);
-					const payYear = Number(year);
-					const daysInMonth = monthIndex !== -1 ? new Date(payYear, monthIndex + 1, 0).getDate() : 30;
+				const monthIndex = [
+					"يناير",
+					"فبراير",
+					"مارس",
+					"أبريل",
+					"مايو",
+					"يونيو",
+					"يوليو",
+					"أغسطس",
+					"سبتمبر",
+					"أكتوبر",
+					"نوفمبر",
+					"ديسمبر"
+				].indexOf(month);
+				const payYear = Number(year);
+				const daysInMonth = monthIndex !== -1 ? new Date(payYear, monthIndex + 1, 0).getDate() : 30;
+				const monthPad2 = monthIndex !== -1 ? String(monthIndex + 1).padStart(2, "0") : "01";
+				const monthStartStr = `${payYear}-${monthPad2}-01`;
+				const monthEndStr = `${payYear}-${monthPad2}-${String(daysInMonth).padStart(2, "0")}`;
+				const countBillableAttendance = () => {
+					const row = billableAttendanceStmt.get(enrollment.child_id, monthStartStr, monthEndStr, enrollment.service);
+					return Number(row?.cnt) || 0;
+				};
+				const existing = checkStmt.get(enrollment.child_id, enrollment.id, month, year);
+				if (existing && (enrollment.unit === "يوم" || enrollment.unit === "ساعة")) {
+					const current = db.prepare("SELECT * FROM payments WHERE id = ?").get(existing.id);
+					const newQuantity = countBillableAttendance();
+					if (current && current.quantity !== newQuantity) {
+						const { total, balance, status } = calculatePayment(newQuantity, current.price, current.paid);
+						db.prepare(`
+              UPDATE payments SET quantity = ?, total = ?, balance = ?, status = ?, updated_at = ?, synced = 0
+              WHERE id = ?
+            `).run(newQuantity, total, balance, status, now, existing.id);
+						updatedCount++;
+					}
+				}
+				if (!existing) {
 					let quantity;
 					if (enrollment.unit === "شهر") quantity = 1;
-					else if (enrollment.unit === "يوم") quantity = daysInMonth;
-					else if (enrollment.unit === "ساعة") quantity = 1;
+					else if (enrollment.unit === "يوم") quantity = countBillableAttendance();
+					else if (enrollment.unit === "ساعة") quantity = countBillableAttendance();
 					else if (enrollment.unit === "جلسة") {
 						const monthPad = monthIndex !== -1 ? String(monthIndex + 1).padStart(2, "0") : "01";
 						const monthStart = `${payYear}-${monthPad}-01`;
@@ -22761,11 +22792,7 @@ ipcMain.handle("payments:generate", async (_event, { month, year }) => {
 						if (regYear === payYear && regMonth === monthIndex && regDate.getDate() > 1) {
 							const daysRemaining = daysInMonth - regDate.getDate() + 1;
 							if (enrollment.unit === "شهر") proratedCalc = Math.round(enrollment.price * daysRemaining / daysInMonth);
-							else if (enrollment.unit === "يوم") {
-								quantity = daysRemaining;
-								proratedCalc = Math.round(enrollment.price * daysRemaining);
-							} else if (enrollment.unit === "ساعة") quantity = 1;
-							else if (enrollment.unit === "جلسة") {
+							else if (enrollment.unit === "يوم" || enrollment.unit === "ساعة") {} else if (enrollment.unit === "جلسة") {
 								const regDateStr = enrollment.reg_date;
 								const monthEnd = `${payYear}-${String(monthIndex + 1).padStart(2, "0")}-${String(daysInMonth).padStart(2, "0")}`;
 								quantity = db.prepare(`SELECT COUNT(*) as cnt FROM scheduled_sessions WHERE session_date >= ? AND session_date <= ?`).get(regDateStr, monthEnd)?.cnt || quantity;
@@ -22797,7 +22824,10 @@ ipcMain.handle("payments:generate", async (_event, { month, year }) => {
 				}
 			}
 		})();
-		return { created: createdCount };
+		return {
+			created: createdCount,
+			updated: updatedCount
+		};
 	} catch (error) {
 		console.error("Failed to generate payments:", error);
 		throw new Error(error.message || "Failed to generate payments");
