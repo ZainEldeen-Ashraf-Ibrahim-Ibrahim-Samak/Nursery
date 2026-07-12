@@ -1072,6 +1072,57 @@ const migrations: Migration[] = [
         CREATE INDEX IF NOT EXISTS idx_child_activities_child_date ON child_activities(child_id, activity_date);
       `)
     }
+  },
+  {
+    // Employees can no longer delete attendance directly — deleting goes through the same
+    // approval flow as edits, as a request with requested_status = 'delete'. Rebuild
+    // attendance_edit_requests to (a) widen the requested_status CHECK to include 'delete' and
+    // (b) make attendance_record_id nullable with ON DELETE SET NULL, so an approved delete
+    // request survives as history instead of being cascade-deleted along with its record.
+    name: '042_attendance_delete_requests',
+    noTransaction: true,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS attendance_edit_requests_new (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          attendance_record_id INTEGER REFERENCES attendance_records(id) ON DELETE SET NULL,
+          child_id INTEGER NOT NULL REFERENCES children(id) ON DELETE CASCADE,
+          teacher_id INTEGER REFERENCES employees(id),
+          attendance_date TEXT NOT NULL,
+          original_status TEXT NOT NULL,
+          original_excuse_notes TEXT,
+          original_teacher_status TEXT,
+          requested_status TEXT NOT NULL CHECK(requested_status IN ('attended','absent_excused','absent_unexcused','deleted')),
+          requested_excuse_notes TEXT,
+          requested_teacher_status TEXT CHECK(requested_teacher_status IN ('present','absent')),
+          reason TEXT NOT NULL,
+          requested_by INTEGER NOT NULL REFERENCES users(id),
+          requested_at TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','approved','rejected')),
+          decided_by INTEGER REFERENCES users(id),
+          decided_at TEXT,
+          decision_notes TEXT,
+          synced INTEGER DEFAULT 0
+        );
+
+        INSERT INTO attendance_edit_requests_new
+          (id, attendance_record_id, child_id, teacher_id, attendance_date,
+           original_status, original_excuse_notes, original_teacher_status,
+           requested_status, requested_excuse_notes, requested_teacher_status,
+           reason, requested_by, requested_at, status, decided_by, decided_at, decision_notes, synced)
+        SELECT id, attendance_record_id, child_id, teacher_id, attendance_date,
+           original_status, original_excuse_notes, original_teacher_status,
+           requested_status, requested_excuse_notes, requested_teacher_status,
+           reason, requested_by, requested_at, status, decided_by, decided_at, decision_notes, synced
+        FROM attendance_edit_requests;
+
+        DROP TABLE attendance_edit_requests;
+        ALTER TABLE attendance_edit_requests_new RENAME TO attendance_edit_requests;
+        CREATE INDEX IF NOT EXISTS idx_edit_requests_record ON attendance_edit_requests(attendance_record_id);
+        CREATE INDEX IF NOT EXISTS idx_edit_requests_status ON attendance_edit_requests(status);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_edit_requests_one_pending ON attendance_edit_requests(attendance_record_id) WHERE status = 'pending';
+      `)
+    }
   }
 ]
 

@@ -229,7 +229,7 @@ export interface SessionTeacher {
   synced: number
 }
 
-export type AttendanceStatus = 'attended' | 'absent_excused' | 'absent_unexcused'
+export type AttendanceStatus = 'attended' | 'absent_excused' | 'absent_unexcused' | 'deleted'
 
 export interface AttendanceRecord {
   id: number

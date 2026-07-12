@@ -426,26 +426,58 @@ ipcMain.handle('attendance:record', async (_event, args) => {
 // Each item may be a plain child_id (legacy — deletes every teacher row for that child) or
 // { child_id, teacher_id } (precise — deletes only that child's row for that specific teacher,
 // since a child can now have more than one teacher's row in the same session).
-ipcMain.handle('attendance:delete', async (_event, { session_id, child_ids }) => {
+// Admins delete immediately. Employees do NOT delete — each matched record becomes a pending
+// 'delete' request in attendance_edit_requests for an admin to approve (recording NEW
+// attendance stays direct for employees; only removing a saved record needs approval).
+ipcMain.handle('attendance:delete', async (_event, { session_id, child_ids, reason }) => {
   try {
     checkAuth()
     const db = getDb()
+    const user = getCurrentUser()!
+    const isAdmin = user.role === 'admin'
     const rawItems: any[] = Array.isArray(child_ids) ? child_ids : []
     const items: { child_id: number; teacher_id: number | null | undefined }[] = rawItems.map((it) =>
       typeof it === 'object' ? { child_id: it.child_id, teacher_id: it.teacher_id } : { child_id: it, teacher_id: undefined }
     )
-    if (items.length === 0) return { ok: true, deleted: 0 }
+    if (items.length === 0) return { ok: true, deleted: 0, requested: 0 }
     let deleted = 0
+    let requested = 0
     const now = new Date().toISOString()
     db.transaction(() => {
       for (const item of items) {
         const matchTeacher = item.teacher_id !== undefined
         const records = (matchTeacher
           ? (item.teacher_id == null
-              ? db.prepare('SELECT id FROM attendance_records WHERE session_id = ? AND child_id = ? AND attended_teacher_id IS NULL').all(session_id, item.child_id)
-              : db.prepare('SELECT id FROM attendance_records WHERE session_id = ? AND child_id = ? AND attended_teacher_id = ?').all(session_id, item.child_id, item.teacher_id))
-          : db.prepare('SELECT id FROM attendance_records WHERE session_id = ? AND child_id = ?').all(session_id, item.child_id)
-        ) as { id: number }[]
+              ? db.prepare('SELECT * FROM attendance_records WHERE session_id = ? AND child_id = ? AND attended_teacher_id IS NULL').all(session_id, item.child_id)
+              : db.prepare('SELECT * FROM attendance_records WHERE session_id = ? AND child_id = ? AND attended_teacher_id = ?').all(session_id, item.child_id, item.teacher_id))
+          : db.prepare('SELECT * FROM attendance_records WHERE session_id = ? AND child_id = ?').all(session_id, item.child_id)
+        ) as any[]
+
+        if (!isAdmin) {
+          // Employee path: submit one pending delete request per record instead of deleting.
+          for (const record of records) {
+            const existingPending = db.prepare(
+              `SELECT 1 FROM attendance_edit_requests WHERE attendance_record_id = ? AND status = 'pending'`
+            ).get(record.id)
+            if (existingPending) continue
+            const session = db.prepare('SELECT session_date FROM scheduled_sessions WHERE id = ?').get(record.session_id) as any
+            db.prepare(`
+              INSERT INTO attendance_edit_requests
+                (attendance_record_id, child_id, teacher_id, attendance_date,
+                 original_status, original_excuse_notes, original_teacher_status,
+                 requested_status, requested_excuse_notes, requested_teacher_status,
+                 reason, requested_by, requested_at, status, synced)
+              VALUES (?, ?, ?, ?, ?, ?, ?, 'deleted', NULL, NULL, ?, ?, ?, 'pending', 0)
+            `).run(
+              record.id, record.child_id, record.attended_teacher_id, session?.session_date ?? now.slice(0, 10),
+              record.status, record.excuse_notes, record.teacher_status,
+              (reason && String(reason).trim()) || 'حذف تسجيل حضور / Delete attendance record',
+              user.id, now
+            )
+            requested++
+          }
+          continue
+        }
 
         for (const { id: recordId } of records) {
           // A paid teacher_payments row must never disappear silently — leave its attendance
@@ -462,8 +494,22 @@ ipcMain.handle('attendance:delete', async (_event, { session_id, child_ids }) =>
           deleted += Number(res.changes)
         }
       }
+
+      // Notify every admin that delete requests are awaiting review (same as requestEdit).
+      if (requested > 0) {
+        const admins = db.prepare(`SELECT id FROM users WHERE role = 'admin' AND is_active = 1`).all() as { id: number }[]
+        for (const admin of admins) {
+          insertNotification(db, {
+            user_id: admin.id,
+            type: 'edit_request_submitted',
+            related_id: null,
+            message_ar: `طلب حذف حضور جديد بانتظار المراجعة (${requested})`,
+            message_en: `New attendance delete request awaiting review (${requested})`
+          })
+        }
+      }
     })()
-    return { ok: true, deleted }
+    return { ok: true, deleted, requested }
   } catch (error: any) {
     throw new Error(error.message || 'Failed to delete attendance')
   }
@@ -703,37 +749,64 @@ ipcMain.handle('attendance:decideEditRequest', async (_event, args) => {
         const record = db.prepare('SELECT * FROM attendance_records WHERE id = ?').get(request.attendance_record_id) as any
         if (!record) throw new Error('Attendance record no longer exists — cannot apply approved changes')
 
-        db.prepare(`
-          UPDATE attendance_records
-          SET status = ?, excuse_notes = ?, teacher_status = ?, updated_at = ?, synced = 0
-          WHERE id = ?
-        `).run(request.requested_status, request.requested_excuse_notes, request.requested_teacher_status, now, record.id)
+        if (request.requested_status === 'deleted') {
+          const tp = db.prepare('SELECT id, status FROM teacher_payments WHERE attendance_record_id = ?').get(record.id) as any
+          if (tp && tp.status === 'paid') {
+            throw new Error('Cannot delete this attendance record because the teacher payment has already been paid out.')
+          }
+          if (tp) {
+            db.prepare('DELETE FROM teacher_payments WHERE id = ?').run(tp.id)
+          }
 
-        writeAuditLog(db, {
-          attendance_record_id: record.id,
-          edit_request_id: request.id,
-          old_status: request.original_status,
-          old_excuse_notes: request.original_excuse_notes,
-          old_teacher_status: request.original_teacher_status,
-          new_status: request.requested_status,
-          new_excuse_notes: request.requested_excuse_notes,
-          new_teacher_status: request.requested_teacher_status,
-          changed_by: request.requested_by,
-          approved_by: admin.id,
-          reason: request.reason,
-          changed_at: now
-        })
-
-        if (record.attended_teacher_id && request.attendance_date) {
-          recalculateAttendancePayment(db, {
-            teacher_id: record.attended_teacher_id,
-            child_id: record.child_id,
+          writeAuditLog(db, {
             attendance_record_id: record.id,
-            attendance_date: request.attendance_date,
-            status: request.requested_status,
-            teacher_status: request.requested_teacher_status,
-            now
+            edit_request_id: request.id,
+            old_status: request.original_status,
+            old_excuse_notes: request.original_excuse_notes,
+            old_teacher_status: request.original_teacher_status,
+            new_status: request.requested_status,
+            new_excuse_notes: request.requested_excuse_notes,
+            new_teacher_status: request.requested_teacher_status,
+            changed_by: request.requested_by,
+            approved_by: admin.id,
+            reason: request.reason,
+            changed_at: now
           })
+
+          db.prepare('DELETE FROM attendance_records WHERE id = ?').run(record.id)
+        } else {
+          db.prepare(`
+            UPDATE attendance_records
+            SET status = ?, excuse_notes = ?, teacher_status = ?, updated_at = ?, synced = 0
+            WHERE id = ?
+          `).run(request.requested_status, request.requested_excuse_notes, request.requested_teacher_status, now, record.id)
+
+          writeAuditLog(db, {
+            attendance_record_id: record.id,
+            edit_request_id: request.id,
+            old_status: request.original_status,
+            old_excuse_notes: request.original_excuse_notes,
+            old_teacher_status: request.original_teacher_status,
+            new_status: request.requested_status,
+            new_excuse_notes: request.requested_excuse_notes,
+            new_teacher_status: request.requested_teacher_status,
+            changed_by: request.requested_by,
+            approved_by: admin.id,
+            reason: request.reason,
+            changed_at: now
+          })
+
+          if (record.attended_teacher_id && request.attendance_date) {
+            recalculateAttendancePayment(db, {
+              teacher_id: record.attended_teacher_id,
+              child_id: record.child_id,
+              attendance_record_id: record.id,
+              attendance_date: request.attendance_date,
+              status: request.requested_status,
+              teacher_status: request.requested_teacher_status,
+              now
+            })
+          }
         }
       }
 

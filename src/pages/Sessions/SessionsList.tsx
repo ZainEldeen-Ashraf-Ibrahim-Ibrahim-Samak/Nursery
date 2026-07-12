@@ -247,6 +247,7 @@ export default function SessionsList() {
   const statusLabel = (s: AttendanceStatus) => {
     if (s === 'attended') return isAr ? 'حاضر' : 'Attended'
     if (s === 'absent_excused') return isAr ? 'غائب بعذر' : 'Excused'
+    if (s === 'deleted') return isAr ? 'حذف السجل' : 'Delete Record'
     return isAr ? 'غائب' : 'Absent'
   }
 
@@ -699,8 +700,8 @@ export default function SessionsList() {
           </p>
           <div className="space-y-1.5">
             <label className="text-xs font-semibold text-slate-500">{isAr ? 'الحالة المطلوبة' : 'Requested status'}</label>
-            <div className="flex gap-1">
-              {(['attended', 'absent_excused', 'absent_unexcused'] as AttendanceStatus[]).map((status) => (
+            <div className="flex gap-1 flex-wrap">
+              {(['attended', 'absent_excused', 'absent_unexcused', 'deleted'] as AttendanceStatus[]).map((status) => (
                 <button
                   key={status}
                   type="button"
@@ -708,7 +709,7 @@ export default function SessionsList() {
                   className={[
                     'px-2 py-1 rounded text-xs font-medium border transition-all',
                     editRequestStatus === status
-                      ? 'bg-primary/10 border-primary text-primary'
+                      ? (status === 'deleted' ? 'bg-red-100 border-red-500 text-red-700' : 'bg-primary/10 border-primary text-primary')
                       : 'bg-white border-slate-200 text-slate-400 hover:border-slate-400'
                   ].join(' ')}
                 >
