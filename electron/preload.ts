@@ -29,8 +29,8 @@ const api = {
     add: (args: any) => ipcRenderer.invoke('childServices:add', args),
     update: (args: any) => ipcRenderer.invoke('childServices:update', args),
     remove: (args: { id: number }) => ipcRenderer.invoke('childServices:remove', args),
-    previewTeacherCost: (teacher_id: number, lesson_days: number[]) =>
-      ipcRenderer.invoke('childServices:previewTeacherCost', { teacher_id, lesson_days }) as Promise<{ remaining_sessions: number; expected_cost: number; teacher_session_rate: number }>,
+    previewTeacherCost: (teacher_id: number, lesson_days: number[], teacher_session_rate?: number | null) =>
+      ipcRenderer.invoke('childServices:previewTeacherCost', { teacher_id, lesson_days, teacher_session_rate }) as Promise<{ remaining_sessions: number; expected_cost: number; teacher_session_rate: number }>,
     getTimetable: (child_id: number) => ipcRenderer.invoke('childServices:getTimetable', { child_id }),
   },
 
@@ -84,7 +84,7 @@ const api = {
   },
   childActivities: {
     list: (child_id: number) => ipcRenderer.invoke('childActivities:list', { child_id }),
-    create: (args: { child_id: number; activity_date?: string; note?: string; media_data_url?: string; media_type?: 'photo' | 'video' }) =>
+    create: (args: { child_id: number; activity_date?: string; note?: string; media_data_url?: string; media_type?: 'photo' | 'video' | 'file' }) =>
       ipcRenderer.invoke('childActivities:create', args),
     delete: (id: number) => ipcRenderer.invoke('childActivities:delete', { id }),
   },
@@ -105,6 +105,8 @@ const api = {
   salary: {
     get: (args: any) => ipcRenderer.invoke('salary:get', args),
     update: (args: any) => ipcRenderer.invoke('salary:update', args),
+    getExpected: (args: { employee_id: number; month: string; year: number }) =>
+      ipcRenderer.invoke('salary:getExpected', args) as Promise<{ actual_to_date: number; projected_remaining: number; expected_total: number; salary_type_mode: string | null }>,
   },
 
   // Expenses

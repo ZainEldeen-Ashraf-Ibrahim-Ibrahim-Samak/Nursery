@@ -998,6 +998,80 @@ const migrations: Migration[] = [
         DROP TABLE IF EXISTS daily_payments;
       `)
     }
+  },
+  {
+    // Per-child override of the teacher's flat `teacher_session_rate` — lets the same teacher
+    // be paid a different per-session amount for different children, without changing their
+    // own profile rate. Falls back to the teacher's rate (then the org-wide default) when unset.
+    name: '039_child_services_teacher_rate',
+    up: (db) => {
+      try { db.exec('ALTER TABLE child_services ADD COLUMN teacher_session_rate REAL;') } catch { /* already exists */ }
+    }
+  },
+  {
+    // New 'per_child_session' salary type mode: this employee's pay is driven entirely by the
+    // attendance-based teacher_payments ledger (which already resolves the per-child override
+    // above), rather than a role-level monthly/session/pct formula. Requires rebuilding
+    // salary_types since SQLite cannot ALTER a CHECK constraint in place.
+    // MUST run outside a transaction so PRAGMA foreign_keys = OFF takes effect (same pattern
+    // as 025_child_services_drop_unique).
+    name: '040_salary_types_per_child_mode',
+    noTransaction: true,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS salary_types_new (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL UNIQUE,
+          mode TEXT NOT NULL CHECK(mode IN ('fixed_monthly','per_session_fixed','per_session_pct','hybrid','per_child_session')),
+          monthly_rate REAL,
+          session_rate REAL,
+          session_pct REAL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          synced INTEGER DEFAULT 0
+        );
+
+        INSERT INTO salary_types_new
+          (id, name, mode, monthly_rate, session_rate, session_pct, created_at, updated_at, synced)
+        SELECT id, name, mode, monthly_rate, session_rate, session_pct, created_at, updated_at, synced
+        FROM salary_types;
+
+        DROP TABLE salary_types;
+        ALTER TABLE salary_types_new RENAME TO salary_types;
+      `)
+    }
+  },
+  {
+    // Child activity diary now accepts any attachment type, not just photo/video.
+    // Rebuild child_activities to widen the media_type CHECK to include 'file'
+    // (SQLite cannot ALTER a CHECK constraint in place — same pattern as 040).
+    name: '041_child_activities_any_media_type',
+    noTransaction: true,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS child_activities_new (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          child_id INTEGER NOT NULL REFERENCES children(id) ON DELETE CASCADE,
+          activity_date TEXT NOT NULL,
+          note TEXT,
+          media_url TEXT,
+          media_type TEXT CHECK(media_type IN ('photo','video','file')),
+          media_status TEXT CHECK(media_status IN ('uploaded','failed')),
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          synced INTEGER DEFAULT 0
+        );
+
+        INSERT INTO child_activities_new
+          (id, child_id, activity_date, note, media_url, media_type, media_status, created_at, updated_at, synced)
+        SELECT id, child_id, activity_date, note, media_url, media_type, media_status, created_at, updated_at, synced
+        FROM child_activities;
+
+        DROP TABLE child_activities;
+        ALTER TABLE child_activities_new RENAME TO child_activities;
+        CREATE INDEX IF NOT EXISTS idx_child_activities_child_date ON child_activities(child_id, activity_date);
+      `)
+    }
   }
 ]
 

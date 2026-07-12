@@ -22,6 +22,9 @@ interface ServiceRow {
   lesson_days: number[]
   extra_lessons: number
   session_price: number
+  // Per-child override of the teacher's per-session pay rate ("salary type per child"). Falls
+  // back to the teacher's own rate, then their salary type's rate, when left blank.
+  teacher_session_rate: number | ''
 }
 
 // Egyptian mobile: starts with 01, optionally prefixed by 2 or +2 (feature 004, FR-001).
@@ -30,10 +33,12 @@ const GUARDIAN_PHONE_RE = /^(?:\+?2)?01[0-9]{9}$/
 const DAY_KEYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const
 
 /**
- * Live, read-only preview of remaining scheduled sessions this month and the expected charge
- * for this service row, using the row's selected unit price (FR-002/FR-003). Monthly units are
- * a flat subscription, so the monthly price is shown as-is; per-day/hour/session units multiply
- * the unit price by the remaining scheduled occurrences from today to the end of the month.
+ * Live, read-only preview of the full month's scheduled sessions and expected charge for this
+ * service row, using the row's selected unit price (FR-002/FR-003). Monthly units are a flat
+ * subscription, so the monthly price is shown as-is; per-day/hour/session units multiply the
+ * unit price by ALL scheduled occurrences of the lesson days across the whole calendar month —
+ * not just the ones remaining from today onward, so admins always see the full expected total
+ * for the month regardless of what day it is or whether attendance has been recorded yet.
  */
 function ServiceCostPreview({ lessonDays, unit, price, isAr }: { lessonDays: number[]; unit: UnitType; price: number; isAr: boolean }) {
   if (lessonDays.length === 0) return null
@@ -42,21 +47,21 @@ function ServiceCostPreview({ lessonDays, unit, price, isAr }: { lessonDays: num
   const year = today.getFullYear()
   const month = today.getMonth()
   const daysInMonth = new Date(year, month + 1, 0).getDate()
-  let remaining = 0
-  for (let d = today.getDate(); d <= daysInMonth; d++) {
-    if (lessonDays.includes(new Date(year, month, d).getDay())) remaining++
+  let total = 0
+  for (let d = 1; d <= daysInMonth; d++) {
+    if (lessonDays.includes(new Date(year, month, d).getDay())) total++
   }
 
   const unitPrice = Number(price) || 0
   const isMonthly = unit === 'شهر'
-  const expected = isMonthly ? unitPrice : Number((remaining * unitPrice).toFixed(2))
+  const expected = isMonthly ? unitPrice : Number((total * unitPrice).toFixed(2))
 
   return (
     <div className="bg-primary/5 border border-primary/20 rounded-lg px-3 py-2 text-xs text-slate-600 flex items-center justify-between">
       <span>
         {isAr
-          ? `الجلسات المتبقية هذا الشهر: ${remaining}${isMonthly ? '' : ` × ${unitPrice} ج.م`}`
-          : `Remaining sessions this month: ${remaining}${isMonthly ? '' : ` × ${unitPrice} EGP`}`}
+          ? `إجمالي جلسات هذا الشهر: ${total}${isMonthly ? '' : ` × ${unitPrice} ج.م`}`
+          : `Total sessions this month: ${total}${isMonthly ? '' : ` × ${unitPrice} EGP`}`}
       </span>
       <span className="font-bold text-slate-800">
         {isAr ? `التكلفة المتوقعة: ${expected} ج.م` : `Expected cost: ${expected} EGP`}
@@ -119,7 +124,7 @@ export default function ChildForm() {
     national_id: '',
     reg_date: new Date().toISOString().split('T')[0],
     notes: '',
-    services: [{ service: 'حضانة' as ServiceType, unit: 'شهر' as UnitType, price: 0, teacher_id: '', lesson_days: [] as number[], extra_lessons: 0, session_price: 0 }] as ServiceRow[],
+    services: [{ service: 'حضانة' as ServiceType, unit: 'شهر' as UnitType, price: 0, teacher_id: '', lesson_days: [] as number[], extra_lessons: 0, session_price: 0, teacher_session_rate: '' as number | '' }] as ServiceRow[],
   })
 
   // Photo (data URL for new/changed photo; existing URL otherwise)
@@ -225,6 +230,7 @@ export default function ChildForm() {
                   lesson_days: days,
                   extra_lessons: s.extra_lessons ?? 0,
                   session_price: s.session_price ?? 0,
+                  teacher_session_rate: s.teacher_session_rate ?? '',
                 }
               })
             : [{
@@ -242,6 +248,7 @@ export default function ChildForm() {
                 })(),
                 extra_lessons: child.extra_lessons ?? 0,
                 session_price: child.session_price ?? 0,
+                teacher_session_rate: '',
               }]
 
           setFormData({
@@ -301,7 +308,7 @@ export default function ChildForm() {
     const defaultUnit = unitOpts[0]?.value ?? 'شهر'
     setFormData(prev => ({
       ...prev,
-      services: [...prev.services, { service: svcName, unit: defaultUnit, price: 0, teacher_id: '', lesson_days: [] as number[], extra_lessons: 0, session_price: 0 }]
+      services: [...prev.services, { service: svcName, unit: defaultUnit, price: 0, teacher_id: '', lesson_days: [] as number[], extra_lessons: 0, session_price: 0, teacher_session_rate: '' as number | '' }]
     }))
   }
 
@@ -467,6 +474,7 @@ export default function ChildForm() {
           lesson_days: s.lesson_days,
           extra_lessons: Number(s.extra_lessons) || 0,
           session_price: Number(s.session_price) || 0,
+          teacher_session_rate: s.teacher_session_rate !== '' ? Number(s.teacher_session_rate) : null,
         })),
         // Backward compat: set global fields from first row that has teacher/days
         teacher_id: formData.services.find(s => s.teacher_id)?.teacher_id || null,
@@ -750,6 +758,26 @@ export default function ChildForm() {
                           />
                         </div>
                       </div>
+
+                      {/* Row 2b: Salary type per child — overrides what THIS teacher earns for
+                          THIS child specifically (separate from session_price, which is what the
+                          family is billed). Only meaningful once a teacher is assigned. */}
+                      {row.teacher_id && (
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                          <div className="space-y-1.5">
+                            <label className="text-xs font-semibold text-slate-500">
+                              {ar ? 'تكلفة الجلسة لهذا المعلم (اختياري)' : "Teacher's Rate For This Child (optional)"}
+                            </label>
+                            <Input
+                              type="number"
+                              min={0}
+                              value={row.teacher_session_rate}
+                              placeholder={ar ? 'افتراضي: سعر جلسة المعلم' : "Default: teacher's own rate"}
+                              onChange={(e) => handleServiceChange(index, 'teacher_session_rate', e.target.value === '' ? '' : Math.max(0, Number(e.target.value)))}
+                            />
+                          </div>
+                        </div>
+                      )}
 
                       {/* Row 3: Lesson days */}
                       <div className="space-y-1.5">

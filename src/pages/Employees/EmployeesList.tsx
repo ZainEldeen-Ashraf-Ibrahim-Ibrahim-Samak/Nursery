@@ -38,6 +38,8 @@ export default function EmployeesList() {
     updateEmployee,
     deactivateEmployee,
     clearError,
+    currentMonth,
+    currentYear,
   } = useSalariesStore()
 
   const { roles, fetchRoles, addRole } = useRolesStore()
@@ -65,6 +67,12 @@ export default function EmployeesList() {
   const [teacherSessionRate, setTeacherSessionRate] = useState('')
   const [formError, setFormError] = useState('')
   const [isSubmitLoading, setIsSubmitLoading] = useState(false)
+
+  // Live forecast for the current payroll period (feature: salary type per child) — what this
+  // employee has already earned this month plus a projection for their remaining scheduled
+  // sessions. Read-only, computed on the fly; only meaningful for an existing employee.
+  const [expectedSalary, setExpectedSalary] = useState<{ actual_to_date: number; projected_remaining: number; expected_total: number } | null>(null)
+  const [isLoadingExpected, setIsLoadingExpected] = useState(false)
 
   // Inline add-new-role state
   const [showAddRole, setShowAddRole] = useState(false)
@@ -168,6 +176,7 @@ export default function EmployeesList() {
     setName(''); setRoleId(''); setSalaryTypeOverrideId('')
     setBaseSalary(''); setHousing(''); setTransport(''); setTeacherSessionRate('')
     setFormError(''); setShowAddRole(false); setNewRoleName('')
+    setExpectedSalary(null)
     setIsFormOpen(true)
   }
 
@@ -179,6 +188,12 @@ export default function EmployeesList() {
     setBaseSalary(String(emp.base_salary)); setHousing(String(emp.housing)); setTransport(String(emp.transport))
     setTeacherSessionRate(emp.teacher_session_rate != null ? String(emp.teacher_session_rate) : '')
     setFormError(''); setShowAddRole(false); setNewRoleName('')
+    setExpectedSalary(null)
+    setIsLoadingExpected(true)
+    window.api.salary.getExpected({ employee_id: emp.id, month: currentMonth, year: currentYear })
+      .then(setExpectedSalary)
+      .catch(() => setExpectedSalary(null))
+      .finally(() => setIsLoadingExpected(false))
     setIsFormOpen(true)
   }
 
@@ -470,6 +485,33 @@ export default function EmployeesList() {
             <span className="text-slate-500 font-medium">{isAr ? 'صافي الراتب (محسوب)' : 'Net Salary (computed)'}</span>
             <span className="font-bold text-primary">{fmt(previewNet)}</span>
           </div>
+
+          {editing && (
+            <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-3 text-sm space-y-1.5">
+              <div className="flex justify-between items-center">
+                <span className="text-emerald-700 font-semibold">
+                  {isAr ? `الراتب المتوقع (${currentMonth} ${currentYear})` : `Expected Salary (${currentMonth} ${currentYear})`}
+                </span>
+                {isLoadingExpected && <span className="text-xs text-emerald-500">{isAr ? 'جارٍ الحساب...' : 'Calculating...'}</span>}
+              </div>
+              {expectedSalary && !isLoadingExpected && (
+                <>
+                  <div className="flex justify-between text-xs text-emerald-700">
+                    <span>{isAr ? 'محقق حتى الآن' : 'Earned so far'}</span>
+                    <span>{fmt(expectedSalary.actual_to_date)}</span>
+                  </div>
+                  <div className="flex justify-between text-xs text-emerald-700">
+                    <span>{isAr ? 'المتبقي من المتوقع' : 'Remaining of expected'}</span>
+                    <span>{fmt(expectedSalary.projected_remaining)}</span>
+                  </div>
+                  <div className="flex justify-between font-bold text-emerald-800 border-t border-emerald-200 pt-1.5">
+                    <span>{isAr ? 'الراتب المتوقع (الشهر كاملاً)' : 'Expected Salary (full month)'}</span>
+                    <span>{fmt(expectedSalary.expected_total)}</span>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
         </form>
       </Modal>
 

@@ -24,7 +24,7 @@ ipcMain.handle('childServices:list', async (_event, { childId }) => {
   }
 })
 
-ipcMain.handle('childServices:add', async (_event, { childId, service, unit, price }) => {
+ipcMain.handle('childServices:add', async (_event, { childId, service, unit, price, teacher_session_rate = null }) => {
   try {
     requireAdmin()
     const db = getDb()
@@ -40,9 +40,9 @@ ipcMain.handle('childServices:add', async (_event, { childId, service, unit, pri
 
     const now = new Date().toISOString()
     const result = db.prepare(`
-      INSERT INTO child_services (child_id, service, unit, price, created_at, updated_at, synced)
-      VALUES (?, ?, ?, ?, ?, ?, 0)
-    `).run(childId, service, unit, price, now, now)
+      INSERT INTO child_services (child_id, service, unit, price, teacher_session_rate, created_at, updated_at, synced)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 0)
+    `).run(childId, service, unit, price, teacher_session_rate !== null ? Number(teacher_session_rate) : null, now, now)
 
     return db.prepare('SELECT * FROM child_services WHERE id = ?').get(result.lastInsertRowid) as ServiceEnrollment
   } catch (error: any) {
@@ -60,7 +60,7 @@ ipcMain.handle('childServices:update', async (_event, { id, patch }) => {
     let query = 'UPDATE child_services SET '
     const params: any[] = []
     
-    const allowed = ['unit', 'price']
+    const allowed = ['unit', 'price', 'teacher_session_rate']
     for (const key of allowed) {
       if (patch[key] !== undefined) {
         query += `${key} = ?, `
@@ -81,21 +81,29 @@ ipcMain.handle('childServices:update', async (_event, { id, patch }) => {
   }
 })
 
-// Read-only preview (FR-002/FR-003): counts scheduled weekday occurrences for `lesson_days`
-// (0=Sun…6=Sat) from today through the end of the current calendar month, and multiplies by
-// the teacher's per-session rate. Never writes anything — pure computation for the enrollment UI.
-ipcMain.handle('childServices:previewTeacherCost', async (_event, { teacher_id, lesson_days }) => {
+// Read-only preview (FR-002/FR-003): counts ALL scheduled weekday occurrences for `lesson_days`
+// (0=Sun…6=Sat) across the current calendar month (not just from today onward, so the total
+// stays accurate regardless of the day it's viewed), and multiplies by the teacher's per-session
+// rate. Never writes anything — pure computation for the enrollment UI.
+ipcMain.handle('childServices:previewTeacherCost', async (_event, { teacher_id, lesson_days, teacher_session_rate = null }) => {
   try {
     checkAuth()
     const db = getDb()
     const teacher = db.prepare('SELECT teacher_session_rate FROM employees WHERE id = ?').get(teacher_id) as any
-    let rate = teacher?.teacher_session_rate ?? null
+    // Fallback order mirrors resolveTeacherSessionRate in attendanceIPC.ts — the child-level
+    // override (this enrollment's own input, since the child may not exist yet to look up) wins
+    // over the teacher's own rate, which wins over their assigned salary type's session rate.
+    // There is no org-wide default fallback anymore.
+    let rate = teacher_session_rate !== null && teacher_session_rate !== '' ? Number(teacher_session_rate) : (teacher?.teacher_session_rate ?? null)
     if (rate == null) {
-      // Mirror the payment engine's fallback (attendanceIPC.ts): if this teacher has no rate
-      // of their own, the org-wide default from Settings is what will actually be charged.
-      const defaultSetting = db.prepare("SELECT value FROM settings WHERE key = 'default_teacher_session_rate'").get() as any
-      const defaultRate = defaultSetting?.value != null ? Number(defaultSetting.value) : NaN
-      rate = !isNaN(defaultRate) && defaultRate > 0 ? defaultRate : 0
+      const salaryTypeRow = db.prepare(`
+        SELECT st.session_rate as session_rate
+        FROM employees e
+        LEFT JOIN employee_roles er ON e.role_id = er.id
+        LEFT JOIN salary_types st ON st.id = COALESCE(e.salary_type_override_id, er.salary_type_id)
+        WHERE e.id = ?
+      `).get(teacher_id) as any
+      rate = salaryTypeRow?.session_rate ?? 0
     }
 
     const days: number[] = Array.isArray(lesson_days) ? lesson_days.map(Number) : []
@@ -105,17 +113,20 @@ ipcMain.handle('childServices:previewTeacherCost', async (_event, { teacher_id, 
     const month = today.getMonth()
     const daysInMonth = new Date(year, month + 1, 0).getDate()
 
-    let remaining = 0
+    // Full calendar month total, not just occurrences remaining from today onward — an admin
+    // reviewing this mid/end-of-month should still see the whole month's expected total, not a
+    // number that silently drops to 0 once the days have already passed.
+    let total = 0
     if (days.length > 0) {
-      for (let d = today.getDate(); d <= daysInMonth; d++) {
+      for (let d = 1; d <= daysInMonth; d++) {
         const date = new Date(year, month, d)
-        if (days.includes(date.getDay())) remaining++
+        if (days.includes(date.getDay())) total++
       }
     }
 
     return {
-      remaining_sessions: remaining,
-      expected_cost: Number((remaining * rate).toFixed(2)),
+      remaining_sessions: total,
+      expected_cost: Number((total * rate).toFixed(2)),
       teacher_session_rate: rate
     }
   } catch (error: any) {

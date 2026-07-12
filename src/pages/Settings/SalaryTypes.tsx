@@ -13,8 +13,9 @@ import type { SalaryType, SalaryMode } from '../../types/index.js'
 const MODES: { value: SalaryMode; labelEn: string; labelAr: string }[] = [
   { value: 'fixed_monthly', labelEn: 'Fixed Monthly', labelAr: 'راتب شهري ثابت' },
   { value: 'per_session_fixed', labelEn: 'Per Session (Fixed)', labelAr: 'مبلغ ثابت لكل جلسة' },
-  { value: 'per_session_pct', labelEn: 'Per Session (Percentage)', labelAr: 'نسبة مئوية من الجلسة' },
+  { value: 'per_session_pct', labelEn: 'Per Session (% of child\'s service price)', labelAr: 'نسبة مئوية من سعر خدمة الطفل' },
   { value: 'hybrid', labelEn: 'Hybrid (Monthly + Per Session)', labelAr: 'هجين (شهري + لكل جلسة)' },
+  { value: 'per_child_session', labelEn: 'Per Child (Attendance-based)', labelAr: 'حسب الطفل (بناءً على الحضور)' },
 ]
 
 export default function SalaryTypes() {
@@ -37,29 +38,9 @@ export default function SalaryTypes() {
   const [roleAssignId, setRoleAssignId] = useState<number | ''>('')
   const [assigningRoleId, setAssigningRoleId] = useState<number | null>(null)
 
-  // Org-wide fallback used by the attendance-based teacher payment engine when a specific
-  // teacher has no per-session rate set on their own profile (see Employees settings).
-  const [defaultSessionRate, setDefaultSessionRate] = useState('')
-  const [isSavingDefaultRate, setIsSavingDefaultRate] = useState(false)
-  const [defaultRateSaved, setDefaultRateSaved] = useState(false)
-
   useEffect(() => {
     fetchSalaryTypes(); fetchRoles()
-    window.api.settings.get().then((s: Record<string, string>) => {
-      if (s.default_teacher_session_rate) setDefaultSessionRate(s.default_teacher_session_rate)
-    }).catch(() => {})
   }, [])
-
-  const handleSaveDefaultRate = async () => {
-    setIsSavingDefaultRate(true)
-    setDefaultRateSaved(false)
-    try {
-      await window.api.settings.update({ default_teacher_session_rate: defaultSessionRate })
-      setDefaultRateSaved(true)
-    } finally {
-      setIsSavingDefaultRate(false)
-    }
-  }
 
   const openCreate = () => {
     setEditing(null); setName(''); setMode('fixed_monthly'); setMonthlyRate(''); setSessionRate(''); setSessionPct(''); setFormError('')
@@ -118,32 +99,6 @@ export default function SalaryTypes() {
       {successMsg && <Alert variant="success" onClose={() => setSuccessMsg('')}>{successMsg}</Alert>}
       {error && <Alert variant="danger" onClose={clearError}>{error}</Alert>}
 
-      <div className="bg-white border border-slate-200 rounded-lg p-4 space-y-2">
-        <h3 className="text-sm font-semibold text-slate-700">
-          {isAr ? 'سعر الجلسة الافتراضي للمعلمين' : 'Default Teacher Session Rate'}
-        </h3>
-        <p className="text-xs text-slate-400">
-          {isAr
-            ? 'يُستخدم فقط عند تسجيل حضور معلم لم يُحدَّد له "تكلفة الجلسة" الخاصة في ملفه — بدلاً من عدم صرف أي مبلغ له.'
-            : 'Used only when recording attendance for a teacher who has no "Per Session Cost" set on their own profile — instead of generating no payment at all.'}
-        </p>
-        <div className="flex items-end gap-2">
-          <div className="w-40">
-            <Input
-              type="number"
-              min={0}
-              value={defaultSessionRate}
-              onChange={(e) => { setDefaultSessionRate(e.target.value); setDefaultRateSaved(false) }}
-              placeholder={isAr ? 'مثال: 150' : 'e.g. 150'}
-            />
-          </div>
-          <Button variant="outline" size="sm" onClick={handleSaveDefaultRate} isLoading={isSavingDefaultRate}>
-            {isAr ? 'حفظ' : 'Save'}
-          </Button>
-          {defaultRateSaved && <span className="text-xs text-emerald-600">{isAr ? 'تم الحفظ' : 'Saved'}</span>}
-        </div>
-      </div>
-
       {isLoading ? (
         <p className="text-slate-400 text-sm">{isAr ? 'جارٍ التحميل...' : 'Loading...'}</p>
       ) : salaryTypes.length === 0 ? (
@@ -199,6 +154,16 @@ export default function SalaryTypes() {
           )}
           {mode === 'per_session_pct' && (
             <Input label={isAr ? 'النسبة (0–1)' : 'Percentage (0–1)'} type="number" value={sessionPct} onChange={(e) => setSessionPct(e.target.value)} min={0} max={1} step={0.01} />
+          )}
+          {mode === 'per_child_session' && (
+            <>
+              <p className="text-xs text-slate-400">
+                {isAr
+                  ? 'يُصرف مبلغ الحضور حسب كل طفل: سعر المعلم المحدد للطفل (إن وُجد) أولاً، ثم سعر خدمة الطفل نفسها، ثم القيمة الاحتياطية أدناه — ولا يُستخدم أبداً سعر جلسة المعلم في ملفه.'
+                  : 'Attendance pay follows each child: the child’s teacher-rate override first (if set), then the child’s own service price, then the fallback below — the teacher’s own "Per Session Cost" is never used in this mode.'}
+              </p>
+              <Input label={isAr ? 'قيمة احتياطية للجلسة (جنيه)' : 'Fallback Per Session Rate (EGP)'} type="number" value={sessionRate} onChange={(e) => setSessionRate(e.target.value)} min={0} />
+            </>
           )}
         </div>
       </Modal>

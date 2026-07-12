@@ -27,14 +27,16 @@ export default function ChildDetails() {
 
   const {
     openCase, activities, error: activityError,
-    fetchAll, addActivity, openIllnessCase, resolveIllnessCase, clearError,
+    fetchAll, addActivity, openIllnessCase, resolveIllnessCase, clearError, deleteActivity,
   } = useChildActivitiesStore()
 
   const [note, setNote] = useState('')
   const [mediaDataUrl, setMediaDataUrl] = useState<string | undefined>()
-  const [mediaType, setMediaType] = useState<'photo' | 'video'>('photo')
+  const [mediaType, setMediaType] = useState<'photo' | 'video' | 'file'>('photo')
+  const [mediaFileName, setMediaFileName] = useState('')
   const [illnessDescription, setIllnessDescription] = useState('')
   const [showIllnessForm, setShowIllnessForm] = useState(false)
+  const [isAddingActivity, setIsAddingActivity] = useState(false)
 
   useEffect(() => {
     if (!childId) return
@@ -55,20 +57,30 @@ export default function ChildDetails() {
     fetchAll(childId)
   }, [childId])
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, type: 'photo' | 'video') => {
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
+    // Any file type is accepted; detect photos/videos so they render inline,
+    // everything else is stored as a generic downloadable attachment.
+    const type = file.type.startsWith('image/') ? 'photo' : file.type.startsWith('video/') ? 'video' : 'file'
     setMediaType(type)
+    setMediaFileName(file.name)
     const reader = new FileReader()
     reader.onload = () => setMediaDataUrl(reader.result as string)
     reader.readAsDataURL(file)
   }
 
   const handleAddActivity = async () => {
-    const ok = await addActivity(childId, { note, media_data_url: mediaDataUrl, media_type: mediaType })
-    if (ok) {
-      setNote('')
-      setMediaDataUrl(undefined)
+    setIsAddingActivity(true)
+    try {
+      const ok = await addActivity(childId, { note, media_data_url: mediaDataUrl, media_type: mediaType })
+      if (ok) {
+        setNote('')
+        setMediaDataUrl(undefined)
+        setMediaFileName('')
+      }
+    } finally {
+      setIsAddingActivity(false)
     }
   }
 
@@ -120,7 +132,9 @@ export default function ChildDetails() {
       {/* Illness case OR activity/media diary (FR-007/FR-008/FR-009/FR-014) */}
       <Card title={isAr ? 'الحالة الصحية / النشاط اليومي' : 'Health / Daily Activity'}>
         <div className="p-4 space-y-4">
-          {openCase ? (
+          {/* An open illness case shows as a warning banner but no longer hides the diary —
+              activities can still be added while the case is open. */}
+          {openCase && (
             <div>
               <Alert variant="warning">
                 {isAr ? 'حالة مرضية مفتوحة: ' : 'Open illness case: '}{openCase.description || ''}
@@ -129,7 +143,9 @@ export default function ChildDetails() {
                 {isAr ? 'إغلاق الحالة' : 'Resolve case'}
               </Button>
             </div>
-          ) : showIllnessForm ? (
+          )}
+
+          {!openCase && showIllnessForm ? (
             <div className="space-y-2">
               <textarea
                 className="w-full border rounded-lg p-2 text-sm"
@@ -152,41 +168,67 @@ export default function ChildDetails() {
               />
               <div className="flex flex-wrap items-center gap-3">
                 <label className="text-sm text-slate-600">
-                  {isAr ? 'صورة' : 'Photo'}
-                  <input type="file" accept="image/*" className="block" onChange={(e) => handleFileChange(e, 'photo')} />
+                  {isAr ? 'مرفق (أي نوع ملف)' : 'Attachment (any file type)'}
+                  <input type="file" className="block" onChange={handleFileChange} />
                 </label>
-                <label className="text-sm text-slate-600">
-                  {isAr ? 'فيديو' : 'Video'}
-                  <input type="file" accept="video/*" className="block" onChange={(e) => handleFileChange(e, 'video')} />
-                </label>
+                {mediaDataUrl && mediaFileName && (
+                  <span className="text-xs text-slate-500">{mediaFileName}</span>
+                )}
               </div>
-              <div className="flex gap-2">
-                <Button onClick={handleAddActivity} disabled={!note && !mediaDataUrl}>
-                  {isAr ? 'إضافة نشاط' : 'Add Activity'}
+              <div className="flex gap-2 items-center">
+                <Button onClick={handleAddActivity} isLoading={isAddingActivity} disabled={(!note && !mediaDataUrl) || isAddingActivity}>
+                  {isAddingActivity
+                    ? (mediaDataUrl ? (isAr ? 'جارٍ رفع الوسائط...' : 'Uploading media...') : (isAr ? 'جارٍ الحفظ...' : 'Saving...'))
+                    : (isAr ? 'إضافة نشاط' : 'Add Activity')}
                 </Button>
-                <Button variant="outline" onClick={() => setShowIllnessForm(true)}>
-                  {isAr ? 'الإبلاغ عن حالة مرضية' : 'Report illness case'}
-                </Button>
+                {!openCase && (
+                  <Button variant="outline" onClick={() => setShowIllnessForm(true)}>
+                    {isAr ? 'الإبلاغ عن حالة مرضية' : 'Report illness case'}
+                  </Button>
+                )}
               </div>
             </div>
           )}
 
           {activities.length > 0 && (
-            <ul className="space-y-3 pt-2 border-t border-slate-100">
+            <ul className="space-y-3 pt-4 border-t border-slate-100">
               {activities.map((a) => (
-                <li key={a.id} className="text-sm">
-                  <div className="flex justify-between">
-                    <span className="font-medium text-slate-800">{a.activity_date}</span>
-                    {a.media_status === 'failed' && (
-                      <span className="text-red-500 text-xs">{isAr ? 'فشل رفع الوسائط' : 'Media upload failed'}</span>
-                    )}
+                <li key={a.id} className="text-sm bg-slate-50 p-3 rounded-lg border border-slate-100">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <span className="font-medium text-slate-800">{a.activity_date}</span>
+                      {a.media_status === 'failed' && (
+                        <span className="ml-2 text-red-500 text-xs">{isAr ? 'فشل رفع الوسائط' : 'Media upload failed'}</span>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => {
+                        if (window.confirm(isAr ? 'هل أنت متأكد من الحذف؟' : 'Are you sure you want to delete?')) {
+                          deleteActivity(a.id)
+                        }
+                      }}
+                      className="text-red-500 hover:text-red-700 text-xs font-medium px-2 py-1 bg-red-50 hover:bg-red-100 rounded transition-colors"
+                      title={isAr ? 'حذف' : 'Delete'}
+                    >
+                      {isAr ? 'حذف' : 'Delete'}
+                    </button>
                   </div>
-                  {a.note && <p className="text-slate-600">{a.note}</p>}
+                  {a.note && <p className="text-slate-600 mt-2">{a.note}</p>}
                   {a.media_url && a.media_type === 'photo' && (
-                    <img src={a.media_url} alt="" className="mt-1 max-h-40 rounded-lg" />
+                    <img src={a.media_url} alt="" className="mt-2 max-h-40 rounded-lg object-cover" />
                   )}
                   {a.media_url && a.media_type === 'video' && (
-                    <video src={a.media_url} controls className="mt-1 max-h-40 rounded-lg" />
+                    <video src={a.media_url} controls className="mt-2 max-h-40 rounded-lg" />
+                  )}
+                  {a.media_url && a.media_type === 'file' && (
+                    <a
+                      href={a.media_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mt-2 inline-block text-blue-600 hover:text-blue-800 underline text-sm"
+                    >
+                      {isAr ? 'فتح المرفق' : 'Open attachment'}
+                    </a>
                   )}
                 </li>
               ))}

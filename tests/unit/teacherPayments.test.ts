@@ -118,12 +118,15 @@ describe('Attendance-based teacher payments — duplicate protection & void/requ
 
   it('re-snapshots session_cost on a still-pending payment when the teacher rate is corrected afterward', async () => {
     const now = new Date().toISOString()
-    db.prepare(`INSERT OR REPLACE INTO settings (key, value, updated_at, synced) VALUES ('default_teacher_session_rate', '40', ?, 0)`).run(now)
+    const salaryTypeId = Number(db.prepare(`
+      INSERT INTO salary_types (name, mode, session_rate, created_at, updated_at, synced)
+      VALUES ('Per Session (Fallback 40)', 'per_session_fixed', 40, ?, ?, 0)
+    `).run(now, now).lastInsertRowid)
 
     const teacher = Number(db.prepare(`
-      INSERT INTO employees (name, role, base_salary, net_salary, is_active, created_at)
-      VALUES ('Corrected Rate Teacher', 'Teacher', 0, 0, 1, ?)
-    `).run(now).lastInsertRowid)
+      INSERT INTO employees (name, role, base_salary, net_salary, is_active, created_at, salary_type_override_id)
+      VALUES ('Corrected Rate Teacher', 'Teacher', 0, 0, 1, ?, ?)
+    `).run(now, salaryTypeId).lastInsertRowid)
     const child = Number(db.prepare(`
       INSERT INTO children (name, guardian, guardian_phone, service, unit, price, reg_date, created_at, updated_at, teacher_id)
       VALUES ('Omar', 'Guardian', '0103', 'جلسة', 'جلسة', 100, '2026-01-01', ?, ?, ?)
@@ -132,7 +135,8 @@ describe('Attendance-based teacher payments — duplicate protection & void/requ
       INSERT INTO scheduled_sessions (session_date, created_at, updated_at) VALUES ('2026-07-10', ?, ?)
     `).run(now, now).lastInsertRowid)
 
-    // First save: teacher has no rate of their own yet, so the org-wide default (40) applies.
+    // First save: teacher has no rate of their own yet, so their assigned salary type's
+    // session_rate (40) applies.
     await record(null, { session_id: session, records: [{ child_id: child, status: 'attended', teacher_status: 'present' }] })
     let rows = db.prepare('SELECT * FROM teacher_payments WHERE teacher_id = ?').all(teacher)
     expect(rows[0].session_cost).toBe(40)
@@ -144,8 +148,6 @@ describe('Attendance-based teacher payments — duplicate protection & void/requ
     rows = db.prepare('SELECT * FROM teacher_payments WHERE teacher_id = ?').all(teacher)
     expect(rows.length).toBe(1)
     expect(rows[0].session_cost).toBe(30)
-
-    db.prepare(`DELETE FROM settings WHERE key = 'default_teacher_session_rate'`).run()
   })
 
   it('does NOT re-snapshot a payment that has already been marked paid, even if the rate changes', async () => {
@@ -158,14 +160,17 @@ describe('Attendance-based teacher payments — duplicate protection & void/requ
     expect(after.session_cost).toBe(before.session_cost)
   })
 
-  it('falls back to the org-wide default_teacher_session_rate setting when the teacher has no rate of their own', async () => {
+  it('falls back to the employee\'s assigned salary type session rate when the teacher has no rate of their own', async () => {
     const now = new Date().toISOString()
-    db.prepare(`INSERT OR REPLACE INTO settings (key, value, updated_at, synced) VALUES ('default_teacher_session_rate', '120', ?, 0)`).run(now)
+    const salaryTypeId = Number(db.prepare(`
+      INSERT INTO salary_types (name, mode, session_rate, created_at, updated_at, synced)
+      VALUES ('Per Session (Fallback 120)', 'per_session_fixed', 120, ?, ?, 0)
+    `).run(now, now).lastInsertRowid)
 
     const noRateTeacherId = Number(db.prepare(`
-      INSERT INTO employees (name, role, base_salary, net_salary, is_active, created_at)
-      VALUES ('Fallback Teacher', 'Teacher', 0, 0, 1, ?)
-    `).run(now).lastInsertRowid)
+      INSERT INTO employees (name, role, base_salary, net_salary, is_active, created_at, salary_type_override_id)
+      VALUES ('Fallback Teacher', 'Teacher', 0, 0, 1, ?, ?)
+    `).run(now, salaryTypeId).lastInsertRowid)
     const noRateChildId = Number(db.prepare(`
       INSERT INTO children (name, guardian, guardian_phone, service, unit, price, reg_date, created_at, updated_at, teacher_id)
       VALUES ('Nour', 'Guardian', '0102', 'جلسة', 'جلسة', 100, '2026-01-01', ?, ?, ?)
@@ -179,7 +184,115 @@ describe('Attendance-based teacher payments — duplicate protection & void/requ
     const rows = db.prepare('SELECT * FROM teacher_payments WHERE teacher_id = ?').all(noRateTeacherId)
     expect(rows.length).toBe(1)
     expect(rows[0].session_cost).toBe(120)
+  })
 
-    db.prepare(`DELETE FROM settings WHERE key = 'default_teacher_session_rate'`).run()
+  it('per_child_session mode pays the child\'s own service price when no per-child override is set', async () => {
+    const now = new Date().toISOString()
+    const salaryTypeId = Number(db.prepare(`
+      INSERT INTO salary_types (name, mode, session_rate, created_at, updated_at, synced)
+      VALUES ('Per Child', 'per_child_session', NULL, ?, ?, 0)
+    `).run(now, now).lastInsertRowid)
+
+    // Teacher also has a flat rate of 90 — the child's service price (130) must still win in
+    // per_child_session mode.
+    const perChildTeacherId = Number(db.prepare(`
+      INSERT INTO employees (name, role, base_salary, net_salary, is_active, created_at, salary_type_override_id, teacher_session_rate)
+      VALUES ('PerChild Teacher', 'Teacher', 0, 0, 1, ?, ?, 90)
+    `).run(now, salaryTypeId).lastInsertRowid)
+    const perChildChildId = Number(db.prepare(`
+      INSERT INTO children (name, guardian, guardian_phone, service, unit, price, reg_date, created_at, updated_at, teacher_id)
+      VALUES ('Hana', 'Guardian', '0104', 'جلسة', 'جلسة', 130, '2026-01-01', ?, ?, ?)
+    `).run(now, now, perChildTeacherId).lastInsertRowid)
+    db.prepare(`
+      INSERT INTO child_services (child_id, service, unit, price, teacher_id, created_at, updated_at, synced)
+      VALUES (?, 'جلسة', 'جلسة', 130, ?, ?, ?, 0)
+    `).run(perChildChildId, perChildTeacherId, now, now)
+    const session = Number(db.prepare(`
+      INSERT INTO scheduled_sessions (session_date, created_at, updated_at) VALUES ('2026-07-12', ?, ?)
+    `).run(now, now).lastInsertRowid)
+
+    await record(null, { session_id: session, records: [{ child_id: perChildChildId, status: 'attended', teacher_status: 'present' }] })
+
+    const row = db.prepare('SELECT * FROM teacher_payments WHERE teacher_id = ?').get(perChildTeacherId) as any
+    expect(row.session_cost).toBe(130)
+  })
+
+  it('per_child_session mode never uses the teacher\'s flat rate — falls to the child\'s price even without a (child, teacher) enrollment row', async () => {
+    const now = new Date().toISOString()
+    const salaryTypeId = Number(db.prepare(`
+      INSERT INTO salary_types (name, mode, session_rate, created_at, updated_at, synced)
+      VALUES ('Per Child Strict', 'per_child_session', NULL, ?, ?, 0)
+    `).run(now, now).lastInsertRowid)
+
+    // Teacher has a flat rate of 75, but there is NO child_services row linking them to this
+    // child (attendance came from the child-level teacher field). Pay must still follow the
+    // child's own price (110), not the teacher's 75.
+    const strictTeacherId = Number(db.prepare(`
+      INSERT INTO employees (name, role, base_salary, net_salary, is_active, created_at, salary_type_override_id, teacher_session_rate)
+      VALUES ('Strict PerChild Teacher', 'Teacher', 0, 0, 1, ?, ?, 75)
+    `).run(now, salaryTypeId).lastInsertRowid)
+    const strictChildId = Number(db.prepare(`
+      INSERT INTO children (name, guardian, guardian_phone, service, unit, price, reg_date, created_at, updated_at, teacher_id)
+      VALUES ('Malak', 'Guardian', '0105', 'جلسة', 'جلسة', 110, '2026-01-01', ?, ?, ?)
+    `).run(now, now, strictTeacherId).lastInsertRowid)
+    const session = Number(db.prepare(`
+      INSERT INTO scheduled_sessions (session_date, created_at, updated_at) VALUES ('2026-07-13', ?, ?)
+    `).run(now, now).lastInsertRowid)
+
+    await record(null, { session_id: session, records: [{ child_id: strictChildId, status: 'attended', teacher_status: 'present' }] })
+
+    const row = db.prepare('SELECT * FROM teacher_payments WHERE teacher_id = ?').get(strictTeacherId) as any
+    expect(row.session_cost).toBe(110)
+  })
+
+  it('per_session_pct mode pays a percentage OF the child\'s service price — not a hardcoded 100 EGP base', async () => {
+    const now = new Date().toISOString()
+    const salaryTypeId = Number(db.prepare(`
+      INSERT INTO salary_types (name, mode, session_pct, created_at, updated_at, synced)
+      VALUES ('Pct Of Child Price', 'per_session_pct', 0.3, ?, ?, 0)
+    `).run(now, now).lastInsertRowid)
+
+    const pctTeacherId = Number(db.prepare(`
+      INSERT INTO employees (name, role, base_salary, net_salary, is_active, created_at, salary_type_override_id)
+      VALUES ('Pct Teacher', 'Teacher', 0, 0, 1, ?, ?)
+    `).run(now, salaryTypeId).lastInsertRowid)
+    const pctChildId = Number(db.prepare(`
+      INSERT INTO children (name, guardian, guardian_phone, service, unit, price, reg_date, created_at, updated_at, teacher_id)
+      VALUES ('Yousef', 'Guardian', '0106', 'جلسة', 'جلسة', 250, '2026-01-01', ?, ?, ?)
+    `).run(now, now, pctTeacherId).lastInsertRowid)
+    db.prepare(`
+      INSERT INTO child_services (child_id, service, unit, price, teacher_id, created_at, updated_at, synced)
+      VALUES (?, 'جلسة', 'جلسة', 250, ?, ?, ?, 0)
+    `).run(pctChildId, pctTeacherId, now, now)
+    const session = Number(db.prepare(`
+      INSERT INTO scheduled_sessions (session_date, created_at, updated_at) VALUES ('2026-07-14', ?, ?)
+    `).run(now, now).lastInsertRowid)
+
+    await record(null, { session_id: session, records: [{ child_id: pctChildId, status: 'attended', teacher_status: 'present' }] })
+
+    // 30% of the child's 250 EGP service price = 75 — NOT 0.3 × 100 = 30 from the old formula.
+    const row = db.prepare('SELECT * FROM teacher_payments WHERE teacher_id = ?').get(pctTeacherId) as any
+    expect(row.session_cost).toBe(75)
+  })
+
+  it('a per-child rate override (salary type per child) wins over the teacher\'s own flat rate', async () => {
+    // teacherId has a flat teacher_session_rate of 150 (set in the outer beforeAll). Give THIS
+    // child its own child_services override of 200 and confirm the payment uses 200, not 150.
+    const now = new Date().toISOString()
+    db.prepare(`
+      INSERT INTO child_services (child_id, service, unit, price, teacher_id, teacher_session_rate, created_at, updated_at, synced)
+      VALUES (?, 'جلسة', 'جلسة', 100, ?, 200, ?, ?, 0)
+    `).run(childId, teacherId, now, now)
+
+    const otherSession = Number(db.prepare(`
+      INSERT INTO scheduled_sessions (session_date, created_at, updated_at) VALUES ('2026-07-11', ?, ?)
+    `).run(now, now).lastInsertRowid)
+
+    await record(null, { session_id: otherSession, records: [{ child_id: childId, status: 'attended', teacher_status: 'present' }] })
+
+    const row = db.prepare(`
+      SELECT * FROM teacher_payments WHERE teacher_id = ? AND child_id = ? AND attendance_date = ?
+    `).get(teacherId, childId, '2026-07-11') as any
+    expect(row.session_cost).toBe(200)
   })
 })

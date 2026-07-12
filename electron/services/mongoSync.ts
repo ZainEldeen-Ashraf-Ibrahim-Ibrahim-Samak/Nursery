@@ -205,6 +205,7 @@ const childServiceSchema = new Schema({
   service: String,
   unit: String,
   price: Number,
+  teacher_session_rate: Number,
   created_at: String,
   updated_at: String,
   synced: Number

@@ -67,16 +67,6 @@ export default function SessionsList() {
   // service enrollments, so child_id alone is no longer a unique key.
   const [attendanceEdits, setAttendanceEdits] = useState<Record<string, { status: AttendanceStatus | null; excuse_notes: string; teacher_status: 'present' | 'absent' }>>({})
   const [isSavingAttendance, setIsSavingAttendance] = useState(false)
-  // Org-wide fallback rate (Settings → Salary Types → Default Teacher Session Rate), used only
-  // to preview the same rate resolution the backend applies (own rate → this default → none).
-  const [orgDefaultRate, setOrgDefaultRate] = useState<number | null>(null)
-
-  useEffect(() => {
-    window.api.settings.get().then((s: Record<string, string>) => {
-      const n = s.default_teacher_session_rate ? Number(s.default_teacher_session_rate) : NaN
-      setOrgDefaultRate(!isNaN(n) && n > 0 ? n : null)
-    }).catch(() => setOrgDefaultRate(null))
-  }, [])
 
   // Today's auto-session detection
   const [todayChildren, setTodayChildren] = useState<{ id: number; name: string }[]>([])
@@ -163,12 +153,11 @@ export default function SessionsList() {
     teacher_status: (rec.teacher_status as 'present' | 'absent') || 'present'
   }
 
-  // Live preview of what will actually be paid, using the SAME rate resolution the backend
-  // applies (attendanceIPC.ts): a teacher's own teacher_session_rate first, the org-wide
-  // default_teacher_session_rate setting only if they have none, and no payment at all only
-  // if neither exists. This replaces the old sessions:salaryCredit banner, which read a
-  // completely different, unrelated field (salary_types.session_rate) and could show a number
-  // that disagreed with what the attendance-based payment engine actually generates.
+  // Live preview of what will actually be paid. `rec.teacher_session_rate` already carries the
+  // backend's full rate resolution (attendanceIPC.ts resolveTeacherSessionRate): this child's own
+  // rate override (salary type per child) → the teacher's own per-session rate → their assigned
+  // salary type's session rate. No org-wide default anymore — a teacher with none of the above
+  // configured just generates no payment, so misconfiguration is visible here too.
   const teacherPaymentPreview = (() => {
     const totals = new Map<number, { name: string; amount: number }>()
     let anyTeacherAssigned = false
@@ -178,7 +167,7 @@ export default function SessionsList() {
       const edit = getEdit(rec)
       const payable = edit.teacher_status === 'present' && (edit.status === 'attended' || edit.status === 'absent_unexcused')
       if (!payable) continue
-      const rate = rec.teacher_session_rate ?? orgDefaultRate
+      const rate = rec.teacher_session_rate
       if (rate == null) continue
       const existing = totals.get(rec.teacher_id)
       totals.set(rec.teacher_id, { name: rec.teacher_name || '', amount: (existing?.amount ?? 0) + rate })

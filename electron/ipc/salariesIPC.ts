@@ -1,6 +1,7 @@
 import { ipcMain } from 'electron'
 import { getDb } from '../db/connection.js'
 import { requireAdmin } from './_guard.js'
+import { resnapshotPendingTeacherPayments } from './attendanceIPC.js'
 import type { Employee, SalaryPayment } from '../../src/types/index.js'
 
 const ARABIC_MONTHS: Record<string, number> = {
@@ -41,6 +42,11 @@ function getTeacherPaymentsForMonth(db: any, employeeId: number, start: string, 
  * estimate — that ledger is what attendance actually generated, at their real rate.
  */
 function computeBaseSalary(db: any, employeeId: number, month: string, year: number | string) {
+  // Heal any stale Pending snapshots first — rate sources can change from several places
+  // (salary type edited in Settings, per-child override in the child form) that don't know
+  // about this teacher's ledger. Pending is always "current rate"; Paid is frozen.
+  resnapshotPendingTeacherPayments(db, employeeId)
+
   const row = db.prepare(`
     SELECT e.net_salary, e.teacher_session_rate, COALESCE(e.salary_type_override_id, er.salary_type_id) as eff
     FROM employees e LEFT JOIN employee_roles er ON e.role_id = er.id WHERE e.id = ?
@@ -62,7 +68,16 @@ function computeBaseSalary(db: any, employeeId: number, month: string, year: num
       salaryTypeName = st.name
       salaryTypeMode = st.mode
 
-      if (hasOwnTeacherRate && (st.mode === 'per_session_fixed' || st.mode === 'hybrid')) {
+      if (st.mode === 'per_child_session' || st.mode === 'per_session_pct') {
+        // Pay is driven entirely by the attendance-based teacher_payments ledger, which already
+        // resolves each session to its effective rate at generation time (per-child override →
+        // child's service price, or session_pct × the child's service price for the percentage
+        // mode) — see resolveTeacherSessionRate. No hardcoded per-session value anywhere.
+        const tp = hasOwnTeacherRate ? teacherPayments! : getTeacherPaymentsForMonth(db, employeeId, start, end)
+        payableSessions = tp.count
+        totalSessions = tp.count
+        base = tp.total
+      } else if (hasOwnTeacherRate && (st.mode === 'per_session_fixed' || st.mode === 'hybrid')) {
         payableSessions = teacherPayments!.count
         totalSessions = teacherPayments!.count
         base = st.mode === 'hybrid' ? (st.monthly_rate ?? 0) + teacherPayments!.total : teacherPayments!.total
@@ -80,9 +95,10 @@ function computeBaseSalary(db: any, employeeId: number, month: string, year: num
             WHERE session_id IN (${ph}) AND status IN ('attended','absent_unexcused')
           `).get(...sessionIds) as { cnt: number }).cnt
         }
+        // per_session_pct never reaches here — it is ledger-driven above (pct × child price),
+        // replacing the old formula that assumed every session was worth a flat 100 EGP.
         if (st.mode === 'fixed_monthly') base = st.monthly_rate ?? netSalary
         else if (st.mode === 'per_session_fixed') base = payableSessions * (st.session_rate ?? 0)
-        else if (st.mode === 'per_session_pct') base = payableSessions * (st.session_pct ?? 0) * 100
         else if (st.mode === 'hybrid') base = (st.monthly_rate ?? 0) + payableSessions * (st.session_rate ?? 0)
       }
     }
@@ -196,16 +212,16 @@ ipcMain.handle('employees:update', async (_event, { id, patch }) => {
       WHERE id = ?
     `).run(name, role, role_id, salary_type_override_id, base_salary, housing, transport, netSalary, now, teacher_session_rate, id)
 
-    // If the teacher's own per-session rate changed and is now set, re-snapshot any of their
-    // still-Pending payments to the corrected rate immediately — otherwise a payment generated
-    // before the rate was configured (or generated from the org-wide Settings fallback) would
-    // stay stale until that attendance record happened to be re-saved. Paid/Void rows are never
-    // touched, consistent with the attendance-time re-snapshot rule (research.md #7).
-    if (patch.teacher_session_rate !== undefined && teacher_session_rate !== emp.teacher_session_rate && teacher_session_rate != null) {
-      db.prepare(`
-        UPDATE teacher_payments SET session_cost = ?, updated_at = ?, synced = 0
-        WHERE teacher_id = ? AND status = 'pending'
-      `).run(teacher_session_rate, now, id)
+    // If anything that feeds the rate resolution changed (own per-session rate, salary type
+    // override, or role), re-snapshot this teacher's still-Pending payments using the full
+    // per-child resolution — NOT a blanket flat-rate update, which would clobber per-child
+    // pricing. Paid/Void rows are never touched (research.md #7).
+    if (
+      (patch.teacher_session_rate !== undefined && teacher_session_rate !== emp.teacher_session_rate) ||
+      (patch.salary_type_override_id !== undefined && salary_type_override_id !== emp.salary_type_override_id) ||
+      (patch.role_id !== undefined && role_id !== emp.role_id)
+    ) {
+      resnapshotPendingTeacherPayments(db, id)
     }
 
     const updatedEmployee = db.prepare(`
@@ -359,5 +375,95 @@ ipcMain.handle('salary:update', async (_event, { employee_id, month, year, bonus
   } catch (error: any) {
     console.error('Failed to update salary payment:', error)
     throw new Error(error.message || 'Failed to update salary payment')
+  }
+})
+
+// 7. salary:getExpected (Admin only) — live forecast for the Employee details panel:
+// the FULL month's scheduled sessions × each child's resolved rate (child override → child's
+// service price in per_child_session mode → teacher rate → salary type rate), reported next to
+// what the ledger says has actually been earned so far. Attendance status does not change the
+// expected total — only the earned figure.
+ipcMain.handle('salary:getExpected', async (_event, { employee_id, month, year }) => {
+  try {
+    requireAdmin()
+    const db = getDb()
+    if (!employee_id || !month || !year) {
+      throw new Error('Employee ID, month, and year are required')
+    }
+
+    const { start } = monthBounds(month, year)
+    const { base: actualToDate, salaryTypeMode } = computeBaseSalary(db, employee_id, month, year)
+
+    const emp = db.prepare('SELECT teacher_session_rate FROM employees WHERE id = ?').get(employee_id) as any
+
+    // Expected salary is projected from the schedule for attendance-driven pay (per-session/
+    // hybrid/per-child/percentage modes, or a plain per-session teacher with no salary type at
+    // all). Only fixed-monthly isn't schedule-driven.
+    const projectable = salaryTypeMode === null || ['per_session_fixed', 'hybrid', 'per_child_session', 'per_session_pct'].includes(salaryTypeMode ?? '')
+
+    // Expected total = the FULL month's scheduled sessions × each child's resolved rate —
+    // independent of what has been attended so far, so it never mixes stale ledger amounts
+    // into the forecast. "Earned so far" (the ledger) is reported alongside, not added in.
+    let expectedTotal = actualToDate
+    if (projectable) {
+      const st = db.prepare(`
+        SELECT st.session_rate as session_rate, st.monthly_rate as monthly_rate, st.session_pct as session_pct
+        FROM employees e
+        LEFT JOIN employee_roles er ON e.role_id = er.id
+        LEFT JOIN salary_types st ON st.id = COALESCE(e.salary_type_override_id, er.salary_type_id)
+        WHERE e.id = ?
+      `).get(employee_id) as any
+      const salaryTypeSessionRate = st?.session_rate ?? null
+
+      const assignedChildren = db.prepare(`
+        SELECT lesson_days, teacher_session_rate, price FROM child_services WHERE teacher_id = ?
+      `).all(employee_id) as any[]
+
+      const startDate = new Date(start)
+      const y = startDate.getFullYear()
+      const m = startDate.getMonth()
+      const daysInMonth = new Date(y, m + 1, 0).getDate()
+
+      let scheduleTotal = 0
+      for (const row of assignedChildren) {
+        let days: number[] = []
+        if (row.lesson_days) {
+          try { days = JSON.parse(row.lesson_days) } catch { days = [] }
+        }
+        if (days.length === 0) continue
+        // Same order as resolveTeacherSessionRate. per_child_session: child override → the
+        // child's own service price → salary type fallback. per_session_pct: child override →
+        // session_pct × the child's service price. Other modes: override → teacher's flat rate
+        // → salary type's session rate. The teacher's flat "Per Session Cost" and the
+        // enrollment's session_price are never used by the child-price modes.
+        const rate = row.teacher_session_rate
+          ?? (salaryTypeMode === 'per_child_session'
+            ? (row.price ?? salaryTypeSessionRate)
+            : salaryTypeMode === 'per_session_pct'
+              ? (row.price != null && st?.session_pct != null ? Number((row.price * st.session_pct).toFixed(2)) : null)
+              : (emp?.teacher_session_rate ?? salaryTypeSessionRate))
+        if (!rate) continue
+
+        let sessionCount = 0
+        for (let d = 1; d <= daysInMonth; d++) {
+          if (days.includes(new Date(y, m, d).getDay())) sessionCount++
+        }
+        scheduleTotal += sessionCount * rate
+      }
+
+      expectedTotal = scheduleTotal
+      // Hybrid pay adds the fixed monthly component on top of per-session earnings.
+      if (salaryTypeMode === 'hybrid') expectedTotal += st?.monthly_rate ?? 0
+    }
+
+    return {
+      actual_to_date: actualToDate,
+      projected_remaining: Number(Math.max(0, expectedTotal - actualToDate).toFixed(2)),
+      expected_total: Number(expectedTotal.toFixed(2)),
+      salary_type_mode: salaryTypeMode,
+    }
+  } catch (error: any) {
+    console.error('Failed to compute expected salary:', error)
+    throw new Error(error.message || 'Failed to compute expected salary')
   }
 })

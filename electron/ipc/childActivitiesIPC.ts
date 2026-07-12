@@ -2,7 +2,7 @@ import { ipcMain } from 'electron'
 import { getDb } from '../db/connection.js'
 import { getCurrentUser } from './authIPC.js'
 import { requireAdmin } from './_guard.js'
-import { uploadImage, uploadVideo } from '../services/cloudinaryService.js'
+import { uploadFile, uploadImage, uploadVideo } from '../services/cloudinaryService.js'
 
 function checkAuth() {
   const user = getCurrentUser()
@@ -35,14 +35,8 @@ ipcMain.handle('childActivities:create', async (_event, { child_id, activity_dat
 
     const db = getDb()
 
-    // Server-side enforcement of FR-007: activities are only offered while there is no open
-    // illness case for this child.
-    const openCase = db.prepare(
-      "SELECT id FROM child_illness_cases WHERE child_id = ? AND status = 'open'"
-    ).get(child_id)
-    if (openCase) {
-      throw new Error('لا يمكن إضافة نشاط بينما توجد حالة مرضية مفتوحة / Cannot add an activity while an illness case is open')
-    }
+    // An open illness case no longer blocks adding activities (originally FR-007) — the case
+    // stays visible as a warning banner in the UI, but the daily diary keeps working.
 
     let mediaUrl: string | null = null
     let mediaStatus: 'uploaded' | 'failed' | null = null
@@ -52,7 +46,9 @@ ipcMain.handle('childActivities:create', async (_event, { child_id, activity_dat
         const folder = `nursery/children/${child_id}/activities`
         const uploaded = media_type === 'video'
           ? await uploadVideo(media_data_url, folder)
-          : await uploadImage(media_data_url, folder)
+          : media_type === 'file'
+            ? await uploadFile(media_data_url, folder)
+            : await uploadImage(media_data_url, folder)
         mediaUrl = uploaded.url
         mediaStatus = 'uploaded'
       } catch (uploadError) {

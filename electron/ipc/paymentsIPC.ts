@@ -55,13 +55,49 @@ ipcMain.handle('payments:get', async (_event, { month, year }) => {
     // read-only Transactions view, day/hour services are billed here from attendance counts.
     const payments = db.prepare(`
       SELECT p.*, c.name as child_name, c.guardian as child_guardian, c.guardian_phone as child_guardian_phone, c.is_active as child_is_active,
+        COALESCE(NULLIF(cs.lesson_days, '[]'), c.lesson_days) as service_lesson_days,
         (SELECT COUNT(*) FROM payment_transactions pt WHERE pt.payment_id = p.id) as transaction_count
       FROM payments p
       JOIN children c ON p.child_id = c.id
+      LEFT JOIN child_services cs ON cs.id = p.service_id
       WHERE p.month = ? AND p.year = ?
       ORDER BY c.name ASC
-    `).all(month, year) as Payment[]
-    
+    `).all(month, year) as (Payment & { service_lesson_days: string | null })[]
+
+    // Expected quantity: the full scheduled amount for the month regardless of attendance
+    // (unlike the billed `quantity`, which for attendance-driven units only counts days/hours
+    // actually attended or absent-unexcused so far). Shown to admins as a preview total.
+    const arabicMonthNames = ['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر']
+    const monthIndex = arabicMonthNames.indexOf(month)
+    const payYear = Number(year)
+    const daysInMonth = monthIndex !== -1 ? new Date(payYear, monthIndex + 1, 0).getDate() : 30
+
+    // Same calendar-based counting as the ChildForm's ServiceCostPreview banner: every
+    // occurrence of the service's lesson days across the whole month counts, independent of
+    // whether sessions were scheduled or attendance was recorded — so the preview never reads
+    // "0 × price" just because the month hasn't been attended yet.
+    const countLessonDayOccurrences = (lessonDays: number[]): number => {
+      let count = 0
+      for (let d = 1; d <= daysInMonth; d++) {
+        if (lessonDays.includes(new Date(payYear, monthIndex, d).getDay())) count++
+      }
+      return count
+    }
+
+    const computeExpectedQuantity = (p: Payment & { service_lesson_days: string | null }): number => {
+      if (p.unit === 'شهر') return 1
+      // 'يوم' / 'ساعة' / 'جلسة' — expected = all lesson-day occurrences in the calendar month
+      let lessonDays: number[] = []
+      try { lessonDays = JSON.parse(p.service_lesson_days || '[]') } catch { /* no schedule set */ }
+      if (lessonDays.length === 0 || monthIndex === -1) return p.quantity
+      return countLessonDayOccurrences(lessonDays)
+    }
+
+    for (const p of payments as any[]) {
+      p.expected_quantity = computeExpectedQuantity(p)
+      p.expected_total = Number((p.expected_quantity * p.price).toFixed(2))
+    }
+
     // Compute summaries
     let totalInvoiced = 0
     let totalCollected = 0

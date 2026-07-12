@@ -18,7 +18,7 @@ function getHandler(channel: string) {
   return found[1]
 }
 
-describe('Teacher rate priority: own rate (30) must win over settings default (40) from the very first save', () => {
+describe('Teacher rate priority: own rate (30) must win from the very first save', () => {
   let db: any
   let teacherId: number
   let childId: number
@@ -31,10 +31,6 @@ describe('Teacher rate priority: own rate (30) must win over settings default (4
 
     const now = new Date().toISOString()
     db.prepare(`INSERT INTO users (id, username, password, role, is_active, created_at) VALUES (1, 'admin', 'x', 'admin', 1, ?)`).run(now)
-
-    // Settings default is 40, set BEFORE the teacher exists — mirrors an admin who
-    // configured the org default first, then added a teacher with their own rate.
-    db.prepare(`INSERT OR REPLACE INTO settings (key, value, updated_at, synced) VALUES ('default_teacher_session_rate', '40', ?, 0)`).run(now)
 
     teacherId = Number(db.prepare(`
       INSERT INTO employees (name, role, base_salary, net_salary, is_active, created_at, teacher_session_rate)
@@ -53,7 +49,7 @@ describe('Teacher rate priority: own rate (30) must win over settings default (4
 
   const record = getHandler('attendance:record')
 
-  it('uses the teacher\'s own rate (30) on the very first payment, not the settings default (40)', async () => {
+  it('uses the teacher\'s own rate (30) on the very first payment', async () => {
     await record(null, { session_id: sessionId, records: [{ child_id: childId, status: 'attended', teacher_status: 'present' }] })
     const row = db.prepare('SELECT * FROM teacher_payments WHERE teacher_id = ? AND child_id = ?').get(teacherId, childId) as any
     expect(row).toBeDefined()

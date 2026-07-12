@@ -38,12 +38,15 @@ describe('Attendance Edit Request lifecycle (feature 007, FR-014…FR-020)', () 
     const now = new Date().toISOString()
     db.prepare(`INSERT INTO users (id, username, password, role, is_active, created_at) VALUES (1, 'admin', 'x', 'admin', 1, ?)`).run(now)
     db.prepare(`INSERT INTO users (id, username, password, role, is_active, created_at) VALUES (2, 'emp', 'x', 'employee', 1, ?)`).run(now)
-    db.prepare(`INSERT OR REPLACE INTO settings (key, value, updated_at, synced) VALUES ('default_teacher_session_rate', '50', ?, 0)`).run(now)
+    const salaryTypeId = Number(db.prepare(`
+      INSERT INTO salary_types (name, mode, session_rate, created_at, updated_at, synced)
+      VALUES ('Per Session (50)', 'per_session_fixed', 50, ?, ?, 0)
+    `).run(now, now).lastInsertRowid)
 
     teacherId = Number(db.prepare(`
-      INSERT INTO employees (name, role, base_salary, housing, transport, net_salary, is_active, created_at, updated_at, synced)
-      VALUES ('Ahmed', 'teacher', 0, 0, 0, 0, 1, ?, ?, 0)
-    `).run(now, now).lastInsertRowid)
+      INSERT INTO employees (name, role, base_salary, housing, transport, net_salary, is_active, created_at, updated_at, synced, salary_type_override_id)
+      VALUES ('Ahmed', 'teacher', 0, 0, 0, 0, 1, ?, ?, 0, ?)
+    `).run(now, now, salaryTypeId).lastInsertRowid)
 
     childId = Number(db.prepare(`
       INSERT INTO children (name, guardian, guardian_phone, service, unit, price, reg_date, created_at, updated_at, teacher_id)

@@ -163,14 +163,15 @@ ipcMain.handle('children:add', async (_event, childInput) => {
       )
 
       const childId = Number(result.lastInsertRowid)
-      const insertSvc = db.prepare(`INSERT INTO child_services (child_id, service, unit, price, teacher_id, lesson_days, extra_lessons, session_price, created_at, updated_at, synced) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`)
-      
+      const insertSvc = db.prepare(`INSERT INTO child_services (child_id, service, unit, price, teacher_id, lesson_days, extra_lessons, session_price, teacher_session_rate, created_at, updated_at, synced) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`)
+
       for (const s of enrollments) {
         const sTeacherId = s.teacher_id != null && s.teacher_id !== '' ? Number(s.teacher_id) : null
         const sLessonDays = Array.isArray(s.lesson_days) ? JSON.stringify(s.lesson_days) : (s.lesson_days || null)
         const sExtraLessons = s.extra_lessons != null ? Number(s.extra_lessons) : 0
         const sSessionPrice = s.session_price != null && s.session_price !== '' ? Number(s.session_price) : null
-        insertSvc.run(childId, s.service, s.unit, s.price, sTeacherId, sLessonDays, sExtraLessons, sSessionPrice, now, now)
+        const sTeacherSessionRate = s.teacher_session_rate != null && s.teacher_session_rate !== '' ? Number(s.teacher_session_rate) : null
+        insertSvc.run(childId, s.service, s.unit, s.price, sTeacherId, sLessonDays, sExtraLessons, sSessionPrice, sTeacherSessionRate, now, now)
       }
       return childId
     })
@@ -281,20 +282,21 @@ ipcMain.handle('children:update', async (_event, { id, patch }) => {
 
         const updateSvc = db.prepare(`
           UPDATE child_services
-          SET service = ?, unit = ?, price = ?, teacher_id = ?, lesson_days = ?, extra_lessons = ?, session_price = ?, updated_at = ?, synced = 0
+          SET service = ?, unit = ?, price = ?, teacher_id = ?, lesson_days = ?, extra_lessons = ?, session_price = ?, teacher_session_rate = ?, updated_at = ?, synced = 0
           WHERE id = ? AND child_id = ?
         `)
-        const insertSvc = db.prepare(`INSERT INTO child_services (child_id, service, unit, price, teacher_id, lesson_days, extra_lessons, session_price, created_at, updated_at, synced) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`)
+        const insertSvc = db.prepare(`INSERT INTO child_services (child_id, service, unit, price, teacher_id, lesson_days, extra_lessons, session_price, teacher_session_rate, created_at, updated_at, synced) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`)
         for (const s of enrollments) {
           const sTeacherId = s.teacher_id != null && s.teacher_id !== '' ? Number(s.teacher_id) : null
           const sLessonDays = Array.isArray(s.lesson_days) ? JSON.stringify(s.lesson_days) : (s.lesson_days || null)
           const sExtraLessons = s.extra_lessons != null ? Number(s.extra_lessons) : 0
           const sSessionPrice = s.session_price != null && s.session_price !== '' ? Number(s.session_price) : null
+          const sTeacherSessionRate = s.teacher_session_rate != null && s.teacher_session_rate !== '' ? Number(s.teacher_session_rate) : null
           const existingId = s.id != null ? Number(s.id) : null
           if (existingId != null && existingIds.has(existingId)) {
-            updateSvc.run(s.service, s.unit, s.price, sTeacherId, sLessonDays, sExtraLessons, sSessionPrice, now, existingId, id)
+            updateSvc.run(s.service, s.unit, s.price, sTeacherId, sLessonDays, sExtraLessons, sSessionPrice, sTeacherSessionRate, now, existingId, id)
           } else {
-            insertSvc.run(id, s.service, s.unit, s.price, sTeacherId, sLessonDays, sExtraLessons, sSessionPrice, now, now)
+            insertSvc.run(id, s.service, s.unit, s.price, sTeacherId, sLessonDays, sExtraLessons, sSessionPrice, sTeacherSessionRate, now, now)
           }
         }
 

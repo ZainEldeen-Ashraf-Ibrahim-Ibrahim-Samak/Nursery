@@ -26,9 +26,10 @@ electron.contextBridge.exposeInMainWorld("api", {
 		add: (args) => electron.ipcRenderer.invoke("childServices:add", args),
 		update: (args) => electron.ipcRenderer.invoke("childServices:update", args),
 		remove: (args) => electron.ipcRenderer.invoke("childServices:remove", args),
-		previewTeacherCost: (teacher_id, lesson_days) => electron.ipcRenderer.invoke("childServices:previewTeacherCost", {
+		previewTeacherCost: (teacher_id, lesson_days, teacher_session_rate) => electron.ipcRenderer.invoke("childServices:previewTeacherCost", {
 			teacher_id,
-			lesson_days
+			lesson_days,
+			teacher_session_rate
 		}),
 		getTimetable: (child_id) => electron.ipcRenderer.invoke("childServices:getTimetable", { child_id })
 	},
@@ -87,7 +88,8 @@ electron.contextBridge.exposeInMainWorld("api", {
 	},
 	salary: {
 		get: (args) => electron.ipcRenderer.invoke("salary:get", args),
-		update: (args) => electron.ipcRenderer.invoke("salary:update", args)
+		update: (args) => electron.ipcRenderer.invoke("salary:update", args),
+		getExpected: (args) => electron.ipcRenderer.invoke("salary:getExpected", args)
 	},
 	expenses: {
 		get: (args) => electron.ipcRenderer.invoke("expenses:get", args),

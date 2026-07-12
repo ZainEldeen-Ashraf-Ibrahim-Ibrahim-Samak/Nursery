@@ -22,6 +22,9 @@ export interface ServiceEnrollment {
   lesson_days?: number[] | string | null
   extra_lessons?: number
   session_price?: number | null
+  // Per-child override of the assigned teacher's per-session pay rate — "salary type per
+  // child". Falls back to the teacher's own rate, then their salary type's session rate.
+  teacher_session_rate?: number | null
   created_at?: string
   updated_at?: string
   synced?: number
@@ -86,6 +89,10 @@ export interface Payment {
 
   // Optional join field for UI
   child_name?: string
+  // Full scheduled amount for the month regardless of attendance (vs. `quantity`, which for
+  // attendance-driven units only counts days/hours attended or absent-unexcused so far)
+  expected_quantity?: number
+  expected_total?: number
   // Pro-rating audit (feature 005)
   prorated_calculated?: number | null
   // Payment method (feature 005 extension)
@@ -125,7 +132,7 @@ export interface ChildActivity {
   activity_date: string
   note?: string | null
   media_url?: string | null
-  media_type?: 'photo' | 'video' | null
+  media_type?: 'photo' | 'video' | 'file' | null
   media_status?: 'uploaded' | 'failed' | null
   created_at: string
   updated_at: string
@@ -175,7 +182,7 @@ export interface EmployeeRole {
   synced: number
 }
 
-export type SalaryMode = 'fixed_monthly' | 'per_session_fixed' | 'per_session_pct' | 'hybrid'
+export type SalaryMode = 'fixed_monthly' | 'per_session_fixed' | 'per_session_pct' | 'hybrid' | 'per_child_session'
 
 export interface SalaryType {
   id: number

@@ -15854,6 +15854,70 @@ var migrations = [
         DROP TABLE IF EXISTS daily_payments;
       `);
 		}
+	},
+	{
+		name: "039_child_services_teacher_rate",
+		up: (db) => {
+			try {
+				db.exec("ALTER TABLE child_services ADD COLUMN teacher_session_rate REAL;");
+			} catch {}
+		}
+	},
+	{
+		name: "040_salary_types_per_child_mode",
+		noTransaction: true,
+		up: (db) => {
+			db.exec(`
+        CREATE TABLE IF NOT EXISTS salary_types_new (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL UNIQUE,
+          mode TEXT NOT NULL CHECK(mode IN ('fixed_monthly','per_session_fixed','per_session_pct','hybrid','per_child_session')),
+          monthly_rate REAL,
+          session_rate REAL,
+          session_pct REAL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          synced INTEGER DEFAULT 0
+        );
+
+        INSERT INTO salary_types_new
+          (id, name, mode, monthly_rate, session_rate, session_pct, created_at, updated_at, synced)
+        SELECT id, name, mode, monthly_rate, session_rate, session_pct, created_at, updated_at, synced
+        FROM salary_types;
+
+        DROP TABLE salary_types;
+        ALTER TABLE salary_types_new RENAME TO salary_types;
+      `);
+		}
+	},
+	{
+		name: "041_child_activities_any_media_type",
+		noTransaction: true,
+		up: (db) => {
+			db.exec(`
+        CREATE TABLE IF NOT EXISTS child_activities_new (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          child_id INTEGER NOT NULL REFERENCES children(id) ON DELETE CASCADE,
+          activity_date TEXT NOT NULL,
+          note TEXT,
+          media_url TEXT,
+          media_type TEXT CHECK(media_type IN ('photo','video','file')),
+          media_status TEXT CHECK(media_status IN ('uploaded','failed')),
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          synced INTEGER DEFAULT 0
+        );
+
+        INSERT INTO child_activities_new
+          (id, child_id, activity_date, note, media_url, media_type, media_status, created_at, updated_at, synced)
+        SELECT id, child_id, activity_date, note, media_url, media_type, media_status, created_at, updated_at, synced
+        FROM child_activities;
+
+        DROP TABLE child_activities;
+        ALTER TABLE child_activities_new RENAME TO child_activities;
+        CREATE INDEX IF NOT EXISTS idx_child_activities_child_date ON child_activities(child_id, activity_date);
+      `);
+		}
 	}
 ];
 function runMigrations(db) {
@@ -22291,13 +22355,14 @@ ipcMain.handle("children:add", async (_event, childInput) => {
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, 0)
       `).run(name, guardian, guardian_phone, child_phone || null, national_id || null, first.service, first.unit, first.price, reg_date, notes || null, childInput.photo_url || null, childInput.photo_public_id || null, lesson.teacher_id, lesson.lesson_days, lesson.sessions_baseline, lesson.extra_lessons, lesson.session_price, lesson.monthly_fee, now, now);
 			const childId = Number(result.lastInsertRowid);
-			const insertSvc = db.prepare(`INSERT INTO child_services (child_id, service, unit, price, teacher_id, lesson_days, extra_lessons, session_price, created_at, updated_at, synced) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`);
+			const insertSvc = db.prepare(`INSERT INTO child_services (child_id, service, unit, price, teacher_id, lesson_days, extra_lessons, session_price, teacher_session_rate, created_at, updated_at, synced) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`);
 			for (const s of enrollments) {
 				const sTeacherId = s.teacher_id != null && s.teacher_id !== "" ? Number(s.teacher_id) : null;
 				const sLessonDays = Array.isArray(s.lesson_days) ? JSON.stringify(s.lesson_days) : s.lesson_days || null;
 				const sExtraLessons = s.extra_lessons != null ? Number(s.extra_lessons) : 0;
 				const sSessionPrice = s.session_price != null && s.session_price !== "" ? Number(s.session_price) : null;
-				insertSvc.run(childId, s.service, s.unit, s.price, sTeacherId, sLessonDays, sExtraLessons, sSessionPrice, now, now);
+				const sTeacherSessionRate = s.teacher_session_rate != null && s.teacher_session_rate !== "" ? Number(s.teacher_session_rate) : null;
+				insertSvc.run(childId, s.service, s.unit, s.price, sTeacherId, sLessonDays, sExtraLessons, sSessionPrice, sTeacherSessionRate, now, now);
 			}
 			return childId;
 		})();
@@ -22383,18 +22448,19 @@ ipcMain.handle("children:update", async (_event, { id, patch }) => {
 				}
 				const updateSvc = db.prepare(`
           UPDATE child_services
-          SET service = ?, unit = ?, price = ?, teacher_id = ?, lesson_days = ?, extra_lessons = ?, session_price = ?, updated_at = ?, synced = 0
+          SET service = ?, unit = ?, price = ?, teacher_id = ?, lesson_days = ?, extra_lessons = ?, session_price = ?, teacher_session_rate = ?, updated_at = ?, synced = 0
           WHERE id = ? AND child_id = ?
         `);
-				const insertSvc = db.prepare(`INSERT INTO child_services (child_id, service, unit, price, teacher_id, lesson_days, extra_lessons, session_price, created_at, updated_at, synced) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`);
+				const insertSvc = db.prepare(`INSERT INTO child_services (child_id, service, unit, price, teacher_id, lesson_days, extra_lessons, session_price, teacher_session_rate, created_at, updated_at, synced) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`);
 				for (const s of enrollments) {
 					const sTeacherId = s.teacher_id != null && s.teacher_id !== "" ? Number(s.teacher_id) : null;
 					const sLessonDays = Array.isArray(s.lesson_days) ? JSON.stringify(s.lesson_days) : s.lesson_days || null;
 					const sExtraLessons = s.extra_lessons != null ? Number(s.extra_lessons) : 0;
 					const sSessionPrice = s.session_price != null && s.session_price !== "" ? Number(s.session_price) : null;
+					const sTeacherSessionRate = s.teacher_session_rate != null && s.teacher_session_rate !== "" ? Number(s.teacher_session_rate) : null;
 					const existingId = s.id != null ? Number(s.id) : null;
-					if (existingId != null && existingIds.has(existingId)) updateSvc.run(s.service, s.unit, s.price, sTeacherId, sLessonDays, sExtraLessons, sSessionPrice, now, existingId, id);
-					else insertSvc.run(id, s.service, s.unit, s.price, sTeacherId, sLessonDays, sExtraLessons, sSessionPrice, now, now);
+					if (existingId != null && existingIds.has(existingId)) updateSvc.run(s.service, s.unit, s.price, sTeacherId, sLessonDays, sExtraLessons, sSessionPrice, sTeacherSessionRate, now, existingId, id);
+					else insertSvc.run(id, s.service, s.unit, s.price, sTeacherId, sLessonDays, sExtraLessons, sSessionPrice, sTeacherSessionRate, now, now);
 				}
 				db.prepare(`
           UPDATE payments
@@ -22483,7 +22549,7 @@ ipcMain.handle("childServices:list", async (_event, { childId }) => {
 		throw new Error(error.message || "Failed to get child services");
 	}
 });
-ipcMain.handle("childServices:add", async (_event, { childId, service, unit, price }) => {
+ipcMain.handle("childServices:add", async (_event, { childId, service, unit, price, teacher_session_rate = null }) => {
 	try {
 		requireAdmin();
 		const db = getDb();
@@ -22491,9 +22557,9 @@ ipcMain.handle("childServices:add", async (_event, { childId, service, unit, pri
 		if (db.prepare("SELECT id FROM child_services WHERE child_id = ? AND service = ?").get(childId, service)) throw new Error("هذه الخدمة مضافة بالفعل للطفل / Service already enrolled");
 		const now = (/* @__PURE__ */ new Date()).toISOString();
 		const result = db.prepare(`
-      INSERT INTO child_services (child_id, service, unit, price, created_at, updated_at, synced)
-      VALUES (?, ?, ?, ?, ?, ?, 0)
-    `).run(childId, service, unit, price, now, now);
+      INSERT INTO child_services (child_id, service, unit, price, teacher_session_rate, created_at, updated_at, synced)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 0)
+    `).run(childId, service, unit, price, teacher_session_rate !== null ? Number(teacher_session_rate) : null, now, now);
 		return db.prepare("SELECT * FROM child_services WHERE id = ?").get(result.lastInsertRowid);
 	} catch (error) {
 		console.error("Failed to add child service:", error);
@@ -22507,7 +22573,11 @@ ipcMain.handle("childServices:update", async (_event, { id, patch }) => {
 		if (!id || !patch) throw new Error("ID and patch are required");
 		let query = "UPDATE child_services SET ";
 		const params = [];
-		for (const key of ["unit", "price"]) if (patch[key] !== void 0) {
+		for (const key of [
+			"unit",
+			"price",
+			"teacher_session_rate"
+		]) if (patch[key] !== void 0) {
 			query += `${key} = ?, `;
 			params.push(patch[key]);
 		}
@@ -22521,29 +22591,32 @@ ipcMain.handle("childServices:update", async (_event, { id, patch }) => {
 		throw new Error(error.message || "Failed to update child service");
 	}
 });
-ipcMain.handle("childServices:previewTeacherCost", async (_event, { teacher_id, lesson_days }) => {
+ipcMain.handle("childServices:previewTeacherCost", async (_event, { teacher_id, lesson_days, teacher_session_rate = null }) => {
 	try {
 		checkAuth$8();
 		const db = getDb();
-		let rate = db.prepare("SELECT teacher_session_rate FROM employees WHERE id = ?").get(teacher_id)?.teacher_session_rate ?? null;
-		if (rate == null) {
-			const defaultSetting = db.prepare("SELECT value FROM settings WHERE key = 'default_teacher_session_rate'").get();
-			const defaultRate = defaultSetting?.value != null ? Number(defaultSetting.value) : NaN;
-			rate = !isNaN(defaultRate) && defaultRate > 0 ? defaultRate : 0;
-		}
+		const teacher = db.prepare("SELECT teacher_session_rate FROM employees WHERE id = ?").get(teacher_id);
+		let rate = teacher_session_rate !== null && teacher_session_rate !== "" ? Number(teacher_session_rate) : teacher?.teacher_session_rate ?? null;
+		if (rate == null) rate = db.prepare(`
+        SELECT st.session_rate as session_rate
+        FROM employees e
+        LEFT JOIN employee_roles er ON e.role_id = er.id
+        LEFT JOIN salary_types st ON st.id = COALESCE(e.salary_type_override_id, er.salary_type_id)
+        WHERE e.id = ?
+      `).get(teacher_id)?.session_rate ?? 0;
 		const days = Array.isArray(lesson_days) ? lesson_days.map(Number) : [];
 		const today = /* @__PURE__ */ new Date();
 		const year = today.getFullYear();
 		const month = today.getMonth();
 		const daysInMonth = new Date(year, month + 1, 0).getDate();
-		let remaining = 0;
-		if (days.length > 0) for (let d = today.getDate(); d <= daysInMonth; d++) {
+		let total = 0;
+		if (days.length > 0) for (let d = 1; d <= daysInMonth; d++) {
 			const date = new Date(year, month, d);
-			if (days.includes(date.getDay())) remaining++;
+			if (days.includes(date.getDay())) total++;
 		}
 		return {
-			remaining_sessions: remaining,
-			expected_cost: Number((remaining * rate).toFixed(2)),
+			remaining_sessions: total,
+			expected_cost: Number((total * rate).toFixed(2)),
 			teacher_session_rate: rate
 		};
 	} catch (error) {
@@ -22652,12 +22725,48 @@ ipcMain.handle("payments:get", async (_event, { month, year }) => {
 		if (!month || !year) throw new Error("Month and year are required");
 		const payments = db.prepare(`
       SELECT p.*, c.name as child_name, c.guardian as child_guardian, c.guardian_phone as child_guardian_phone, c.is_active as child_is_active,
+        COALESCE(NULLIF(cs.lesson_days, '[]'), c.lesson_days) as service_lesson_days,
         (SELECT COUNT(*) FROM payment_transactions pt WHERE pt.payment_id = p.id) as transaction_count
       FROM payments p
       JOIN children c ON p.child_id = c.id
+      LEFT JOIN child_services cs ON cs.id = p.service_id
       WHERE p.month = ? AND p.year = ?
       ORDER BY c.name ASC
     `).all(month, year);
+		const monthIndex = [
+			"يناير",
+			"فبراير",
+			"مارس",
+			"أبريل",
+			"مايو",
+			"يونيو",
+			"يوليو",
+			"أغسطس",
+			"سبتمبر",
+			"أكتوبر",
+			"نوفمبر",
+			"ديسمبر"
+		].indexOf(month);
+		const payYear = Number(year);
+		const daysInMonth = monthIndex !== -1 ? new Date(payYear, monthIndex + 1, 0).getDate() : 30;
+		const countLessonDayOccurrences = (lessonDays) => {
+			let count = 0;
+			for (let d = 1; d <= daysInMonth; d++) if (lessonDays.includes(new Date(payYear, monthIndex, d).getDay())) count++;
+			return count;
+		};
+		const computeExpectedQuantity = (p) => {
+			if (p.unit === "شهر") return 1;
+			let lessonDays = [];
+			try {
+				lessonDays = JSON.parse(p.service_lesson_days || "[]");
+			} catch {}
+			if (lessonDays.length === 0 || monthIndex === -1) return p.quantity;
+			return countLessonDayOccurrences(lessonDays);
+		};
+		for (const p of payments) {
+			p.expected_quantity = computeExpectedQuantity(p);
+			p.expected_total = Number((p.expected_quantity * p.price).toFixed(2));
+		}
 		let totalInvoiced = 0;
 		let totalCollected = 0;
 		let arrears = 0;
@@ -23047,6 +23156,647 @@ ipcMain.handle("payments:deleteForChild", async (_event, { child_id, month, year
 	}
 });
 //#endregion
+//#region electron/services/attendanceAuditService.ts
+/**
+* Appends one row to attendance_audit_log. Insert-only — no update/delete handler is ever
+* exposed for this table (FR-013/FR-021): "no attendance record should ever disappear
+* completely" extends to its history.
+*/
+function writeAuditLog(db, entry) {
+	db.prepare(`
+    INSERT INTO attendance_audit_log
+      (attendance_record_id, edit_request_id, old_status, old_excuse_notes, old_teacher_status,
+       new_status, new_excuse_notes, new_teacher_status, changed_by, approved_by, reason, changed_at, synced)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+  `).run(entry.attendance_record_id, entry.edit_request_id, entry.old_status, entry.old_excuse_notes, entry.old_teacher_status, entry.new_status, entry.new_excuse_notes, entry.new_teacher_status, entry.changed_by, entry.approved_by, entry.reason, entry.changed_at);
+}
+//#endregion
+//#region electron/ipc/notificationsIPC.ts
+/**
+* Minimal in-app notification (research.md #6 — no email/SMS/push integration in v1).
+* Exported so other IPC modules (attendanceIPC) can enqueue notifications inline.
+*/
+function insertNotification(db, entry) {
+	db.prepare(`
+    INSERT INTO notifications (user_id, type, related_id, message_ar, message_en, read_at, created_at, synced)
+    VALUES (?, ?, ?, ?, ?, NULL, ?, 0)
+  `).run(entry.user_id, entry.type, entry.related_id, entry.message_ar, entry.message_en, (/* @__PURE__ */ new Date()).toISOString());
+}
+ipcMain.handle("notifications:list", async (_event, args) => {
+	try {
+		checkAuth$10();
+		const user = getCurrentUser();
+		const db = getDb();
+		const sql = args?.unreadOnly === true ? "SELECT * FROM notifications WHERE user_id = ? AND read_at IS NULL ORDER BY created_at DESC" : "SELECT * FROM notifications WHERE user_id = ? ORDER BY created_at DESC";
+		return db.prepare(sql).all(user.id);
+	} catch (error) {
+		throw new Error(error.message || "Failed to list notifications");
+	}
+});
+ipcMain.handle("notifications:markRead", async (_event, args) => {
+	try {
+		checkAuth$10();
+		const user = getCurrentUser();
+		const db = getDb();
+		const now = (/* @__PURE__ */ new Date()).toISOString();
+		if (args?.all) db.prepare("UPDATE notifications SET read_at = ? WHERE user_id = ? AND read_at IS NULL").run(now, user.id);
+		else db.prepare("UPDATE notifications SET read_at = ? WHERE id = ? AND user_id = ?").run(now, args.id, user.id);
+		return { ok: true };
+	} catch (error) {
+		throw new Error(error.message || "Failed to mark notification read");
+	}
+});
+//#endregion
+//#region electron/ipc/attendanceIPC.ts
+/**
+* Pure payment-eligibility rule (spec.md FR-008…FR-011):
+*   teacher present + child attended            → payable
+*   teacher present + child absent (unexcused)   → payable
+*   teacher present + child absent (excused)     → not payable
+*   teacher absent (any child status)            → not payable
+* Exported for direct unit testing without touching the database.
+*/
+function isPaymentEligible(teacherStatus, childStatus) {
+	if (teacherStatus !== "present") return false;
+	return childStatus === "attended" || childStatus === "absent_unexcused";
+}
+/**
+* The price of this child's service, preferring the enrollment linked to this teacher, then the
+* child's most recent enrollment, then the child record's own price. This is `price` — what the
+* service itself costs — NEVER the enrollment's session_price field.
+*/
+function getChildServicePrice(db, child_id, childRow) {
+	if (childRow?.price != null) return childRow.price;
+	const anyEnrollment = db.prepare(`
+    SELECT price FROM child_services WHERE child_id = ? ORDER BY id DESC LIMIT 1
+  `).get(child_id);
+	if (anyEnrollment?.price != null) return anyEnrollment.price;
+	return db.prepare("SELECT price FROM children WHERE id = ?").get(child_id)?.price ?? null;
+}
+/**
+* Resolves the per-session rate to pay a teacher for one child.
+*
+* `per_child_session` salary type mode (pay follows the child, NEVER the teacher's flat
+* "Per Session Cost" and NEVER the enrollment's session_price):
+*   1. that child's own override (`child_services.teacher_session_rate` — salary type per child)
+*   2. the price of the child's service enrollment itself (`child_services.price`)
+*   3. the salary type's own fallback `session_rate`
+*
+* `per_session_pct` salary type mode (percentage OF the child's service price — a 100%
+* percentage pays exactly the service price; nothing is ever hardcoded to 100 EGP):
+*   1. that child's own override, if set (absolute amount)
+*   2. `salary_types.session_pct` × the child's service price
+*
+* All other modes:
+*   1. the child's own override, if set
+*   2. the teacher's own flat rate (`employees.teacher_session_rate`)
+*   3. the effective salary type's per-session rate (`salary_types.session_rate`)
+*
+* There is no org-wide fallback setting anymore — a teacher with none of the above configured
+* simply generates no payment, so misconfiguration is visible rather than silently paid at a
+* stale default.
+*/
+function resolveTeacherSessionRate(db, teacher_id, child_id) {
+	const childRow = db.prepare(`
+    SELECT teacher_session_rate, price FROM child_services
+    WHERE child_id = ? AND teacher_id = ?
+    ORDER BY (teacher_session_rate IS NOT NULL) DESC, id DESC LIMIT 1
+  `).get(child_id, teacher_id);
+	if (childRow?.teacher_session_rate != null) return childRow.teacher_session_rate;
+	const salaryTypeRow = db.prepare(`
+    SELECT st.mode as mode, st.session_rate as session_rate, st.session_pct as session_pct
+    FROM employees e
+    LEFT JOIN employee_roles er ON e.role_id = er.id
+    LEFT JOIN salary_types st ON st.id = COALESCE(e.salary_type_override_id, er.salary_type_id)
+    WHERE e.id = ?
+  `).get(teacher_id);
+	if (salaryTypeRow?.mode === "per_child_session") {
+		const price = getChildServicePrice(db, child_id, childRow);
+		if (price != null) return price;
+		return salaryTypeRow?.session_rate ?? null;
+	}
+	if (salaryTypeRow?.mode === "per_session_pct") {
+		const price = getChildServicePrice(db, child_id, childRow);
+		if (price != null && salaryTypeRow.session_pct != null) return Number((price * salaryTypeRow.session_pct).toFixed(2));
+		return null;
+	}
+	const teacherRow = db.prepare("SELECT teacher_session_rate FROM employees WHERE id = ?").get(teacher_id);
+	if (teacherRow?.teacher_session_rate != null) return teacherRow.teacher_session_rate;
+	if (salaryTypeRow?.session_rate != null) return salaryTypeRow.session_rate;
+	return null;
+}
+/**
+* Re-snapshots every still-Pending payment of one teacher to the rate that CURRENTLY resolves
+* for its child — so a salary-type switch (e.g. to per_child_session), a per-child override, or
+* a rate correction is reflected in salary views immediately, without waiting for each
+* attendance record to be re-saved. Paid/Void rows are never touched (research.md #7).
+*/
+function resnapshotPendingTeacherPayments(db, teacher_id) {
+	const pending = db.prepare(`
+    SELECT id, child_id, session_cost FROM teacher_payments WHERE teacher_id = ? AND status = 'pending'
+  `).all(teacher_id);
+	if (pending.length === 0) return;
+	const now = (/* @__PURE__ */ new Date()).toISOString();
+	for (const p of pending) {
+		const rate = resolveTeacherSessionRate(db, teacher_id, p.child_id);
+		if (rate != null && rate !== p.session_cost) db.prepare(`UPDATE teacher_payments SET session_cost = ?, updated_at = ?, synced = 0 WHERE id = ?`).run(rate, now, p.id);
+	}
+}
+/**
+* Recomputes the teacher_payments row for one (teacher, child, date) combination given the
+* attendance values that now apply — voiding a stale pending payment or (re)generating one, per
+* the same five payment-eligibility cases used since feature 006. Extracted so both the direct
+* attendance:record write path AND the edit-request approval path (feature 007) call one shared
+* implementation instead of two that could silently diverge (specs/007-.../research.md #5).
+*/
+function recalculateAttendancePayment(db, params) {
+	const { teacher_id, child_id, attendance_record_id, attendance_date, status, teacher_status, now } = params;
+	const existing = db.prepare(`
+    SELECT * FROM teacher_payments WHERE teacher_id = ? AND child_id = ? AND attendance_date = ?
+  `).get(teacher_id, child_id, attendance_date);
+	const payable = isPaymentEligible(teacher_status, status);
+	const effectiveRate = resolveTeacherSessionRate(db, teacher_id, child_id);
+	const hasEffectiveRate = effectiveRate != null;
+	if (payable && hasEffectiveRate) {
+		if (!existing || existing.status === "void" || existing.status === "pending") db.prepare(`
+        INSERT INTO teacher_payments (teacher_id, child_id, attendance_record_id, attendance_date, session_cost, status, created_at, updated_at, synced)
+        VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, 0)
+        ON CONFLICT(teacher_id, child_id, attendance_date) DO UPDATE SET
+          attendance_record_id = excluded.attendance_record_id,
+          session_cost = excluded.session_cost,
+          status = 'pending',
+          updated_at = excluded.updated_at,
+          synced = 0
+      `).run(teacher_id, child_id, attendance_record_id, attendance_date, effectiveRate, now, now);
+	} else if ((!payable || !hasEffectiveRate) && existing && existing.status === "pending") db.prepare(`UPDATE teacher_payments SET status = 'void', updated_at = ?, synced = 0 WHERE id = ?`).run(now, existing.id);
+}
+ipcMain.handle("attendance:getSheet", async (_event, { session_id }) => {
+	try {
+		checkAuth$10();
+		const db = getDb();
+		const session = db.prepare("SELECT session_date FROM scheduled_sessions WHERE id = ?").get(session_id);
+		let dayOfWeek = null;
+		if (session?.session_date) {
+			const [y, m, d] = session.session_date.split("-").map(Number);
+			dayOfWeek = new Date(y, m - 1, d).getDay();
+		}
+		const activeChildren = db.prepare(`
+      SELECT id as child_id, name as child_name, photo_url as child_photo_url, lesson_days
+      FROM children WHERE is_active = 1
+    `).all();
+		const enrollments = db.prepare(`
+      SELECT DISTINCT cs.child_id, cs.teacher_id, cs.lesson_days as enrollment_lesson_days
+      FROM child_services cs
+      WHERE cs.teacher_id IS NOT NULL
+    `).all();
+		const enrollmentsByChild = /* @__PURE__ */ new Map();
+		for (const en of enrollments) {
+			if (!enrollmentsByChild.has(en.child_id)) enrollmentsByChild.set(en.child_id, []);
+			enrollmentsByChild.get(en.child_id).push(en);
+		}
+		const candidates = [];
+		for (const c of activeChildren) {
+			const childEnrollments = enrollmentsByChild.get(c.child_id) ?? [];
+			if (childEnrollments.length === 0) candidates.push({
+				child_id: c.child_id,
+				child_name: c.child_name,
+				child_photo_url: c.child_photo_url,
+				teacher_id: null,
+				lesson_days: c.lesson_days
+			});
+			else {
+				const seenTeachers = /* @__PURE__ */ new Set();
+				for (const en of childEnrollments) {
+					if (seenTeachers.has(en.teacher_id)) continue;
+					seenTeachers.add(en.teacher_id);
+					candidates.push({
+						child_id: c.child_id,
+						child_name: c.child_name,
+						child_photo_url: c.child_photo_url,
+						teacher_id: en.teacher_id,
+						lesson_days: en.enrollment_lesson_days || c.lesson_days
+					});
+				}
+			}
+		}
+		const teacherIds = [...new Set(candidates.map((c) => c.teacher_id).filter((id) => id != null))];
+		const teachersById = /* @__PURE__ */ new Map();
+		if (teacherIds.length > 0) {
+			const ph = teacherIds.map(() => "?").join(",");
+			for (const t of db.prepare(`SELECT id, name, teacher_session_rate FROM employees WHERE id IN (${ph})`).all(...teacherIds)) teachersById.set(t.id, t);
+		}
+		const rows = candidates.map((cand) => {
+			const teacher = cand.teacher_id != null ? teachersById.get(cand.teacher_id) : null;
+			const ar = cand.teacher_id != null ? db.prepare(`SELECT * FROM attendance_records WHERE session_id = ? AND child_id = ? AND attended_teacher_id = ?`).get(session_id, cand.child_id, cand.teacher_id) : db.prepare(`SELECT * FROM attendance_records WHERE session_id = ? AND child_id = ? AND attended_teacher_id IS NULL`).get(session_id, cand.child_id);
+			const tp = ar ? db.prepare(`SELECT * FROM teacher_payments WHERE attendance_record_id = ?`).get(ar.id) : null;
+			return {
+				child_id: cand.child_id,
+				child_name: cand.child_name,
+				child_photo_url: cand.child_photo_url,
+				lesson_days: cand.lesson_days,
+				teacher_id: cand.teacher_id,
+				teacher_name: teacher?.name ?? null,
+				teacher_session_rate: cand.teacher_id != null ? resolveTeacherSessionRate(db, cand.teacher_id, cand.child_id) : null,
+				attendance_id: ar?.id ?? null,
+				locked: !!ar,
+				status: ar?.status ?? null,
+				excuse_notes: ar?.excuse_notes ?? null,
+				recorded_by: ar?.recorded_by ?? null,
+				recorded_at: ar?.recorded_at ?? null,
+				updated_at: ar?.updated_at ?? null,
+				attended_teacher_id: ar?.attended_teacher_id ?? null,
+				teacher_status: ar?.teacher_status ?? null,
+				payment: {
+					generated: tp?.status === "pending" || tp?.status === "paid",
+					amount: tp?.session_cost ?? null,
+					status: tp?.status ?? null
+				}
+			};
+		}).filter((r) => {
+			if (r.attendance_id) return true;
+			if (!r.lesson_days || r.lesson_days === "[]" || r.lesson_days === "") return true;
+			if (dayOfWeek === null) return true;
+			try {
+				const days = JSON.parse(r.lesson_days);
+				return days.length === 0 || days.includes(dayOfWeek);
+			} catch {
+				return true;
+			}
+		}).map(({ lesson_days, ...rest }) => rest);
+		rows.sort((a, b) => a.child_name.localeCompare(b.child_name));
+		return rows;
+	} catch (error) {
+		throw new Error(error.message || "Failed to get attendance sheet");
+	}
+});
+ipcMain.handle("attendance:record", async (_event, args) => {
+	try {
+		checkAuth$10();
+		const db = getDb();
+		const user = getCurrentUser();
+		const isAdmin = user?.role === "admin";
+		const now = (/* @__PURE__ */ new Date()).toISOString();
+		const results = [];
+		const sessionId = args?.session_id;
+		const records = Array.isArray(args) ? args : args?.records ?? [];
+		const payableTeachersBySession = /* @__PURE__ */ new Map();
+		db.transaction(() => {
+			for (const rec of records) {
+				const session_id = sessionId ?? rec.session_id;
+				const { child_id, status, excuse_notes = null, teacher_status = "present" } = rec;
+				if (![
+					"attended",
+					"absent_excused",
+					"absent_unexcused"
+				].includes(status)) throw new Error(`Invalid status: ${status}`);
+				if (teacher_status !== "present" && teacher_status !== "absent") throw new Error(`Invalid teacher_status: ${teacher_status}`);
+				let attended_teacher_id;
+				if ("teacher_id" in rec) attended_teacher_id = rec.teacher_id ?? null;
+				else attended_teacher_id = db.prepare("SELECT teacher_id FROM children WHERE id = ?").get(child_id)?.teacher_id ?? null;
+				const attendanceDate = db.prepare("SELECT session_date FROM scheduled_sessions WHERE id = ?").get(session_id)?.session_date;
+				const existingRecord = attended_teacher_id == null ? db.prepare("SELECT * FROM attendance_records WHERE session_id = ? AND child_id = ? AND attended_teacher_id IS NULL").get(session_id, child_id) : db.prepare("SELECT * FROM attendance_records WHERE session_id = ? AND child_id = ? AND attended_teacher_id = ?").get(session_id, child_id, attended_teacher_id);
+				if (existingRecord && !isAdmin) {
+					results.push({
+						...existingRecord,
+						locked: true
+					});
+					continue;
+				}
+				if (existingRecord) db.prepare(`
+            UPDATE attendance_records
+            SET status = ?, excuse_notes = ?, recorded_by = ?, updated_at = ?, teacher_status = ?, synced = 0
+            WHERE id = ?
+          `).run(status, excuse_notes, user?.id ?? null, now, teacher_status, existingRecord.id);
+				else db.prepare(`
+            INSERT INTO attendance_records (session_id, child_id, status, excuse_notes, recorded_by, recorded_at, updated_at, synced, attended_teacher_id, teacher_status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+            ON CONFLICT(session_id, child_id, attended_teacher_id) DO UPDATE SET
+              status = excluded.status,
+              excuse_notes = excluded.excuse_notes,
+              recorded_by = excluded.recorded_by,
+              updated_at = excluded.updated_at,
+              teacher_status = excluded.teacher_status,
+              synced = 0
+          `).run(session_id, child_id, status, excuse_notes, user?.id ?? null, now, now, attended_teacher_id, teacher_status);
+				const savedRecord = attended_teacher_id == null ? db.prepare("SELECT * FROM attendance_records WHERE session_id = ? AND child_id = ? AND attended_teacher_id IS NULL").get(session_id, child_id) : db.prepare("SELECT * FROM attendance_records WHERE session_id = ? AND child_id = ? AND attended_teacher_id = ?").get(session_id, child_id, attended_teacher_id);
+				if (existingRecord && isAdmin && user) writeAuditLog(db, {
+					attendance_record_id: savedRecord.id,
+					edit_request_id: null,
+					old_status: existingRecord.status,
+					old_excuse_notes: existingRecord.excuse_notes,
+					old_teacher_status: existingRecord.teacher_status,
+					new_status: status,
+					new_excuse_notes: excuse_notes,
+					new_teacher_status: teacher_status,
+					changed_by: user.id,
+					approved_by: user.id,
+					reason: null,
+					changed_at: now
+				});
+				if (attended_teacher_id && attendanceDate) recalculateAttendancePayment(db, {
+					teacher_id: attended_teacher_id,
+					child_id,
+					attendance_record_id: savedRecord.id,
+					attendance_date: attendanceDate,
+					status,
+					teacher_status,
+					now
+				});
+				if ((status === "attended" || status === "absent_unexcused") && attended_teacher_id != null) {
+					if (!payableTeachersBySession.has(session_id)) payableTeachersBySession.set(session_id, /* @__PURE__ */ new Set());
+					payableTeachersBySession.get(session_id).add(attended_teacher_id);
+				}
+				results.push(savedRecord);
+			}
+			for (const [session_id, teacherIds] of payableTeachersBySession) for (const teacher_id of teacherIds) db.prepare("INSERT OR IGNORE INTO session_teachers (session_id, employee_id, synced) VALUES (?, ?, 0)").run(session_id, teacher_id);
+		})();
+		return results;
+	} catch (error) {
+		throw new Error(error.message || "Failed to record attendance");
+	}
+});
+ipcMain.handle("attendance:delete", async (_event, { session_id, child_ids }) => {
+	try {
+		checkAuth$10();
+		const db = getDb();
+		const items = (Array.isArray(child_ids) ? child_ids : []).map((it) => typeof it === "object" ? {
+			child_id: it.child_id,
+			teacher_id: it.teacher_id
+		} : {
+			child_id: it,
+			teacher_id: void 0
+		});
+		if (items.length === 0) return {
+			ok: true,
+			deleted: 0
+		};
+		let deleted = 0;
+		const now = (/* @__PURE__ */ new Date()).toISOString();
+		db.transaction(() => {
+			for (const item of items) {
+				const records = item.teacher_id !== void 0 ? item.teacher_id == null ? db.prepare("SELECT id FROM attendance_records WHERE session_id = ? AND child_id = ? AND attended_teacher_id IS NULL").all(session_id, item.child_id) : db.prepare("SELECT id FROM attendance_records WHERE session_id = ? AND child_id = ? AND attended_teacher_id = ?").all(session_id, item.child_id, item.teacher_id) : db.prepare("SELECT id FROM attendance_records WHERE session_id = ? AND child_id = ?").all(session_id, item.child_id);
+				for (const { id: recordId } of records) {
+					if (db.prepare(`SELECT 1 FROM teacher_payments WHERE attendance_record_id = ? AND status = 'paid'`).get(recordId)) continue;
+					db.prepare(`UPDATE teacher_payments SET status = 'void', updated_at = ?, synced = 0 WHERE status = 'pending' AND attendance_record_id = ?`).run(now, recordId);
+					db.prepare(`DELETE FROM attendance_conflicts WHERE attendance_record_id = ?`).run(recordId);
+					const res = db.prepare(`DELETE FROM attendance_records WHERE id = ?`).run(recordId);
+					deleted += Number(res.changes);
+				}
+			}
+		})();
+		return {
+			ok: true,
+			deleted
+		};
+	} catch (error) {
+		throw new Error(error.message || "Failed to delete attendance");
+	}
+});
+ipcMain.handle("attendance:getChildHistory", async (_event, { child_id }) => {
+	try {
+		requireAdmin();
+		return getDb().prepare(`
+      SELECT
+        ss.session_date as attendance_date,
+        ar.attended_teacher_id as teacher_id,
+        e.name as teacher_name,
+        ar.teacher_status,
+        ar.status as child_status,
+        CASE WHEN tp.status IN ('pending','paid') THEN 1 ELSE 0 END as payment_generated,
+        tp.status as payment_status,
+        tp.session_cost
+      FROM attendance_records ar
+      JOIN scheduled_sessions ss ON ss.id = ar.session_id
+      LEFT JOIN employees e ON e.id = ar.attended_teacher_id
+      LEFT JOIN teacher_payments tp ON tp.attendance_record_id = ar.id
+      WHERE ar.child_id = ?
+      ORDER BY ss.session_date DESC
+    `).all(child_id).map((row) => ({
+			...row,
+			payment_generated: !!row.payment_generated
+		}));
+	} catch (error) {
+		throw new Error(error.message || "Failed to get attendance history");
+	}
+});
+ipcMain.handle("attendance:getConflicts", async () => {
+	try {
+		requireAdmin();
+		return getDb().prepare("SELECT * FROM attendance_conflicts WHERE reviewed = 0 ORDER BY created_at DESC").all();
+	} catch (error) {
+		throw new Error(error.message || "Failed to get conflicts");
+	}
+});
+ipcMain.handle("attendance:resolveConflict", async (_event, { conflict_id, final_status }) => {
+	try {
+		requireAdmin();
+		const db = getDb();
+		const conflict = db.prepare("SELECT * FROM attendance_conflicts WHERE id = ?").get(conflict_id);
+		if (!conflict) throw new Error("التعارض غير موجود / Conflict not found");
+		db.prepare("UPDATE attendance_conflicts SET reviewed = 1 WHERE id = ?").run(conflict_id);
+		db.prepare("UPDATE attendance_records SET status = ?, updated_at = ?, synced = 0 WHERE id = ?").run(final_status, (/* @__PURE__ */ new Date()).toISOString(), conflict.attendance_record_id);
+		return { ok: true };
+	} catch (error) {
+		throw new Error(error.message || "Failed to resolve conflict");
+	}
+});
+ipcMain.handle("attendance:getSummary", async (_event, { employee_id, month, year }) => {
+	try {
+		requireAdmin();
+		const db = getDb();
+		const monthIdx = [
+			"يناير",
+			"فبراير",
+			"مارس",
+			"أبريل",
+			"مايو",
+			"يونيو",
+			"يوليو",
+			"أغسطس",
+			"سبتمبر",
+			"أكتوبر",
+			"نوفمبر",
+			"ديسمبر"
+		].indexOf(String(month));
+		const monthNum = monthIdx !== -1 ? String(monthIdx + 1).padStart(2, "0") : String(month).padStart(2, "0");
+		const yearStr = String(year);
+		const monthStart = `${yearStr}-${monthNum}-01`;
+		const monthEnd = `${yearStr}-${monthNum}-31`;
+		const sessionIds = db.prepare(`
+      SELECT ss.id FROM scheduled_sessions ss
+      JOIN session_teachers st ON st.session_id = ss.id
+      WHERE st.employee_id = ? AND ss.session_date >= ? AND ss.session_date <= ?
+    `).all(employee_id, monthStart, monthEnd).map((s) => s.id);
+		if (sessionIds.length === 0) return {
+			total_sessions: 0,
+			payable_sessions: 0,
+			excused_absences: 0,
+			unexcused_absences: 0,
+			breakdown: []
+		};
+		const placeholders = sessionIds.map(() => "?").join(",");
+		const records = db.prepare(`
+      SELECT status, COUNT(*) as cnt FROM attendance_records WHERE session_id IN (${placeholders}) GROUP BY status
+    `).all(...sessionIds);
+		const attended = records.find((r) => r.status === "attended")?.cnt ?? 0;
+		const excused = records.find((r) => r.status === "absent_excused")?.cnt ?? 0;
+		const unexcused = records.find((r) => r.status === "absent_unexcused")?.cnt ?? 0;
+		return {
+			total_sessions: sessionIds.length,
+			payable_sessions: attended + unexcused,
+			excused_absences: excused,
+			unexcused_absences: unexcused,
+			breakdown: records
+		};
+	} catch (error) {
+		throw new Error(error.message || "Failed to get attendance summary");
+	}
+});
+ipcMain.handle("attendance:requestEdit", async (_event, args) => {
+	try {
+		checkAuth$10();
+		const user = getCurrentUser();
+		if (user.role === "admin") throw new Error("Admins edit attendance directly and do not need to submit an edit request");
+		const db = getDb();
+		const { attendance_record_id, requested_status, requested_excuse_notes = null, requested_teacher_status = null, reason } = args;
+		if (!reason || !String(reason).trim()) throw new Error("A reason is required to request an attendance edit");
+		const record = db.prepare("SELECT * FROM attendance_records WHERE id = ?").get(attendance_record_id);
+		if (!record) throw new Error("Attendance record not found");
+		const existingPending = db.prepare(`SELECT * FROM attendance_edit_requests WHERE attendance_record_id = ? AND status = 'pending'`).get(attendance_record_id);
+		if (existingPending) {
+			const err = /* @__PURE__ */ new Error("A pending edit request already exists for this attendance record");
+			err.existingRequest = existingPending;
+			throw err;
+		}
+		const session = db.prepare("SELECT session_date FROM scheduled_sessions WHERE id = ?").get(record.session_id);
+		const now = (/* @__PURE__ */ new Date()).toISOString();
+		const result = db.prepare(`
+      INSERT INTO attendance_edit_requests
+        (attendance_record_id, child_id, teacher_id, attendance_date,
+         original_status, original_excuse_notes, original_teacher_status,
+         requested_status, requested_excuse_notes, requested_teacher_status,
+         reason, requested_by, requested_at, status, synced)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0)
+    `).run(attendance_record_id, record.child_id, record.attended_teacher_id, session?.session_date ?? null, record.status, record.excuse_notes, record.teacher_status, requested_status, requested_excuse_notes, requested_teacher_status, reason, user.id, now);
+		const requestId = Number(result.lastInsertRowid);
+		const admins = db.prepare(`SELECT id FROM users WHERE role = 'admin' AND is_active = 1`).all();
+		for (const admin of admins) insertNotification(db, {
+			user_id: admin.id,
+			type: "edit_request_submitted",
+			related_id: requestId,
+			message_ar: `طلب تعديل حضور جديد بانتظار المراجعة`,
+			message_en: `New attendance edit request awaiting review`
+		});
+		return db.prepare("SELECT * FROM attendance_edit_requests WHERE id = ?").get(requestId);
+	} catch (error) {
+		const err = new Error(error.message || "Failed to submit edit request");
+		if (error.existingRequest) err.existingRequest = error.existingRequest;
+		throw err;
+	}
+});
+ipcMain.handle("attendance:listEditRequests", async (_event, args) => {
+	try {
+		checkAuth$10();
+		const user = getCurrentUser();
+		const db = getDb();
+		const status = args?.status;
+		const conditions = [];
+		const params = [];
+		if (user.role !== "admin") {
+			conditions.push("requested_by = ?");
+			params.push(user.id);
+		}
+		if (status) {
+			conditions.push("status = ?");
+			params.push(status);
+		}
+		if (args?.child_id) {
+			conditions.push("child_id = ?");
+			params.push(args.child_id);
+		}
+		if (args?.teacher_id) {
+			conditions.push("teacher_id = ?");
+			params.push(args.teacher_id);
+		}
+		const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+		return db.prepare(`SELECT * FROM attendance_edit_requests ${where} ORDER BY requested_at DESC`).all(...params);
+	} catch (error) {
+		throw new Error(error.message || "Failed to list edit requests");
+	}
+});
+ipcMain.handle("attendance:decideEditRequest", async (_event, args) => {
+	try {
+		requireAdmin();
+		const admin = getCurrentUser();
+		const db = getDb();
+		const { id, decision, decision_notes = null } = args;
+		if (decision !== "approve" && decision !== "reject") throw new Error(`Invalid decision: ${decision}`);
+		const now = (/* @__PURE__ */ new Date()).toISOString();
+		let result = null;
+		db.transaction(() => {
+			const request = db.prepare("SELECT * FROM attendance_edit_requests WHERE id = ?").get(id);
+			if (!request) throw new Error("Edit request not found");
+			if (request.status !== "pending") throw new Error("This request has already been decided");
+			if (decision === "reject") {
+				const upd = db.prepare(`UPDATE attendance_edit_requests SET status = 'rejected', decided_by = ?, decided_at = ?, decision_notes = ? WHERE id = ? AND status = 'pending'`).run(admin.id, now, decision_notes, id);
+				if (Number(upd.changes) === 0) throw new Error("This request has already been decided");
+			} else {
+				const upd = db.prepare(`UPDATE attendance_edit_requests SET status = 'approved', decided_by = ?, decided_at = ?, decision_notes = ? WHERE id = ? AND status = 'pending'`).run(admin.id, now, decision_notes, id);
+				if (Number(upd.changes) === 0) throw new Error("This request has already been decided");
+				const record = db.prepare("SELECT * FROM attendance_records WHERE id = ?").get(request.attendance_record_id);
+				if (!record) throw new Error("Attendance record no longer exists — cannot apply approved changes");
+				db.prepare(`
+          UPDATE attendance_records
+          SET status = ?, excuse_notes = ?, teacher_status = ?, updated_at = ?, synced = 0
+          WHERE id = ?
+        `).run(request.requested_status, request.requested_excuse_notes, request.requested_teacher_status, now, record.id);
+				writeAuditLog(db, {
+					attendance_record_id: record.id,
+					edit_request_id: request.id,
+					old_status: request.original_status,
+					old_excuse_notes: request.original_excuse_notes,
+					old_teacher_status: request.original_teacher_status,
+					new_status: request.requested_status,
+					new_excuse_notes: request.requested_excuse_notes,
+					new_teacher_status: request.requested_teacher_status,
+					changed_by: request.requested_by,
+					approved_by: admin.id,
+					reason: request.reason,
+					changed_at: now
+				});
+				if (record.attended_teacher_id && request.attendance_date) recalculateAttendancePayment(db, {
+					teacher_id: record.attended_teacher_id,
+					child_id: record.child_id,
+					attendance_record_id: record.id,
+					attendance_date: request.attendance_date,
+					status: request.requested_status,
+					teacher_status: request.requested_teacher_status,
+					now
+				});
+			}
+			insertNotification(db, {
+				user_id: request.requested_by,
+				type: decision === "approve" ? "edit_request_approved" : "edit_request_rejected",
+				related_id: request.id,
+				message_ar: decision === "approve" ? "تمت الموافقة على طلب تعديل الحضور الخاص بك" : "تم رفض طلب تعديل الحضور الخاص بك",
+				message_en: decision === "approve" ? "Your attendance edit request was approved" : "Your attendance edit request was rejected"
+			});
+			result = db.prepare("SELECT * FROM attendance_edit_requests WHERE id = ?").get(id);
+		})();
+		return result;
+	} catch (error) {
+		throw new Error(error.message || "Failed to decide edit request");
+	}
+});
+ipcMain.handle("attendance:getAuditLog", async (_event, { attendance_record_id }) => {
+	try {
+		requireAdmin();
+		return getDb().prepare("SELECT * FROM attendance_audit_log WHERE attendance_record_id = ? ORDER BY changed_at ASC").all(attendance_record_id);
+	} catch (error) {
+		throw new Error(error.message || "Failed to get audit log");
+	}
+});
+//#endregion
 //#region electron/ipc/salariesIPC.ts
 var ARABIC_MONTHS = {
 	"يناير": 1,
@@ -23099,6 +23849,7 @@ function getTeacherPaymentsForMonth(db, employeeId, start, end) {
 * estimate — that ledger is what attendance actually generated, at their real rate.
 */
 function computeBaseSalary(db, employeeId, month, year) {
+	resnapshotPendingTeacherPayments(db, employeeId);
 	const row = db.prepare(`
     SELECT e.net_salary, e.teacher_session_rate, COALESCE(e.salary_type_override_id, er.salary_type_id) as eff
     FROM employees e LEFT JOIN employee_roles er ON e.role_id = er.id WHERE e.id = ?
@@ -23117,7 +23868,12 @@ function computeBaseSalary(db, employeeId, month, year) {
 		if (st) {
 			salaryTypeName = st.name;
 			salaryTypeMode = st.mode;
-			if (hasOwnTeacherRate && (st.mode === "per_session_fixed" || st.mode === "hybrid")) {
+			if (st.mode === "per_child_session" || st.mode === "per_session_pct") {
+				const tp = hasOwnTeacherRate ? teacherPayments : getTeacherPaymentsForMonth(db, employeeId, start, end);
+				payableSessions = tp.count;
+				totalSessions = tp.count;
+				base = tp.total;
+			} else if (hasOwnTeacherRate && (st.mode === "per_session_fixed" || st.mode === "hybrid")) {
 				payableSessions = teacherPayments.count;
 				totalSessions = teacherPayments.count;
 				base = st.mode === "hybrid" ? (st.monthly_rate ?? 0) + teacherPayments.total : teacherPayments.total;
@@ -23137,7 +23893,6 @@ function computeBaseSalary(db, employeeId, month, year) {
 				}
 				if (st.mode === "fixed_monthly") base = st.monthly_rate ?? netSalary;
 				else if (st.mode === "per_session_fixed") base = payableSessions * (st.session_rate ?? 0);
-				else if (st.mode === "per_session_pct") base = payableSessions * (st.session_pct ?? 0) * 100;
 				else if (st.mode === "hybrid") base = (st.monthly_rate ?? 0) + payableSessions * (st.session_rate ?? 0);
 			}
 		}
@@ -23223,10 +23978,7 @@ ipcMain.handle("employees:update", async (_event, { id, patch }) => {
       SET name = ?, role = ?, role_id = ?, salary_type_override_id = ?, base_salary = ?, housing = ?, transport = ?, net_salary = ?, updated_at = ?, synced = 0, teacher_session_rate = ?
       WHERE id = ?
     `).run(name, role, role_id, salary_type_override_id, base_salary, housing, transport, netSalary, now, teacher_session_rate, id);
-		if (patch.teacher_session_rate !== void 0 && teacher_session_rate !== emp.teacher_session_rate && teacher_session_rate != null) db.prepare(`
-        UPDATE teacher_payments SET session_cost = ?, updated_at = ?, synced = 0
-        WHERE teacher_id = ? AND status = 'pending'
-      `).run(teacher_session_rate, now, id);
+		if (patch.teacher_session_rate !== void 0 && teacher_session_rate !== emp.teacher_session_rate || patch.salary_type_override_id !== void 0 && salary_type_override_id !== emp.salary_type_override_id || patch.role_id !== void 0 && role_id !== emp.role_id) resnapshotPendingTeacherPayments(db, id);
 		return db.prepare(`
       SELECT e.*, er.name as role_name FROM employees e LEFT JOIN employee_roles er ON e.role_id = er.id WHERE e.id = ?
     `).get(id);
@@ -23328,6 +24080,66 @@ ipcMain.handle("salary:update", async (_event, { employee_id, month, year, bonus
 	} catch (error) {
 		console.error("Failed to update salary payment:", error);
 		throw new Error(error.message || "Failed to update salary payment");
+	}
+});
+ipcMain.handle("salary:getExpected", async (_event, { employee_id, month, year }) => {
+	try {
+		requireAdmin();
+		const db = getDb();
+		if (!employee_id || !month || !year) throw new Error("Employee ID, month, and year are required");
+		const { start } = monthBounds$1(month, year);
+		const { base: actualToDate, salaryTypeMode } = computeBaseSalary(db, employee_id, month, year);
+		const emp = db.prepare("SELECT teacher_session_rate FROM employees WHERE id = ?").get(employee_id);
+		const projectable = salaryTypeMode === null || [
+			"per_session_fixed",
+			"hybrid",
+			"per_child_session",
+			"per_session_pct"
+		].includes(salaryTypeMode ?? "");
+		let expectedTotal = actualToDate;
+		if (projectable) {
+			const st = db.prepare(`
+        SELECT st.session_rate as session_rate, st.monthly_rate as monthly_rate, st.session_pct as session_pct
+        FROM employees e
+        LEFT JOIN employee_roles er ON e.role_id = er.id
+        LEFT JOIN salary_types st ON st.id = COALESCE(e.salary_type_override_id, er.salary_type_id)
+        WHERE e.id = ?
+      `).get(employee_id);
+			const salaryTypeSessionRate = st?.session_rate ?? null;
+			const assignedChildren = db.prepare(`
+        SELECT lesson_days, teacher_session_rate, price FROM child_services WHERE teacher_id = ?
+      `).all(employee_id);
+			const startDate = new Date(start);
+			const y = startDate.getFullYear();
+			const m = startDate.getMonth();
+			const daysInMonth = new Date(y, m + 1, 0).getDate();
+			let scheduleTotal = 0;
+			for (const row of assignedChildren) {
+				let days = [];
+				if (row.lesson_days) try {
+					days = JSON.parse(row.lesson_days);
+				} catch {
+					days = [];
+				}
+				if (days.length === 0) continue;
+				const rate = row.teacher_session_rate ?? (salaryTypeMode === "per_child_session" ? row.price ?? salaryTypeSessionRate : salaryTypeMode === "per_session_pct" ? row.price != null && st?.session_pct != null ? Number((row.price * st.session_pct).toFixed(2)) : null : emp?.teacher_session_rate ?? salaryTypeSessionRate);
+				if (!rate) continue;
+				let sessionCount = 0;
+				for (let d = 1; d <= daysInMonth; d++) if (days.includes(new Date(y, m, d).getDay())) sessionCount++;
+				scheduleTotal += sessionCount * rate;
+			}
+			expectedTotal = scheduleTotal;
+			if (salaryTypeMode === "hybrid") expectedTotal += st?.monthly_rate ?? 0;
+		}
+		return {
+			actual_to_date: actualToDate,
+			projected_remaining: Number(Math.max(0, expectedTotal - actualToDate).toFixed(2)),
+			expected_total: Number(expectedTotal.toFixed(2)),
+			salary_type_mode: salaryTypeMode
+		};
+	} catch (error) {
+		console.error("Failed to compute expected salary:", error);
+		throw new Error(error.message || "Failed to compute expected salary");
 	}
 });
 //#endregion
@@ -28315,6 +29127,46 @@ async function uploadImage(dataUrl, folder = "nursery/children") {
 	};
 }
 /**
+* Upload any file (data URL) to Cloudinary via a signed REST request, targeting the
+* `/auto/upload` endpoint so Cloudinary detects the resource type itself (image, video,
+* or raw for documents/audio/anything else). Used by the child activity diary, which
+* accepts attachments of any type.
+*/
+async function uploadFile(dataUrl, folder = "nursery/children") {
+	const config = getCloudinaryConfig();
+	if (!config) throw new Error("Cloudinary is not configured / لم يتم إعداد Cloudinary");
+	if (!dataUrl) throw new Error("No file provided / لا يوجد ملف");
+	const timestamp = Math.floor(Date.now() / 1e3);
+	const signature = signParams({
+		folder,
+		timestamp
+	}, config.apiSecret);
+	const form = new FormData();
+	form.append("file", dataUrl);
+	form.append("api_key", config.apiKey);
+	form.append("timestamp", String(timestamp));
+	form.append("folder", folder);
+	form.append("signature", signature);
+	const endpoint = `https://api.cloudinary.com/v1_1/${config.cloudName}/auto/upload`;
+	const res = await fetch(endpoint, {
+		method: "POST",
+		body: form
+	});
+	if (!res.ok) {
+		let detail = "";
+		try {
+			const body = await res.json();
+			detail = body?.error?.message ? `: ${body.error.message}` : "";
+		} catch {}
+		throw new Error(`Cloudinary file upload failed (${res.status})${detail}`);
+	}
+	const body = await res.json();
+	return {
+		url: body.secure_url,
+		publicId: body.public_id
+	};
+}
+/**
 * Upload a video (data URL or remote URL) to Cloudinary via a signed REST request,
 * identical in shape to `uploadImage` but targeting the `/video/upload` endpoint with
 * `resource_type=video` (feature 009 — child activity/diary media).
@@ -28717,6 +29569,7 @@ var childServiceSchema = new Schema({
 	service: String,
 	unit: String,
 	price: Number,
+	teacher_session_rate: Number,
 	created_at: String,
 	updated_at: String,
 	synced: Number
@@ -29883,7 +30736,8 @@ ipcMain.handle("salaryTypes:add", async (_event, input) => {
 			"fixed_monthly",
 			"per_session_fixed",
 			"per_session_pct",
-			"hybrid"
+			"hybrid",
+			"per_child_session"
 		].includes(mode)) throw new Error("نوع الراتب غير صالح / Invalid salary mode");
 		if (mode === "per_session_pct" && (session_pct == null || session_pct <= 0 || session_pct > 1)) throw new Error("نسبة الجلسة يجب أن تكون بين 0 و 1 / Session percentage must be between 0 and 1");
 		const now = (/* @__PURE__ */ new Date()).toISOString();
@@ -30185,570 +31039,6 @@ ipcMain.handle("sessions:proRateCalc", async (_event, args) => {
 		};
 	} catch (error) {
 		throw new Error(error.message || "Failed to calculate pro-rate");
-	}
-});
-//#endregion
-//#region electron/services/attendanceAuditService.ts
-/**
-* Appends one row to attendance_audit_log. Insert-only — no update/delete handler is ever
-* exposed for this table (FR-013/FR-021): "no attendance record should ever disappear
-* completely" extends to its history.
-*/
-function writeAuditLog(db, entry) {
-	db.prepare(`
-    INSERT INTO attendance_audit_log
-      (attendance_record_id, edit_request_id, old_status, old_excuse_notes, old_teacher_status,
-       new_status, new_excuse_notes, new_teacher_status, changed_by, approved_by, reason, changed_at, synced)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
-  `).run(entry.attendance_record_id, entry.edit_request_id, entry.old_status, entry.old_excuse_notes, entry.old_teacher_status, entry.new_status, entry.new_excuse_notes, entry.new_teacher_status, entry.changed_by, entry.approved_by, entry.reason, entry.changed_at);
-}
-//#endregion
-//#region electron/ipc/notificationsIPC.ts
-/**
-* Minimal in-app notification (research.md #6 — no email/SMS/push integration in v1).
-* Exported so other IPC modules (attendanceIPC) can enqueue notifications inline.
-*/
-function insertNotification(db, entry) {
-	db.prepare(`
-    INSERT INTO notifications (user_id, type, related_id, message_ar, message_en, read_at, created_at, synced)
-    VALUES (?, ?, ?, ?, ?, NULL, ?, 0)
-  `).run(entry.user_id, entry.type, entry.related_id, entry.message_ar, entry.message_en, (/* @__PURE__ */ new Date()).toISOString());
-}
-ipcMain.handle("notifications:list", async (_event, args) => {
-	try {
-		checkAuth$10();
-		const user = getCurrentUser();
-		const db = getDb();
-		const sql = args?.unreadOnly === true ? "SELECT * FROM notifications WHERE user_id = ? AND read_at IS NULL ORDER BY created_at DESC" : "SELECT * FROM notifications WHERE user_id = ? ORDER BY created_at DESC";
-		return db.prepare(sql).all(user.id);
-	} catch (error) {
-		throw new Error(error.message || "Failed to list notifications");
-	}
-});
-ipcMain.handle("notifications:markRead", async (_event, args) => {
-	try {
-		checkAuth$10();
-		const user = getCurrentUser();
-		const db = getDb();
-		const now = (/* @__PURE__ */ new Date()).toISOString();
-		if (args?.all) db.prepare("UPDATE notifications SET read_at = ? WHERE user_id = ? AND read_at IS NULL").run(now, user.id);
-		else db.prepare("UPDATE notifications SET read_at = ? WHERE id = ? AND user_id = ?").run(now, args.id, user.id);
-		return { ok: true };
-	} catch (error) {
-		throw new Error(error.message || "Failed to mark notification read");
-	}
-});
-//#endregion
-//#region electron/ipc/attendanceIPC.ts
-/**
-* Pure payment-eligibility rule (spec.md FR-008…FR-011):
-*   teacher present + child attended            → payable
-*   teacher present + child absent (unexcused)   → payable
-*   teacher present + child absent (excused)     → not payable
-*   teacher absent (any child status)            → not payable
-* Exported for direct unit testing without touching the database.
-*/
-function isPaymentEligible(teacherStatus, childStatus) {
-	if (teacherStatus !== "present") return false;
-	return childStatus === "attended" || childStatus === "absent_unexcused";
-}
-/**
-* Recomputes the teacher_payments row for one (teacher, child, date) combination given the
-* attendance values that now apply — voiding a stale pending payment or (re)generating one, per
-* the same five payment-eligibility cases used since feature 006. Extracted so both the direct
-* attendance:record write path AND the edit-request approval path (feature 007) call one shared
-* implementation instead of two that could silently diverge (specs/007-.../research.md #5).
-*/
-function recalculateAttendancePayment(db, params) {
-	const { teacher_id, child_id, attendance_record_id, attendance_date, status, teacher_status, now } = params;
-	const existing = db.prepare(`
-    SELECT * FROM teacher_payments WHERE teacher_id = ? AND child_id = ? AND attendance_date = ?
-  `).get(teacher_id, child_id, attendance_date);
-	const payable = isPaymentEligible(teacher_status, status);
-	let effectiveRate = db.prepare("SELECT teacher_session_rate FROM employees WHERE id = ?").get(teacher_id)?.teacher_session_rate ?? null;
-	if (effectiveRate == null) {
-		const defaultSetting = db.prepare("SELECT value FROM settings WHERE key = 'default_teacher_session_rate'").get();
-		const defaultRate = defaultSetting?.value != null ? Number(defaultSetting.value) : NaN;
-		if (!isNaN(defaultRate) && defaultRate > 0) effectiveRate = defaultRate;
-	}
-	const hasEffectiveRate = effectiveRate != null;
-	if (payable && hasEffectiveRate) {
-		if (!existing || existing.status === "void" || existing.status === "pending") db.prepare(`
-        INSERT INTO teacher_payments (teacher_id, child_id, attendance_record_id, attendance_date, session_cost, status, created_at, updated_at, synced)
-        VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, 0)
-        ON CONFLICT(teacher_id, child_id, attendance_date) DO UPDATE SET
-          attendance_record_id = excluded.attendance_record_id,
-          session_cost = excluded.session_cost,
-          status = 'pending',
-          updated_at = excluded.updated_at,
-          synced = 0
-      `).run(teacher_id, child_id, attendance_record_id, attendance_date, effectiveRate, now, now);
-	} else if ((!payable || !hasEffectiveRate) && existing && existing.status === "pending") db.prepare(`UPDATE teacher_payments SET status = 'void', updated_at = ?, synced = 0 WHERE id = ?`).run(now, existing.id);
-}
-ipcMain.handle("attendance:getSheet", async (_event, { session_id }) => {
-	try {
-		checkAuth$10();
-		const db = getDb();
-		const session = db.prepare("SELECT session_date FROM scheduled_sessions WHERE id = ?").get(session_id);
-		let dayOfWeek = null;
-		if (session?.session_date) {
-			const [y, m, d] = session.session_date.split("-").map(Number);
-			dayOfWeek = new Date(y, m - 1, d).getDay();
-		}
-		const activeChildren = db.prepare(`
-      SELECT id as child_id, name as child_name, photo_url as child_photo_url, lesson_days
-      FROM children WHERE is_active = 1
-    `).all();
-		const enrollments = db.prepare(`
-      SELECT DISTINCT cs.child_id, cs.teacher_id, cs.lesson_days as enrollment_lesson_days
-      FROM child_services cs
-      WHERE cs.teacher_id IS NOT NULL
-    `).all();
-		const enrollmentsByChild = /* @__PURE__ */ new Map();
-		for (const en of enrollments) {
-			if (!enrollmentsByChild.has(en.child_id)) enrollmentsByChild.set(en.child_id, []);
-			enrollmentsByChild.get(en.child_id).push(en);
-		}
-		const candidates = [];
-		for (const c of activeChildren) {
-			const childEnrollments = enrollmentsByChild.get(c.child_id) ?? [];
-			if (childEnrollments.length === 0) candidates.push({
-				child_id: c.child_id,
-				child_name: c.child_name,
-				child_photo_url: c.child_photo_url,
-				teacher_id: null,
-				lesson_days: c.lesson_days
-			});
-			else {
-				const seenTeachers = /* @__PURE__ */ new Set();
-				for (const en of childEnrollments) {
-					if (seenTeachers.has(en.teacher_id)) continue;
-					seenTeachers.add(en.teacher_id);
-					candidates.push({
-						child_id: c.child_id,
-						child_name: c.child_name,
-						child_photo_url: c.child_photo_url,
-						teacher_id: en.teacher_id,
-						lesson_days: en.enrollment_lesson_days || c.lesson_days
-					});
-				}
-			}
-		}
-		const teacherIds = [...new Set(candidates.map((c) => c.teacher_id).filter((id) => id != null))];
-		const teachersById = /* @__PURE__ */ new Map();
-		if (teacherIds.length > 0) {
-			const ph = teacherIds.map(() => "?").join(",");
-			for (const t of db.prepare(`SELECT id, name, teacher_session_rate FROM employees WHERE id IN (${ph})`).all(...teacherIds)) teachersById.set(t.id, t);
-		}
-		const rows = candidates.map((cand) => {
-			const teacher = cand.teacher_id != null ? teachersById.get(cand.teacher_id) : null;
-			const ar = cand.teacher_id != null ? db.prepare(`SELECT * FROM attendance_records WHERE session_id = ? AND child_id = ? AND attended_teacher_id = ?`).get(session_id, cand.child_id, cand.teacher_id) : db.prepare(`SELECT * FROM attendance_records WHERE session_id = ? AND child_id = ? AND attended_teacher_id IS NULL`).get(session_id, cand.child_id);
-			const tp = ar ? db.prepare(`SELECT * FROM teacher_payments WHERE attendance_record_id = ?`).get(ar.id) : null;
-			return {
-				child_id: cand.child_id,
-				child_name: cand.child_name,
-				child_photo_url: cand.child_photo_url,
-				lesson_days: cand.lesson_days,
-				teacher_id: cand.teacher_id,
-				teacher_name: teacher?.name ?? null,
-				teacher_session_rate: teacher?.teacher_session_rate ?? null,
-				attendance_id: ar?.id ?? null,
-				locked: !!ar,
-				status: ar?.status ?? null,
-				excuse_notes: ar?.excuse_notes ?? null,
-				recorded_by: ar?.recorded_by ?? null,
-				recorded_at: ar?.recorded_at ?? null,
-				updated_at: ar?.updated_at ?? null,
-				attended_teacher_id: ar?.attended_teacher_id ?? null,
-				teacher_status: ar?.teacher_status ?? null,
-				payment: {
-					generated: tp?.status === "pending" || tp?.status === "paid",
-					amount: tp?.session_cost ?? null,
-					status: tp?.status ?? null
-				}
-			};
-		}).filter((r) => {
-			if (r.attendance_id) return true;
-			if (!r.lesson_days || r.lesson_days === "[]" || r.lesson_days === "") return true;
-			if (dayOfWeek === null) return true;
-			try {
-				const days = JSON.parse(r.lesson_days);
-				return days.length === 0 || days.includes(dayOfWeek);
-			} catch {
-				return true;
-			}
-		}).map(({ lesson_days, ...rest }) => rest);
-		rows.sort((a, b) => a.child_name.localeCompare(b.child_name));
-		return rows;
-	} catch (error) {
-		throw new Error(error.message || "Failed to get attendance sheet");
-	}
-});
-ipcMain.handle("attendance:record", async (_event, args) => {
-	try {
-		checkAuth$10();
-		const db = getDb();
-		const user = getCurrentUser();
-		const isAdmin = user?.role === "admin";
-		const now = (/* @__PURE__ */ new Date()).toISOString();
-		const results = [];
-		const sessionId = args?.session_id;
-		const records = Array.isArray(args) ? args : args?.records ?? [];
-		const payableTeachersBySession = /* @__PURE__ */ new Map();
-		db.transaction(() => {
-			for (const rec of records) {
-				const session_id = sessionId ?? rec.session_id;
-				const { child_id, status, excuse_notes = null, teacher_status = "present" } = rec;
-				if (![
-					"attended",
-					"absent_excused",
-					"absent_unexcused"
-				].includes(status)) throw new Error(`Invalid status: ${status}`);
-				if (teacher_status !== "present" && teacher_status !== "absent") throw new Error(`Invalid teacher_status: ${teacher_status}`);
-				let attended_teacher_id;
-				if ("teacher_id" in rec) attended_teacher_id = rec.teacher_id ?? null;
-				else attended_teacher_id = db.prepare("SELECT teacher_id FROM children WHERE id = ?").get(child_id)?.teacher_id ?? null;
-				const attendanceDate = db.prepare("SELECT session_date FROM scheduled_sessions WHERE id = ?").get(session_id)?.session_date;
-				const existingRecord = attended_teacher_id == null ? db.prepare("SELECT * FROM attendance_records WHERE session_id = ? AND child_id = ? AND attended_teacher_id IS NULL").get(session_id, child_id) : db.prepare("SELECT * FROM attendance_records WHERE session_id = ? AND child_id = ? AND attended_teacher_id = ?").get(session_id, child_id, attended_teacher_id);
-				if (existingRecord && !isAdmin) {
-					results.push({
-						...existingRecord,
-						locked: true
-					});
-					continue;
-				}
-				if (existingRecord) db.prepare(`
-            UPDATE attendance_records
-            SET status = ?, excuse_notes = ?, recorded_by = ?, updated_at = ?, teacher_status = ?, synced = 0
-            WHERE id = ?
-          `).run(status, excuse_notes, user?.id ?? null, now, teacher_status, existingRecord.id);
-				else db.prepare(`
-            INSERT INTO attendance_records (session_id, child_id, status, excuse_notes, recorded_by, recorded_at, updated_at, synced, attended_teacher_id, teacher_status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
-            ON CONFLICT(session_id, child_id, attended_teacher_id) DO UPDATE SET
-              status = excluded.status,
-              excuse_notes = excluded.excuse_notes,
-              recorded_by = excluded.recorded_by,
-              updated_at = excluded.updated_at,
-              teacher_status = excluded.teacher_status,
-              synced = 0
-          `).run(session_id, child_id, status, excuse_notes, user?.id ?? null, now, now, attended_teacher_id, teacher_status);
-				const savedRecord = attended_teacher_id == null ? db.prepare("SELECT * FROM attendance_records WHERE session_id = ? AND child_id = ? AND attended_teacher_id IS NULL").get(session_id, child_id) : db.prepare("SELECT * FROM attendance_records WHERE session_id = ? AND child_id = ? AND attended_teacher_id = ?").get(session_id, child_id, attended_teacher_id);
-				if (existingRecord && isAdmin && user) writeAuditLog(db, {
-					attendance_record_id: savedRecord.id,
-					edit_request_id: null,
-					old_status: existingRecord.status,
-					old_excuse_notes: existingRecord.excuse_notes,
-					old_teacher_status: existingRecord.teacher_status,
-					new_status: status,
-					new_excuse_notes: excuse_notes,
-					new_teacher_status: teacher_status,
-					changed_by: user.id,
-					approved_by: user.id,
-					reason: null,
-					changed_at: now
-				});
-				if (attended_teacher_id && attendanceDate) recalculateAttendancePayment(db, {
-					teacher_id: attended_teacher_id,
-					child_id,
-					attendance_record_id: savedRecord.id,
-					attendance_date: attendanceDate,
-					status,
-					teacher_status,
-					now
-				});
-				if ((status === "attended" || status === "absent_unexcused") && attended_teacher_id != null) {
-					if (!payableTeachersBySession.has(session_id)) payableTeachersBySession.set(session_id, /* @__PURE__ */ new Set());
-					payableTeachersBySession.get(session_id).add(attended_teacher_id);
-				}
-				results.push(savedRecord);
-			}
-			for (const [session_id, teacherIds] of payableTeachersBySession) for (const teacher_id of teacherIds) db.prepare("INSERT OR IGNORE INTO session_teachers (session_id, employee_id, synced) VALUES (?, ?, 0)").run(session_id, teacher_id);
-		})();
-		return results;
-	} catch (error) {
-		throw new Error(error.message || "Failed to record attendance");
-	}
-});
-ipcMain.handle("attendance:delete", async (_event, { session_id, child_ids }) => {
-	try {
-		checkAuth$10();
-		const db = getDb();
-		const items = (Array.isArray(child_ids) ? child_ids : []).map((it) => typeof it === "object" ? {
-			child_id: it.child_id,
-			teacher_id: it.teacher_id
-		} : {
-			child_id: it,
-			teacher_id: void 0
-		});
-		if (items.length === 0) return {
-			ok: true,
-			deleted: 0
-		};
-		let deleted = 0;
-		const now = (/* @__PURE__ */ new Date()).toISOString();
-		db.transaction(() => {
-			for (const item of items) {
-				const records = item.teacher_id !== void 0 ? item.teacher_id == null ? db.prepare("SELECT id FROM attendance_records WHERE session_id = ? AND child_id = ? AND attended_teacher_id IS NULL").all(session_id, item.child_id) : db.prepare("SELECT id FROM attendance_records WHERE session_id = ? AND child_id = ? AND attended_teacher_id = ?").all(session_id, item.child_id, item.teacher_id) : db.prepare("SELECT id FROM attendance_records WHERE session_id = ? AND child_id = ?").all(session_id, item.child_id);
-				for (const { id: recordId } of records) {
-					if (db.prepare(`SELECT 1 FROM teacher_payments WHERE attendance_record_id = ? AND status = 'paid'`).get(recordId)) continue;
-					db.prepare(`UPDATE teacher_payments SET status = 'void', updated_at = ?, synced = 0 WHERE status = 'pending' AND attendance_record_id = ?`).run(now, recordId);
-					db.prepare(`DELETE FROM attendance_conflicts WHERE attendance_record_id = ?`).run(recordId);
-					const res = db.prepare(`DELETE FROM attendance_records WHERE id = ?`).run(recordId);
-					deleted += Number(res.changes);
-				}
-			}
-		})();
-		return {
-			ok: true,
-			deleted
-		};
-	} catch (error) {
-		throw new Error(error.message || "Failed to delete attendance");
-	}
-});
-ipcMain.handle("attendance:getChildHistory", async (_event, { child_id }) => {
-	try {
-		requireAdmin();
-		return getDb().prepare(`
-      SELECT
-        ss.session_date as attendance_date,
-        ar.attended_teacher_id as teacher_id,
-        e.name as teacher_name,
-        ar.teacher_status,
-        ar.status as child_status,
-        CASE WHEN tp.status IN ('pending','paid') THEN 1 ELSE 0 END as payment_generated,
-        tp.status as payment_status,
-        tp.session_cost
-      FROM attendance_records ar
-      JOIN scheduled_sessions ss ON ss.id = ar.session_id
-      LEFT JOIN employees e ON e.id = ar.attended_teacher_id
-      LEFT JOIN teacher_payments tp ON tp.attendance_record_id = ar.id
-      WHERE ar.child_id = ?
-      ORDER BY ss.session_date DESC
-    `).all(child_id).map((row) => ({
-			...row,
-			payment_generated: !!row.payment_generated
-		}));
-	} catch (error) {
-		throw new Error(error.message || "Failed to get attendance history");
-	}
-});
-ipcMain.handle("attendance:getConflicts", async () => {
-	try {
-		requireAdmin();
-		return getDb().prepare("SELECT * FROM attendance_conflicts WHERE reviewed = 0 ORDER BY created_at DESC").all();
-	} catch (error) {
-		throw new Error(error.message || "Failed to get conflicts");
-	}
-});
-ipcMain.handle("attendance:resolveConflict", async (_event, { conflict_id, final_status }) => {
-	try {
-		requireAdmin();
-		const db = getDb();
-		const conflict = db.prepare("SELECT * FROM attendance_conflicts WHERE id = ?").get(conflict_id);
-		if (!conflict) throw new Error("التعارض غير موجود / Conflict not found");
-		db.prepare("UPDATE attendance_conflicts SET reviewed = 1 WHERE id = ?").run(conflict_id);
-		db.prepare("UPDATE attendance_records SET status = ?, updated_at = ?, synced = 0 WHERE id = ?").run(final_status, (/* @__PURE__ */ new Date()).toISOString(), conflict.attendance_record_id);
-		return { ok: true };
-	} catch (error) {
-		throw new Error(error.message || "Failed to resolve conflict");
-	}
-});
-ipcMain.handle("attendance:getSummary", async (_event, { employee_id, month, year }) => {
-	try {
-		requireAdmin();
-		const db = getDb();
-		const monthIdx = [
-			"يناير",
-			"فبراير",
-			"مارس",
-			"أبريل",
-			"مايو",
-			"يونيو",
-			"يوليو",
-			"أغسطس",
-			"سبتمبر",
-			"أكتوبر",
-			"نوفمبر",
-			"ديسمبر"
-		].indexOf(String(month));
-		const monthNum = monthIdx !== -1 ? String(monthIdx + 1).padStart(2, "0") : String(month).padStart(2, "0");
-		const yearStr = String(year);
-		const monthStart = `${yearStr}-${monthNum}-01`;
-		const monthEnd = `${yearStr}-${monthNum}-31`;
-		const sessionIds = db.prepare(`
-      SELECT ss.id FROM scheduled_sessions ss
-      JOIN session_teachers st ON st.session_id = ss.id
-      WHERE st.employee_id = ? AND ss.session_date >= ? AND ss.session_date <= ?
-    `).all(employee_id, monthStart, monthEnd).map((s) => s.id);
-		if (sessionIds.length === 0) return {
-			total_sessions: 0,
-			payable_sessions: 0,
-			excused_absences: 0,
-			unexcused_absences: 0,
-			breakdown: []
-		};
-		const placeholders = sessionIds.map(() => "?").join(",");
-		const records = db.prepare(`
-      SELECT status, COUNT(*) as cnt FROM attendance_records WHERE session_id IN (${placeholders}) GROUP BY status
-    `).all(...sessionIds);
-		const attended = records.find((r) => r.status === "attended")?.cnt ?? 0;
-		const excused = records.find((r) => r.status === "absent_excused")?.cnt ?? 0;
-		const unexcused = records.find((r) => r.status === "absent_unexcused")?.cnt ?? 0;
-		return {
-			total_sessions: sessionIds.length,
-			payable_sessions: attended + unexcused,
-			excused_absences: excused,
-			unexcused_absences: unexcused,
-			breakdown: records
-		};
-	} catch (error) {
-		throw new Error(error.message || "Failed to get attendance summary");
-	}
-});
-ipcMain.handle("attendance:requestEdit", async (_event, args) => {
-	try {
-		checkAuth$10();
-		const user = getCurrentUser();
-		if (user.role === "admin") throw new Error("Admins edit attendance directly and do not need to submit an edit request");
-		const db = getDb();
-		const { attendance_record_id, requested_status, requested_excuse_notes = null, requested_teacher_status = null, reason } = args;
-		if (!reason || !String(reason).trim()) throw new Error("A reason is required to request an attendance edit");
-		const record = db.prepare("SELECT * FROM attendance_records WHERE id = ?").get(attendance_record_id);
-		if (!record) throw new Error("Attendance record not found");
-		const existingPending = db.prepare(`SELECT * FROM attendance_edit_requests WHERE attendance_record_id = ? AND status = 'pending'`).get(attendance_record_id);
-		if (existingPending) {
-			const err = /* @__PURE__ */ new Error("A pending edit request already exists for this attendance record");
-			err.existingRequest = existingPending;
-			throw err;
-		}
-		const session = db.prepare("SELECT session_date FROM scheduled_sessions WHERE id = ?").get(record.session_id);
-		const now = (/* @__PURE__ */ new Date()).toISOString();
-		const result = db.prepare(`
-      INSERT INTO attendance_edit_requests
-        (attendance_record_id, child_id, teacher_id, attendance_date,
-         original_status, original_excuse_notes, original_teacher_status,
-         requested_status, requested_excuse_notes, requested_teacher_status,
-         reason, requested_by, requested_at, status, synced)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0)
-    `).run(attendance_record_id, record.child_id, record.attended_teacher_id, session?.session_date ?? null, record.status, record.excuse_notes, record.teacher_status, requested_status, requested_excuse_notes, requested_teacher_status, reason, user.id, now);
-		const requestId = Number(result.lastInsertRowid);
-		const admins = db.prepare(`SELECT id FROM users WHERE role = 'admin' AND is_active = 1`).all();
-		for (const admin of admins) insertNotification(db, {
-			user_id: admin.id,
-			type: "edit_request_submitted",
-			related_id: requestId,
-			message_ar: `طلب تعديل حضور جديد بانتظار المراجعة`,
-			message_en: `New attendance edit request awaiting review`
-		});
-		return db.prepare("SELECT * FROM attendance_edit_requests WHERE id = ?").get(requestId);
-	} catch (error) {
-		const err = new Error(error.message || "Failed to submit edit request");
-		if (error.existingRequest) err.existingRequest = error.existingRequest;
-		throw err;
-	}
-});
-ipcMain.handle("attendance:listEditRequests", async (_event, args) => {
-	try {
-		checkAuth$10();
-		const user = getCurrentUser();
-		const db = getDb();
-		const status = args?.status;
-		const conditions = [];
-		const params = [];
-		if (user.role !== "admin") {
-			conditions.push("requested_by = ?");
-			params.push(user.id);
-		}
-		if (status) {
-			conditions.push("status = ?");
-			params.push(status);
-		}
-		if (args?.child_id) {
-			conditions.push("child_id = ?");
-			params.push(args.child_id);
-		}
-		if (args?.teacher_id) {
-			conditions.push("teacher_id = ?");
-			params.push(args.teacher_id);
-		}
-		const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-		return db.prepare(`SELECT * FROM attendance_edit_requests ${where} ORDER BY requested_at DESC`).all(...params);
-	} catch (error) {
-		throw new Error(error.message || "Failed to list edit requests");
-	}
-});
-ipcMain.handle("attendance:decideEditRequest", async (_event, args) => {
-	try {
-		requireAdmin();
-		const admin = getCurrentUser();
-		const db = getDb();
-		const { id, decision, decision_notes = null } = args;
-		if (decision !== "approve" && decision !== "reject") throw new Error(`Invalid decision: ${decision}`);
-		const now = (/* @__PURE__ */ new Date()).toISOString();
-		let result = null;
-		db.transaction(() => {
-			const request = db.prepare("SELECT * FROM attendance_edit_requests WHERE id = ?").get(id);
-			if (!request) throw new Error("Edit request not found");
-			if (request.status !== "pending") throw new Error("This request has already been decided");
-			if (decision === "reject") {
-				const upd = db.prepare(`UPDATE attendance_edit_requests SET status = 'rejected', decided_by = ?, decided_at = ?, decision_notes = ? WHERE id = ? AND status = 'pending'`).run(admin.id, now, decision_notes, id);
-				if (Number(upd.changes) === 0) throw new Error("This request has already been decided");
-			} else {
-				const upd = db.prepare(`UPDATE attendance_edit_requests SET status = 'approved', decided_by = ?, decided_at = ?, decision_notes = ? WHERE id = ? AND status = 'pending'`).run(admin.id, now, decision_notes, id);
-				if (Number(upd.changes) === 0) throw new Error("This request has already been decided");
-				const record = db.prepare("SELECT * FROM attendance_records WHERE id = ?").get(request.attendance_record_id);
-				if (!record) throw new Error("Attendance record no longer exists — cannot apply approved changes");
-				db.prepare(`
-          UPDATE attendance_records
-          SET status = ?, excuse_notes = ?, teacher_status = ?, updated_at = ?, synced = 0
-          WHERE id = ?
-        `).run(request.requested_status, request.requested_excuse_notes, request.requested_teacher_status, now, record.id);
-				writeAuditLog(db, {
-					attendance_record_id: record.id,
-					edit_request_id: request.id,
-					old_status: request.original_status,
-					old_excuse_notes: request.original_excuse_notes,
-					old_teacher_status: request.original_teacher_status,
-					new_status: request.requested_status,
-					new_excuse_notes: request.requested_excuse_notes,
-					new_teacher_status: request.requested_teacher_status,
-					changed_by: request.requested_by,
-					approved_by: admin.id,
-					reason: request.reason,
-					changed_at: now
-				});
-				if (record.attended_teacher_id && request.attendance_date) recalculateAttendancePayment(db, {
-					teacher_id: record.attended_teacher_id,
-					child_id: record.child_id,
-					attendance_record_id: record.id,
-					attendance_date: request.attendance_date,
-					status: request.requested_status,
-					teacher_status: request.requested_teacher_status,
-					now
-				});
-			}
-			insertNotification(db, {
-				user_id: request.requested_by,
-				type: decision === "approve" ? "edit_request_approved" : "edit_request_rejected",
-				related_id: request.id,
-				message_ar: decision === "approve" ? "تمت الموافقة على طلب تعديل الحضور الخاص بك" : "تم رفض طلب تعديل الحضور الخاص بك",
-				message_en: decision === "approve" ? "Your attendance edit request was approved" : "Your attendance edit request was rejected"
-			});
-			result = db.prepare("SELECT * FROM attendance_edit_requests WHERE id = ?").get(id);
-		})();
-		return result;
-	} catch (error) {
-		throw new Error(error.message || "Failed to decide edit request");
-	}
-});
-ipcMain.handle("attendance:getAuditLog", async (_event, { attendance_record_id }) => {
-	try {
-		requireAdmin();
-		return getDb().prepare("SELECT * FROM attendance_audit_log WHERE attendance_record_id = ? ORDER BY changed_at ASC").all(attendance_record_id);
-	} catch (error) {
-		throw new Error(error.message || "Failed to get audit log");
 	}
 });
 //#endregion
@@ -31090,12 +31380,11 @@ ipcMain.handle("childActivities:create", async (_event, { child_id, activity_dat
 		if (!child_id) throw new Error("child_id is required");
 		if (!note && !media_data_url) throw new Error("يجب إضافة ملاحظة أو وسائط / An activity needs a note or media");
 		const db = getDb();
-		if (db.prepare("SELECT id FROM child_illness_cases WHERE child_id = ? AND status = 'open'").get(child_id)) throw new Error("لا يمكن إضافة نشاط بينما توجد حالة مرضية مفتوحة / Cannot add an activity while an illness case is open");
 		let mediaUrl = null;
 		let mediaStatus = null;
 		if (media_data_url) try {
 			const folder = `nursery/children/${child_id}/activities`;
-			mediaUrl = (media_type === "video" ? await uploadVideo(media_data_url, folder) : await uploadImage(media_data_url, folder)).url;
+			mediaUrl = (media_type === "video" ? await uploadVideo(media_data_url, folder) : media_type === "file" ? await uploadFile(media_data_url, folder) : await uploadImage(media_data_url, folder)).url;
 			mediaStatus = "uploaded";
 		} catch (uploadError) {
 			console.error("Activity media upload failed, saving note without media:", uploadError);

@@ -19,6 +19,105 @@ export function isPaymentEligible(teacherStatus: 'present' | 'absent' | null | u
 }
 
 /**
+ * The price of this child's service, preferring the enrollment linked to this teacher, then the
+ * child's most recent enrollment, then the child record's own price. This is `price` — what the
+ * service itself costs — NEVER the enrollment's session_price field.
+ */
+function getChildServicePrice(db: Db, child_id: number, childRow: any): number | null {
+  if (childRow?.price != null) return childRow.price
+  const anyEnrollment = db.prepare(`
+    SELECT price FROM child_services WHERE child_id = ? ORDER BY id DESC LIMIT 1
+  `).get(child_id) as any
+  if (anyEnrollment?.price != null) return anyEnrollment.price
+  const childRec = db.prepare('SELECT price FROM children WHERE id = ?').get(child_id) as any
+  return childRec?.price ?? null
+}
+
+/**
+ * Resolves the per-session rate to pay a teacher for one child.
+ *
+ * `per_child_session` salary type mode (pay follows the child, NEVER the teacher's flat
+ * "Per Session Cost" and NEVER the enrollment's session_price):
+ *   1. that child's own override (`child_services.teacher_session_rate` — salary type per child)
+ *   2. the price of the child's service enrollment itself (`child_services.price`)
+ *   3. the salary type's own fallback `session_rate`
+ *
+ * `per_session_pct` salary type mode (percentage OF the child's service price — a 100%
+ * percentage pays exactly the service price; nothing is ever hardcoded to 100 EGP):
+ *   1. that child's own override, if set (absolute amount)
+ *   2. `salary_types.session_pct` × the child's service price
+ *
+ * All other modes:
+ *   1. the child's own override, if set
+ *   2. the teacher's own flat rate (`employees.teacher_session_rate`)
+ *   3. the effective salary type's per-session rate (`salary_types.session_rate`)
+ *
+ * There is no org-wide fallback setting anymore — a teacher with none of the above configured
+ * simply generates no payment, so misconfiguration is visible rather than silently paid at a
+ * stale default.
+ */
+export function resolveTeacherSessionRate(db: Db, teacher_id: number, child_id: number): number | null {
+  // Prefer an enrollment row with an explicit override; otherwise the most recent enrollment
+  // linking this child to this teacher (its price feeds the child-price modes below).
+  const childRow = db.prepare(`
+    SELECT teacher_session_rate, price FROM child_services
+    WHERE child_id = ? AND teacher_id = ?
+    ORDER BY (teacher_session_rate IS NOT NULL) DESC, id DESC LIMIT 1
+  `).get(child_id, teacher_id) as any
+  if (childRow?.teacher_session_rate != null) return childRow.teacher_session_rate
+
+  const salaryTypeRow = db.prepare(`
+    SELECT st.mode as mode, st.session_rate as session_rate, st.session_pct as session_pct
+    FROM employees e
+    LEFT JOIN employee_roles er ON e.role_id = er.id
+    LEFT JOIN salary_types st ON st.id = COALESCE(e.salary_type_override_id, er.salary_type_id)
+    WHERE e.id = ?
+  `).get(teacher_id) as any
+
+  if (salaryTypeRow?.mode === 'per_child_session') {
+    const price = getChildServicePrice(db, child_id, childRow)
+    if (price != null) return price
+    return salaryTypeRow?.session_rate ?? null
+  }
+
+  if (salaryTypeRow?.mode === 'per_session_pct') {
+    const price = getChildServicePrice(db, child_id, childRow)
+    if (price != null && salaryTypeRow.session_pct != null) {
+      return Number((price * salaryTypeRow.session_pct).toFixed(2))
+    }
+    return null
+  }
+
+  const teacherRow = db.prepare('SELECT teacher_session_rate FROM employees WHERE id = ?').get(teacher_id) as any
+  if (teacherRow?.teacher_session_rate != null) return teacherRow.teacher_session_rate
+
+  if (salaryTypeRow?.session_rate != null) return salaryTypeRow.session_rate
+
+  return null
+}
+
+/**
+ * Re-snapshots every still-Pending payment of one teacher to the rate that CURRENTLY resolves
+ * for its child — so a salary-type switch (e.g. to per_child_session), a per-child override, or
+ * a rate correction is reflected in salary views immediately, without waiting for each
+ * attendance record to be re-saved. Paid/Void rows are never touched (research.md #7).
+ */
+export function resnapshotPendingTeacherPayments(db: Db, teacher_id: number): void {
+  const pending = db.prepare(`
+    SELECT id, child_id, session_cost FROM teacher_payments WHERE teacher_id = ? AND status = 'pending'
+  `).all(teacher_id) as any[]
+  if (pending.length === 0) return
+  const now = new Date().toISOString()
+  for (const p of pending) {
+    const rate = resolveTeacherSessionRate(db, teacher_id, p.child_id)
+    if (rate != null && rate !== p.session_cost) {
+      db.prepare(`UPDATE teacher_payments SET session_cost = ?, updated_at = ?, synced = 0 WHERE id = ?`)
+        .run(rate, now, p.id)
+    }
+  }
+}
+
+/**
  * Recomputes the teacher_payments row for one (teacher, child, date) combination given the
  * attendance values that now apply — voiding a stale pending payment or (re)generating one, per
  * the same five payment-eligibility cases used since feature 006. Extracted so both the direct
@@ -41,13 +140,7 @@ export function recalculateAttendancePayment(db: Db, params: {
 
   const payable = isPaymentEligible(teacher_status, status)
 
-  const teacherRow = db.prepare('SELECT teacher_session_rate FROM employees WHERE id = ?').get(teacher_id) as any
-  let effectiveRate: number | null = teacherRow?.teacher_session_rate ?? null
-  if (effectiveRate == null) {
-    const defaultSetting = db.prepare("SELECT value FROM settings WHERE key = 'default_teacher_session_rate'").get() as any
-    const defaultRate = defaultSetting?.value != null ? Number(defaultSetting.value) : NaN
-    if (!isNaN(defaultRate) && defaultRate > 0) effectiveRate = defaultRate
-  }
+  const effectiveRate = resolveTeacherSessionRate(db, teacher_id, child_id)
   const hasEffectiveRate = effectiveRate != null
 
   if (payable && hasEffectiveRate) {
@@ -147,7 +240,9 @@ ipcMain.handle('attendance:getSheet', async (_event, { session_id }) => {
         lesson_days: cand.lesson_days,
         teacher_id: cand.teacher_id,
         teacher_name: teacher?.name ?? null,
-        teacher_session_rate: teacher?.teacher_session_rate ?? null,
+        // Same resolution the payment engine actually applies (recalculateAttendancePayment):
+        // this child's own rate override → the teacher's flat rate → their salary type's rate.
+        teacher_session_rate: cand.teacher_id != null ? resolveTeacherSessionRate(db, cand.teacher_id, cand.child_id) : null,
         attendance_id: ar?.id ?? null,
         // Locked the moment the row exists (feature 007, research.md #4) — non-admin callers
         // must route further changes through attendance:requestEdit.

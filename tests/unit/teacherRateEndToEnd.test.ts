@@ -19,7 +19,7 @@ function getHandler(channel: string) {
   return found[1]
 }
 
-describe('End-to-end via the real IPC handlers a user actually drives: add teacher (rate 30) with settings default (40)', () => {
+describe('End-to-end via the real IPC handlers a user actually drives: add teacher (own rate 30)', () => {
   let db: any
   let teacherId: number
   let childId: number
@@ -36,7 +36,6 @@ describe('End-to-end via the real IPC handlers a user actually drives: add teach
 
     const now = new Date().toISOString()
     db.prepare(`INSERT INTO users (id, username, password, role, is_active, created_at) VALUES (1, 'admin', 'x', 'admin', 1, ?)`).run(now)
-    db.prepare(`INSERT OR REPLACE INTO settings (key, value, updated_at, synced) VALUES ('default_teacher_session_rate', '40', ?, 0)`).run(now)
 
     // Exactly what EmployeesList.tsx sends: teacher_session_rate as a Number, via employees:add.
     const emp = await addEmployee(null, { name: 'Ahmed', base_salary: 0, teacher_session_rate: 30 })
@@ -57,7 +56,7 @@ describe('End-to-end via the real IPC handlers a user actually drives: add teach
     expect(row.teacher_session_rate).toBe(30)
   })
 
-  it('the generated payment uses 30 (the teacher\'s own rate), not 40 (settings default)', async () => {
+  it('the generated payment uses 30 (the teacher\'s own rate)', async () => {
     await record(null, { session_id: sessionId, records: [{ child_id: childId, status: 'attended', teacher_status: 'present' }] })
     const row = db.prepare('SELECT * FROM teacher_payments WHERE teacher_id = ? AND child_id = ?').get(teacherId, childId) as any
     expect(row.session_cost).toBe(30)

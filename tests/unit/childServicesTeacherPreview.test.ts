@@ -32,41 +32,47 @@ describe('childServices:previewTeacherCost — remaining-sessions/cost preview (
   const add = getHandler('employees:add')
   const preview = getHandler('childServices:previewTeacherCost')
 
-  it('computes remaining sessions and expected cost from lesson_days and the teacher rate', async () => {
+  it('computes the full month\'s sessions and expected cost from lesson_days and the teacher rate', async () => {
     const emp = await add(null, { name: 'Ahmed', base_salary: 0, teacher_session_rate: 200 })
     teacherId = emp.id
 
-    // Every weekday (0-6) — so every remaining day of the month counts.
+    // Every weekday (0-6) — so every day of the month counts, not just from today onward.
     const result = await preview(null, { teacher_id: teacherId, lesson_days: [0, 1, 2, 3, 4, 5, 6] })
 
     const today = new Date()
     const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate()
-    const expectedRemaining = daysInMonth - today.getDate() + 1
 
-    expect(result.remaining_sessions).toBe(expectedRemaining)
-    expect(result.expected_cost).toBe(expectedRemaining * 200)
+    expect(result.remaining_sessions).toBe(daysInMonth)
+    expect(result.expected_cost).toBe(daysInMonth * 200)
   })
 
-  it('returns zero remaining sessions when lesson_days is empty', async () => {
+  it('returns zero sessions when lesson_days is empty', async () => {
     const result = await preview(null, { teacher_id: teacherId, lesson_days: [] })
     expect(result.remaining_sessions).toBe(0)
     expect(result.expected_cost).toBe(0)
   })
 
-  it('treats a teacher with no configured rate and no org-wide default as a zero-cost preview (not an error)', async () => {
+  it('treats a teacher with no configured rate and no assigned salary type as a zero-cost preview (not an error)', async () => {
     const emp = await add(null, { name: 'NoRate', base_salary: 0 })
     const result = await preview(null, { teacher_id: emp.id, lesson_days: [0, 1, 2, 3, 4, 5, 6] })
     expect(result.teacher_session_rate).toBe(0)
     expect(result.expected_cost).toBe(0)
   })
 
-  it('previews using the org-wide default_teacher_session_rate when the teacher has none of their own', async () => {
+  it('previews using the employee\'s assigned salary type session rate when the teacher has none of their own', async () => {
     const now = new Date().toISOString()
-    db.prepare(`INSERT OR REPLACE INTO settings (key, value, updated_at, synced) VALUES ('default_teacher_session_rate', '80', ?, 0)`).run(now)
-    const emp = await add(null, { name: 'NoRateWithDefault', base_salary: 0 })
+    const salaryTypeId = Number(db.prepare(`
+      INSERT INTO salary_types (name, mode, session_rate, created_at, updated_at, synced)
+      VALUES ('Per Session (Fallback 80)', 'per_session_fixed', 80, ?, ?, 0)
+    `).run(now, now).lastInsertRowid)
+    const emp = await add(null, { name: 'NoRateWithSalaryType', base_salary: 0, salary_type_override_id: salaryTypeId })
     const result = await preview(null, { teacher_id: emp.id, lesson_days: [1] })
     expect(result.teacher_session_rate).toBe(80)
-    db.prepare(`DELETE FROM settings WHERE key = 'default_teacher_session_rate'`).run()
+  })
+
+  it('a per-child rate passed by the caller wins over the teacher\'s own rate', async () => {
+    const result = await preview(null, { teacher_id: teacherId, lesson_days: [1], teacher_session_rate: 350 })
+    expect(result.teacher_session_rate).toBe(350)
   })
 
   it('never writes anything — pure computation', async () => {

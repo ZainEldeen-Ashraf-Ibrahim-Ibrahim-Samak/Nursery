@@ -8,9 +8,10 @@ interface ChildActivitiesState {
   isLoading: boolean
   error: string | null
   fetchAll: (childId: number) => Promise<void>
-  addActivity: (childId: number, args: { activity_date?: string; note?: string; media_data_url?: string; media_type?: 'photo' | 'video' }) => Promise<boolean>
+  addActivity: (childId: number, args: { activity_date?: string; note?: string; media_data_url?: string; media_type?: 'photo' | 'video' | 'file' }) => Promise<boolean>
   openIllnessCase: (childId: number, description?: string) => Promise<boolean>
   resolveIllnessCase: (id: number, childId: number) => Promise<boolean>
+  deleteActivity: (id: number) => Promise<boolean>
   clearError: () => void
 }
 
@@ -63,6 +64,17 @@ export const useChildActivitiesStore = create<ChildActivitiesState>((set, get) =
       return true
     } catch (err: any) {
       set({ error: friendlyError(err, 'Failed to resolve illness case') })
+      return false
+    }
+  },
+
+  deleteActivity: async (id) => {
+    try {
+      await window.api.childActivities.delete(id)
+      set((s) => ({ activities: s.activities.filter(a => a.id !== id) }))
+      return true
+    } catch (err: any) {
+      set({ error: friendlyError(err, 'Failed to delete activity') })
       return false
     }
   },

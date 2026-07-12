@@ -552,6 +552,26 @@ export default function MonthlyPayments() {
                             )}
                           </td>
                         </tr>
+                        <tr className="bg-white">
+                          <td colSpan={12} className="px-4 pb-2 pt-0">
+                            <div className="flex flex-wrap gap-2">
+                              {childGroup.services.map((payment: any) => (
+                                <div
+                                  key={payment.id}
+                                  className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-600 flex items-center gap-2"
+                                >
+                                  <span className="font-semibold text-slate-500">{payment.service}</span>
+                                  <span>
+                                    {i18n.language === 'ar'
+                                      ? `${payment.expected_quantity ?? payment.quantity} ${payment.unit} × ${payment.price} ج.م`
+                                      : `${payment.expected_quantity ?? payment.quantity} ${payment.unit} × ${payment.price} EGP`}
+                                  </span>
+                                  <span className="font-bold text-slate-800">{formatCurrency(payment.expected_total ?? payment.total)}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </td>
+                        </tr>
                         {childGroup.services.map((payment: any) => (
                           <PaymentRow
                             key={payment.id}
