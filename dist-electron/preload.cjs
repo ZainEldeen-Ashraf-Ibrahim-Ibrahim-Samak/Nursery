@@ -183,9 +183,10 @@ electron.contextBridge.exposeInMainWorld("api", {
 			session_id: sessionId,
 			records
 		}),
-		delete: (sessionId, child_ids) => electron.ipcRenderer.invoke("attendance:delete", {
+		delete: (sessionId, child_ids, reason) => electron.ipcRenderer.invoke("attendance:delete", {
 			session_id: sessionId,
-			child_ids
+			child_ids,
+			reason
 		}),
 		getConflicts: () => electron.ipcRenderer.invoke("attendance:getConflicts"),
 		resolveConflict: (conflict_id, final_status) => electron.ipcRenderer.invoke("attendance:resolveConflict", {

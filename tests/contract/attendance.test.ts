@@ -128,7 +128,7 @@ describe('attendance IPC contract', () => {
 
   it('attendance:delete with empty child_ids is a no-op', async () => {
     const res = await h()['attendance:delete']({}, { session_id: sessionId, child_ids: [] })
-    expect(res).toEqual({ ok: true, deleted: 0 })
+    expect(res).toEqual({ ok: true, deleted: 0, requested: 0 })
   })
 
   it('attendance:getConflicts returns array', async () => {
