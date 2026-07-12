@@ -173,4 +173,57 @@ describe('Attendance Edit Request lifecycle (feature 007, FR-014…FR-020)', () 
     const empNotifications = db.prepare(`SELECT * FROM notifications WHERE user_id = 2 AND type = 'edit_request_rejected'`).all()
     expect(empNotifications.length).toBe(1)
   })
+
+  it('employee attendance:delete does NOT delete — it files a pending \'deleted\' request and notifies admins', async () => {
+    const deleteAttendance = getHandler('attendance:delete')
+    const now = new Date().toISOString()
+    const session3 = Number(db.prepare(`
+      INSERT INTO scheduled_sessions (session_date, created_at, updated_at) VALUES ('2026-07-06', ?, ?)
+    `).run(now, now).lastInsertRowid)
+
+    setCurrentUser({ id: 2, username: 'emp', role: 'employee', is_active: 1 })
+    const res = await record(null, {
+      session_id: session3,
+      records: [{ child_id: childId, teacher_id: teacherId, status: 'attended', teacher_status: 'present' }]
+    })
+    const recId = res[0].id
+
+    const delRes = await deleteAttendance(null, { session_id: session3, child_ids: [{ child_id: childId, teacher_id: teacherId }] })
+    expect(delRes.deleted).toBe(0)
+    expect(delRes.requested).toBe(1)
+
+    // Record still exists; a pending 'deleted' request was filed instead.
+    expect(db.prepare('SELECT * FROM attendance_records WHERE id = ?').get(recId)).toBeTruthy()
+    const req = db.prepare(`SELECT * FROM attendance_edit_requests WHERE attendance_record_id = ? AND status = 'pending'`).get(recId) as any
+    expect(req.requested_status).toBe('deleted')
+    expect(req.requested_by).toBe(2)
+
+    // Approving the request actually deletes the record and voids/removes its pending payment.
+    setCurrentUser({ id: 1, username: 'admin', role: 'admin', is_active: 1 })
+    const decided = await decideEditRequest(null, { id: req.id, decision: 'approve' })
+    expect(decided.status).toBe('approved')
+    expect(db.prepare('SELECT * FROM attendance_records WHERE id = ?').get(recId)).toBeFalsy()
+    const paid = db.prepare(`SELECT * FROM teacher_payments WHERE attendance_record_id = ? AND status IN ('pending','paid')`).get(recId)
+    expect(paid).toBeFalsy()
+  })
+
+  it('admin attendance:delete still deletes immediately without any request', async () => {
+    const deleteAttendance = getHandler('attendance:delete')
+    const now = new Date().toISOString()
+    const session4 = Number(db.prepare(`
+      INSERT INTO scheduled_sessions (session_date, created_at, updated_at) VALUES ('2026-07-07', ?, ?)
+    `).run(now, now).lastInsertRowid)
+
+    setCurrentUser({ id: 1, username: 'admin', role: 'admin', is_active: 1 })
+    const res = await record(null, {
+      session_id: session4,
+      records: [{ child_id: childId, teacher_id: teacherId, status: 'attended', teacher_status: 'present' }]
+    })
+    const recId = res[0].id
+
+    const delRes = await deleteAttendance(null, { session_id: session4, child_ids: [{ child_id: childId, teacher_id: teacherId }] })
+    expect(delRes.deleted).toBe(1)
+    expect(delRes.requested).toBe(0)
+    expect(db.prepare('SELECT * FROM attendance_records WHERE id = ?').get(recId)).toBeFalsy()
+  })
 })
