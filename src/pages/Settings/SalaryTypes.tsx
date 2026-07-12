@@ -159,10 +159,10 @@ export default function SalaryTypes() {
             <>
               <p className="text-xs text-slate-400">
                 {isAr
-                  ? 'يُصرف مبلغ الحضور حسب كل طفل: سعر المعلم المحدد للطفل (إن وُجد) أولاً، ثم سعر خدمة الطفل نفسها، ثم القيمة الاحتياطية أدناه — ولا يُستخدم أبداً سعر جلسة المعلم في ملفه.'
-                  : 'Attendance pay follows each child: the child’s teacher-rate override first (if set), then the child’s own service price, then the fallback below — the teacher’s own "Per Session Cost" is never used in this mode.'}
+                  ? 'يُصرف مبلغ الحضور حسب كل طفل: سعر المعلم المحدد للطفل (إن وُجد) أولاً، ثم سعر الجلسة المحدد في نوع الراتب أدناه — ولا يُستخدم أبداً سعر خدمة الطفل ولا سعر جلسة المعلم في ملفه.'
+                  : 'Attendance pay follows each child: the child’s teacher-rate override first (if set), then this salary type’s per-session rate below — the child’s service price and the teacher’s own "Per Session Cost" are never used in this mode.'}
               </p>
-              <Input label={isAr ? 'قيمة احتياطية للجلسة (جنيه)' : 'Fallback Per Session Rate (EGP)'} type="number" value={sessionRate} onChange={(e) => setSessionRate(e.target.value)} min={0} />
+              <Input label={isAr ? 'مبلغ الجلسة (جنيه)' : 'Per Session Rate (EGP)'} type="number" value={sessionRate} onChange={(e) => setSessionRate(e.target.value)} min={0} />
             </>
           )}
         </div>

@@ -34,10 +34,11 @@ describe('salary:getExpected — full-month schedule forecast (per_child_session
 
     const salaryTypeId = Number(db.prepare(`
       INSERT INTO salary_types (name, mode, session_rate, created_at, updated_at, synced)
-      VALUES ('Per Child', 'per_child_session', NULL, ?, ?, 0)
+      VALUES ('Per Child', 'per_child_session', 130, ?, ?, 0)
     `).run(now, now).lastInsertRowid)
 
-    // Teacher has a flat rate of 90 that must NOT be used in per_child_session mode.
+    // Teacher has a flat rate of 90 that must NOT be used in per_child_session mode —
+    // and neither must the child's service price (200); pay comes from the salary type (130).
     teacherId = Number(db.prepare(`
       INSERT INTO employees (name, role, base_salary, net_salary, is_active, created_at, salary_type_override_id, teacher_session_rate)
       VALUES ('PerChild Teacher', 'Teacher', 0, 0, 1, ?, ?, 90)
@@ -45,17 +46,17 @@ describe('salary:getExpected — full-month schedule forecast (per_child_session
 
     const childId = Number(db.prepare(`
       INSERT INTO children (name, guardian, guardian_phone, service, unit, price, reg_date, created_at, updated_at, teacher_id)
-      VALUES ('Hana', 'Guardian', '0104', 'جلسة', 'جلسة', 130, '2026-01-01', ?, ?, ?)
+      VALUES ('Hana', 'Guardian', '0104', 'جلسة', 'جلسة', 200, '2026-01-01', ?, ?, ?)
     `).run(now, now, teacherId).lastInsertRowid)
 
-    // Enrollment: price 130, every weekday scheduled.
+    // Enrollment: price 200 (must NOT drive pay), every weekday scheduled.
     db.prepare(`
       INSERT INTO child_services (child_id, service, unit, price, teacher_id, lesson_days, created_at, updated_at, synced)
-      VALUES (?, 'جلسة', 'جلسة', 130, ?, '[0,1,2,3,4,5,6]', ?, ?, 0)
+      VALUES (?, 'جلسة', 'جلسة', 200, ?, '[0,1,2,3,4,5,6]', ?, ?, 0)
     `).run(childId, teacherId, now, now)
   })
 
-  it('expected_total = full month scheduled sessions × the child\'s service price, regardless of attendance', async () => {
+  it('expected_total = full month scheduled sessions × the salary type\'s session rate, regardless of attendance', async () => {
     const today = new Date()
     const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate()
     const month = String(today.getMonth() + 1)
@@ -64,7 +65,8 @@ describe('salary:getExpected — full-month schedule forecast (per_child_session
     const result = await getExpected(null, { employee_id: teacherId, month, year })
 
     // No attendance recorded at all — the expected total must still be the full schedule
-    // at the child's price (130), not the teacher's flat rate (90) and not 0.
+    // at the salary type's session rate (130), not the child's price (200), not the
+    // teacher's flat rate (90), and not 0.
     expect(result.expected_total).toBe(daysInMonth * 130)
     expect(result.actual_to_date).toBe(0)
     expect(result.projected_remaining).toBe(daysInMonth * 130)

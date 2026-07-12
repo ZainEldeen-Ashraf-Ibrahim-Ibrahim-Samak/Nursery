@@ -71,8 +71,8 @@ function computeBaseSalary(db: any, employeeId: number, month: string, year: num
       if (st.mode === 'per_child_session' || st.mode === 'per_session_pct') {
         // Pay is driven entirely by the attendance-based teacher_payments ledger, which already
         // resolves each session to its effective rate at generation time (per-child override →
-        // child's service price, or session_pct × the child's service price for the percentage
-        // mode) — see resolveTeacherSessionRate. No hardcoded per-session value anywhere.
+        // the salary type's own session rate, or session_pct × the child's service price for the
+        // percentage mode) — see resolveTeacherSessionRate. No hardcoded per-session value anywhere.
         const tp = hasOwnTeacherRate ? teacherPayments! : getTeacherPaymentsForMonth(db, employeeId, start, end)
         payableSessions = tp.count
         totalSessions = tp.count
@@ -379,8 +379,8 @@ ipcMain.handle('salary:update', async (_event, { employee_id, month, year, bonus
 })
 
 // 7. salary:getExpected (Admin only) — live forecast for the Employee details panel:
-// the FULL month's scheduled sessions × each child's resolved rate (child override → child's
-// service price in per_child_session mode → teacher rate → salary type rate), reported next to
+// the FULL month's scheduled sessions × each child's resolved rate (child override → salary
+// type's session rate in per_child_session mode → teacher rate → salary type rate), reported next to
 // what the ledger says has actually been earned so far. Attendance status does not change the
 // expected total — only the earned figure.
 ipcMain.handle('salary:getExpected', async (_event, { employee_id, month, year }) => {
@@ -432,13 +432,13 @@ ipcMain.handle('salary:getExpected', async (_event, { employee_id, month, year }
         }
         if (days.length === 0) continue
         // Same order as resolveTeacherSessionRate. per_child_session: child override → the
-        // child's own service price → salary type fallback. per_session_pct: child override →
-        // session_pct × the child's service price. Other modes: override → teacher's flat rate
-        // → salary type's session rate. The teacher's flat "Per Session Cost" and the
-        // enrollment's session_price are never used by the child-price modes.
+        // salary type's own session rate (the child's service/section price is never used).
+        // per_session_pct: child override → session_pct × the child's service price. Other
+        // modes: override → teacher's flat rate → salary type's session rate. The teacher's
+        // flat "Per Session Cost" and the enrollment's session_price are never used by these modes.
         const rate = row.teacher_session_rate
           ?? (salaryTypeMode === 'per_child_session'
-            ? (row.price ?? salaryTypeSessionRate)
+            ? salaryTypeSessionRate
             : salaryTypeMode === 'per_session_pct'
               ? (row.price != null && st?.session_pct != null ? Number((row.price * st.session_pct).toFixed(2)) : null)
               : (emp?.teacher_session_rate ?? salaryTypeSessionRate))

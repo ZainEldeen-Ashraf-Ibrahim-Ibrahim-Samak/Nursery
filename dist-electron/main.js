@@ -23236,11 +23236,11 @@ function getChildServicePrice(db, child_id, childRow) {
 /**
 * Resolves the per-session rate to pay a teacher for one child.
 *
-* `per_child_session` salary type mode (pay follows the child, NEVER the teacher's flat
-* "Per Session Cost" and NEVER the enrollment's session_price):
+* `per_child_session` salary type mode (pay comes from the salary type itself, NEVER the
+* child's service/section price, NEVER the teacher's flat "Per Session Cost" and NEVER the
+* enrollment's session_price):
 *   1. that child's own override (`child_services.teacher_session_rate` — salary type per child)
-*   2. the price of the child's service enrollment itself (`child_services.price`)
-*   3. the salary type's own fallback `session_rate`
+*   2. the salary type's own `session_rate`
 *
 * `per_session_pct` salary type mode (percentage OF the child's service price — a 100%
 * percentage pays exactly the service price; nothing is ever hardcoded to 100 EGP):
@@ -23270,11 +23270,7 @@ function resolveTeacherSessionRate(db, teacher_id, child_id) {
     LEFT JOIN salary_types st ON st.id = COALESCE(e.salary_type_override_id, er.salary_type_id)
     WHERE e.id = ?
   `).get(teacher_id);
-	if (salaryTypeRow?.mode === "per_child_session") {
-		const price = getChildServicePrice(db, child_id, childRow);
-		if (price != null) return price;
-		return salaryTypeRow?.session_rate ?? null;
-	}
+	if (salaryTypeRow?.mode === "per_child_session") return salaryTypeRow?.session_rate ?? null;
 	if (salaryTypeRow?.mode === "per_session_pct") {
 		const price = getChildServicePrice(db, child_id, childRow);
 		if (price != null && salaryTypeRow.session_pct != null) return Number((price * salaryTypeRow.session_pct).toFixed(2));

@@ -186,26 +186,26 @@ describe('Attendance-based teacher payments — duplicate protection & void/requ
     expect(rows[0].session_cost).toBe(120)
   })
 
-  it('per_child_session mode pays the child\'s own service price when no per-child override is set', async () => {
+  it('per_child_session mode pays the salary type\'s own session rate when no per-child override is set', async () => {
     const now = new Date().toISOString()
     const salaryTypeId = Number(db.prepare(`
       INSERT INTO salary_types (name, mode, session_rate, created_at, updated_at, synced)
-      VALUES ('Per Child', 'per_child_session', NULL, ?, ?, 0)
+      VALUES ('Per Child', 'per_child_session', 130, ?, ?, 0)
     `).run(now, now).lastInsertRowid)
 
-    // Teacher also has a flat rate of 90 — the child's service price (130) must still win in
-    // per_child_session mode.
+    // Teacher also has a flat rate of 90 and the child's service price is 200 — the salary
+    // type's own session rate (130) must win in per_child_session mode.
     const perChildTeacherId = Number(db.prepare(`
       INSERT INTO employees (name, role, base_salary, net_salary, is_active, created_at, salary_type_override_id, teacher_session_rate)
       VALUES ('PerChild Teacher', 'Teacher', 0, 0, 1, ?, ?, 90)
     `).run(now, salaryTypeId).lastInsertRowid)
     const perChildChildId = Number(db.prepare(`
       INSERT INTO children (name, guardian, guardian_phone, service, unit, price, reg_date, created_at, updated_at, teacher_id)
-      VALUES ('Hana', 'Guardian', '0104', 'جلسة', 'جلسة', 130, '2026-01-01', ?, ?, ?)
+      VALUES ('Hana', 'Guardian', '0104', 'جلسة', 'جلسة', 200, '2026-01-01', ?, ?, ?)
     `).run(now, now, perChildTeacherId).lastInsertRowid)
     db.prepare(`
       INSERT INTO child_services (child_id, service, unit, price, teacher_id, created_at, updated_at, synced)
-      VALUES (?, 'جلسة', 'جلسة', 130, ?, ?, ?, 0)
+      VALUES (?, 'جلسة', 'جلسة', 200, ?, ?, ?, 0)
     `).run(perChildChildId, perChildTeacherId, now, now)
     const session = Number(db.prepare(`
       INSERT INTO scheduled_sessions (session_date, created_at, updated_at) VALUES ('2026-07-12', ?, ?)
@@ -217,23 +217,24 @@ describe('Attendance-based teacher payments — duplicate protection & void/requ
     expect(row.session_cost).toBe(130)
   })
 
-  it('per_child_session mode never uses the teacher\'s flat rate — falls to the child\'s price even without a (child, teacher) enrollment row', async () => {
+  it('per_child_session mode never uses the teacher\'s flat rate nor the child\'s price — pays the salary type rate even without a (child, teacher) enrollment row', async () => {
     const now = new Date().toISOString()
     const salaryTypeId = Number(db.prepare(`
       INSERT INTO salary_types (name, mode, session_rate, created_at, updated_at, synced)
-      VALUES ('Per Child Strict', 'per_child_session', NULL, ?, ?, 0)
+      VALUES ('Per Child Strict', 'per_child_session', 110, ?, ?, 0)
     `).run(now, now).lastInsertRowid)
 
-    // Teacher has a flat rate of 75, but there is NO child_services row linking them to this
-    // child (attendance came from the child-level teacher field). Pay must still follow the
-    // child's own price (110), not the teacher's 75.
+    // Teacher has a flat rate of 75, the child's own price is 180, and there is NO
+    // child_services row linking them to this child (attendance came from the child-level
+    // teacher field). Pay must come from the salary type's session rate (110) — not the
+    // teacher's 75 and not the child's 180.
     const strictTeacherId = Number(db.prepare(`
       INSERT INTO employees (name, role, base_salary, net_salary, is_active, created_at, salary_type_override_id, teacher_session_rate)
       VALUES ('Strict PerChild Teacher', 'Teacher', 0, 0, 1, ?, ?, 75)
     `).run(now, salaryTypeId).lastInsertRowid)
     const strictChildId = Number(db.prepare(`
       INSERT INTO children (name, guardian, guardian_phone, service, unit, price, reg_date, created_at, updated_at, teacher_id)
-      VALUES ('Malak', 'Guardian', '0105', 'جلسة', 'جلسة', 110, '2026-01-01', ?, ?, ?)
+      VALUES ('Malak', 'Guardian', '0105', 'جلسة', 'جلسة', 180, '2026-01-01', ?, ?, ?)
     `).run(now, now, strictTeacherId).lastInsertRowid)
     const session = Number(db.prepare(`
       INSERT INTO scheduled_sessions (session_date, created_at, updated_at) VALUES ('2026-07-13', ?, ?)
