@@ -213,8 +213,14 @@ export default function SessionsList() {
       .map((rec) => ({ child_id: rec.child_id, teacher_id: rec.teacher_id ?? null }))
     const ok = await recordBulk(viewingSessionId, records)
     if (ok) {
+      // Non-admins don't delete directly — the backend turns each cleared row into a pending
+      // delete request for an admin to approve, and reports it via `requested`.
+      let deleteRequested = 0
       if (clearedItems.length > 0) {
-        try { await window.api.attendance.delete(viewingSessionId, clearedItems) } catch { /* best-effort */ }
+        try {
+          const delRes = await window.api.attendance.delete(viewingSessionId, clearedItems)
+          deleteRequested = delRes?.requested ?? 0
+        } catch { /* best-effort */ }
       }
       // Re-fetch the sheet so the teacher-payment badges reflect what was just generated
       // (attended_teacher_id/teacher_status/payment are computed server-side and were not
@@ -237,6 +243,11 @@ export default function SessionsList() {
       if (generated.size > 0) {
         const lines = [...generated.entries()].map(([name, amount]) => `${name} +${amount} ${isAr ? 'ج.م' : 'EGP'}`).join('، ')
         msg += isAr ? ` 💰 تم احتساب راتب المعلمين: ${lines}` : ` 💰 Teacher payments credited: ${lines}`
+      }
+      if (deleteRequested > 0) {
+        msg += isAr
+          ? ` ⏳ تم إرسال ${deleteRequested} طلب حذف حضور للمدير للموافقة.`
+          : ` ⏳ ${deleteRequested} attendance delete request(s) sent for admin approval.`
       }
       setSuccessMsg(msg)
       setViewingSessionId(null)

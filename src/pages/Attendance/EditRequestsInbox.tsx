@@ -13,6 +13,7 @@ const statusLabel = (s: string, isAr: boolean) => {
   if (s === 'attended') return isAr ? 'حاضر' : 'Attended'
   if (s === 'absent_excused') return isAr ? 'غائب بعذر' : 'Excused'
   if (s === 'absent_unexcused') return isAr ? 'غائب' : 'Absent'
+  if (s === 'deleted') return isAr ? 'حذف السجل' : 'Delete Record'
   return s
 }
 

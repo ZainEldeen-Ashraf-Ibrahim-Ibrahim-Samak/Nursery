@@ -223,8 +223,8 @@ const api = {
   attendance: {
     getSheet: (sessionId: number) => ipcRenderer.invoke('attendance:getSheet', { session_id: sessionId }),
     record: (sessionId: number, records: any[]) => ipcRenderer.invoke('attendance:record', { session_id: sessionId, records }),
-    delete: (sessionId: number, child_ids: (number | { child_id: number; teacher_id: number | null })[]) =>
-      ipcRenderer.invoke('attendance:delete', { session_id: sessionId, child_ids }) as Promise<{ ok: boolean; deleted: number }>,
+    delete: (sessionId: number, child_ids: (number | { child_id: number; teacher_id: number | null })[], reason?: string) =>
+      ipcRenderer.invoke('attendance:delete', { session_id: sessionId, child_ids, reason }) as Promise<{ ok: boolean; deleted: number; requested: number }>,
     getConflicts: () => ipcRenderer.invoke('attendance:getConflicts'),
     resolveConflict: (conflict_id: number, final_status: string) => ipcRenderer.invoke('attendance:resolveConflict', { conflict_id, final_status }),
     getSummary: (employee_id: number, month: string, year: number) => ipcRenderer.invoke('attendance:getSummary', { employee_id, month, year }),
