@@ -31346,11 +31346,13 @@ function weekBounds(dateStr) {
 }
 function monthBounds(dateStr) {
 	const date = new Date(dateStr);
-	const from = new Date(date.getFullYear(), date.getMonth(), 1);
-	const to = new Date(date.getFullYear(), date.getMonth() + 1, 0);
+	const year = date.getFullYear();
+	const month = date.getMonth();
+	const lastDay = new Date(year, month + 1, 0).getDate();
+	const pad = (n) => String(n).padStart(2, "0");
 	return {
-		from: from.toISOString().slice(0, 10),
-		to: to.toISOString().slice(0, 10)
+		from: `${year}-${pad(month + 1)}-01`,
+		to: `${year}-${pad(month + 1)}-${pad(lastDay)}`
 	};
 }
 ipcMain.handle("transactions:list", async (_event, args) => {

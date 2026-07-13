@@ -23,9 +23,17 @@ function weekBounds(dateStr: string): { from: string; to: string } {
 
 function monthBounds(dateStr: string): { from: string; to: string } {
   const date = new Date(dateStr)
-  const from = new Date(date.getFullYear(), date.getMonth(), 1)
-  const to = new Date(date.getFullYear(), date.getMonth() + 1, 0)
-  return { from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) }
+  const year = date.getFullYear()
+  const month = date.getMonth()
+  const lastDay = new Date(year, month + 1, 0).getDate()
+  // Build the ISO strings from local components directly — new Date(year, month, day).toISOString()
+  // converts local midnight to UTC first, which shifts the date back a day in any timezone ahead
+  // of UTC (e.g. Cairo), the same bug fixed in calendarIPC.ts's buildMonthEntries.
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return {
+    from: `${year}-${pad(month + 1)}-01`,
+    to: `${year}-${pad(month + 1)}-${pad(lastDay)}`
+  }
 }
 
 // Financial "transactions" are derived read-time from the existing payments/payment_transactions
