@@ -81,10 +81,10 @@ ipcMain.handle('childServices:update', async (_event, { id, patch }) => {
   }
 })
 
-// Read-only preview (FR-002/FR-003): counts ALL scheduled weekday occurrences for `lesson_days`
-// (0=Sun…6=Sat) across the current calendar month (not just from today onward, so the total
-// stays accurate regardless of the day it's viewed), and multiplies by the teacher's per-session
-// rate. Never writes anything — pure computation for the enrollment UI.
+// Read-only preview (FR-002/FR-003): counts remaining scheduled weekday occurrences for
+// `lesson_days` (0=Sun…6=Sat) from today (inclusive) through the end of the current calendar
+// month, and multiplies by the teacher's per-session rate. Never writes anything — pure
+// computation for the enrollment UI.
 ipcMain.handle('childServices:previewTeacherCost', async (_event, { teacher_id, lesson_days, teacher_session_rate = null }) => {
   try {
     checkAuth()
@@ -113,12 +113,9 @@ ipcMain.handle('childServices:previewTeacherCost', async (_event, { teacher_id, 
     const month = today.getMonth()
     const daysInMonth = new Date(year, month + 1, 0).getDate()
 
-    // Full calendar month total, not just occurrences remaining from today onward — an admin
-    // reviewing this mid/end-of-month should still see the whole month's expected total, not a
-    // number that silently drops to 0 once the days have already passed.
     let total = 0
     if (days.length > 0) {
-      for (let d = 1; d <= daysInMonth; d++) {
+      for (let d = today.getDate(); d <= daysInMonth; d++) {
         const date = new Date(year, month, d)
         if (days.includes(date.getDay())) total++
       }

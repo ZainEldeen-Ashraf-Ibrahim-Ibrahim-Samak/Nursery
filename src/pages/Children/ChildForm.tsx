@@ -33,12 +33,11 @@ const GUARDIAN_PHONE_RE = /^(?:\+?2)?01[0-9]{9}$/
 const DAY_KEYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const
 
 /**
- * Live, read-only preview of the full month's scheduled sessions and expected charge for this
+ * Live, read-only preview of the remaining scheduled sessions and expected charge for this
  * service row, using the row's selected unit price (FR-002/FR-003). Monthly units are a flat
  * subscription, so the monthly price is shown as-is; per-day/hour/session units multiply the
- * unit price by ALL scheduled occurrences of the lesson days across the whole calendar month —
- * not just the ones remaining from today onward, so admins always see the full expected total
- * for the month regardless of what day it is or whether attendance has been recorded yet.
+ * unit price by the scheduled occurrences of the lesson days from today (inclusive) through the
+ * end of the current calendar month.
  */
 function ServiceCostPreview({ lessonDays, unit, price, isAr }: { lessonDays: number[]; unit: UnitType; price: number; isAr: boolean }) {
   if (lessonDays.length === 0) return null
@@ -48,7 +47,7 @@ function ServiceCostPreview({ lessonDays, unit, price, isAr }: { lessonDays: num
   const month = today.getMonth()
   const daysInMonth = new Date(year, month + 1, 0).getDate()
   let total = 0
-  for (let d = 1; d <= daysInMonth; d++) {
+  for (let d = today.getDate(); d <= daysInMonth; d++) {
     if (lessonDays.includes(new Date(year, month, d).getDay())) total++
   }
 
@@ -60,8 +59,8 @@ function ServiceCostPreview({ lessonDays, unit, price, isAr }: { lessonDays: num
     <div className="bg-primary/5 border border-primary/20 rounded-lg px-3 py-2 text-xs text-slate-600 flex items-center justify-between">
       <span>
         {isAr
-          ? `إجمالي جلسات هذا الشهر: ${total}${isMonthly ? '' : ` × ${unitPrice} ج.م`}`
-          : `Total sessions this month: ${total}${isMonthly ? '' : ` × ${unitPrice} EGP`}`}
+          ? `الجلسات المتبقية هذا الشهر: ${total}${isMonthly ? '' : ` × ${unitPrice} ج.م`}`
+          : `Remaining sessions this month: ${total}${isMonthly ? '' : ` × ${unitPrice} EGP`}`}
       </span>
       <span className="font-bold text-slate-800">
         {isAr ? `التكلفة المتوقعة: ${expected} ج.م` : `Expected cost: ${expected} EGP`}

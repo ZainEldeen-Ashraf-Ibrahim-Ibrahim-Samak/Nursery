@@ -2,7 +2,7 @@ import { n as getDb, r as initDb, t as closeDb } from "./connection-DNiMlhbf.js"
 import { createRequire } from "node:module";
 import path from "node:path";
 import nodeCrypto from "crypto";
-import { BrowserWindow, app, dialog, ipcMain, net, protocol, shell } from "electron";
+import { BrowserWindow, Menu, app, dialog, ipcMain, net, protocol, shell } from "electron";
 import fs from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import ExcelJS from "exceljs";
@@ -22656,7 +22656,7 @@ ipcMain.handle("childServices:previewTeacherCost", async (_event, { teacher_id, 
 		const month = today.getMonth();
 		const daysInMonth = new Date(year, month + 1, 0).getDate();
 		let total = 0;
-		if (days.length > 0) for (let d = 1; d <= daysInMonth; d++) {
+		if (days.length > 0) for (let d = today.getDate(); d <= daysInMonth; d++) {
 			const date = new Date(year, month, d);
 			if (days.includes(date.getDay())) total++;
 		}
@@ -31630,6 +31630,7 @@ protocol.registerSchemesAsPrivileged([{
 }]);
 var mainWindow = null;
 function createWindow() {
+	Menu.setApplicationMenu(null);
 	mainWindow = new BrowserWindow({
 		width: 1280,
 		height: 800,
