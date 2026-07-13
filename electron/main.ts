@@ -1,6 +1,6 @@
 // MUST be first: loads .env into process.env before any module reads it.
 import { checkRequiredConfig } from './env.js'
-import { app, BrowserWindow, protocol, net, dialog, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, Menu, protocol, net, dialog, ipcMain, shell } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import path from 'node:path'
 import fs from 'node:fs'
@@ -58,6 +58,8 @@ protocol.registerSchemesAsPrivileged([
 let mainWindow: BrowserWindow | null = null
 
 function createWindow() {
+  Menu.setApplicationMenu(null)
+
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
