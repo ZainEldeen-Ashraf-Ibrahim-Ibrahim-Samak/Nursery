@@ -10,7 +10,7 @@ const ARABIC_MONTHS: Record<string, number> = {
 }
 
 function monthBounds(month: string, year: number | string) {
-  const n = ARABIC_MONTHS[month] ?? Number(month) ?? 1
+  const n = ARABIC_MONTHS[month] ?? (Number(month) || 1)
   const mm = String(n).padStart(2, '0')
   return { start: `${year}-${mm}-01`, end: `${year}-${mm}-31` }
 }
@@ -401,9 +401,10 @@ ipcMain.handle('salary:getExpected', async (_event, { employee_id, month, year }
     // all). Only fixed-monthly isn't schedule-driven.
     const projectable = salaryTypeMode === null || ['per_session_fixed', 'hybrid', 'per_child_session', 'per_session_pct'].includes(salaryTypeMode ?? '')
 
-    // Expected total = the FULL month's scheduled sessions × each child's resolved rate —
-    // independent of what has been attended so far, so it never mixes stale ledger amounts
-    // into the forecast. "Earned so far" (the ledger) is reported alongside, not added in.
+    // Expected total = the remaining scheduled sessions (today onward, for the month in
+    // progress) × each child's resolved rate — independent of what has been attended so far, so
+    // it never mixes stale ledger amounts into the forecast. "Earned so far" (the ledger) is
+    // reported alongside, not added in.
     let expectedTotal = actualToDate
     if (projectable) {
       const st = db.prepare(`
@@ -423,6 +424,11 @@ ipcMain.handle('salary:getExpected', async (_event, { employee_id, month, year }
       const y = startDate.getFullYear()
       const m = startDate.getMonth()
       const daysInMonth = new Date(y, m + 1, 0).getDate()
+      // Occurrences from today (inclusive) onward, for the month currently in progress — already-
+      // elapsed days don't inflate the projected total. Past/future periods count the whole month.
+      const today = new Date()
+      const isCurrentMonth = m === today.getMonth() && y === today.getFullYear()
+      const startDay = isCurrentMonth ? today.getDate() : 1
 
       let scheduleTotal = 0
       for (const row of assignedChildren) {
@@ -445,7 +451,7 @@ ipcMain.handle('salary:getExpected', async (_event, { employee_id, month, year }
         if (!rate) continue
 
         let sessionCount = 0
-        for (let d = 1; d <= daysInMonth; d++) {
+        for (let d = startDay; d <= daysInMonth; d++) {
           if (days.includes(new Date(y, m, d).getDay())) sessionCount++
         }
         scheduleTotal += sessionCount * rate

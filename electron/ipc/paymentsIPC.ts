@@ -72,13 +72,17 @@ ipcMain.handle('payments:get', async (_event, { month, year }) => {
     const payYear = Number(year)
     const daysInMonth = monthIndex !== -1 ? new Date(payYear, monthIndex + 1, 0).getDate() : 30
 
-    // Same calendar-based counting as the ChildForm's ServiceCostPreview banner: every
-    // occurrence of the service's lesson days across the whole month counts, independent of
-    // whether sessions were scheduled or attendance was recorded — so the preview never reads
-    // "0 × price" just because the month hasn't been attended yet.
+    // Same calendar-based counting as the ChildForm's ServiceCostPreview banner: occurrences of
+    // the service's lesson days from today (inclusive) through the end of the month count, for
+    // the month currently in progress — already-elapsed days don't inflate the expected total.
+    // Past/future months (not the one in progress) count the whole month, since there's no
+    // "today" boundary inside them.
+    const today = new Date()
+    const isCurrentMonth = monthIndex === today.getMonth() && payYear === today.getFullYear()
+    const startDay = isCurrentMonth ? today.getDate() : 1
     const countLessonDayOccurrences = (lessonDays: number[]): number => {
       let count = 0
-      for (let d = 1; d <= daysInMonth; d++) {
+      for (let d = startDay; d <= daysInMonth; d++) {
         if (lessonDays.includes(new Date(payYear, monthIndex, d).getDay())) count++
       }
       return count

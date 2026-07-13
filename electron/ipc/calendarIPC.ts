@@ -47,7 +47,9 @@ function buildMonthEntries(db: any, year: number, month: number): CalendarEntry[
 
   for (let d = 1; d <= daysInMonth; d++) {
     const date = new Date(year, month - 1, d)
-    const iso = date.toISOString().slice(0, 10)
+    // Build the date key from local components, not toISOString() — toISOString() converts to
+    // UTC first, which shifts the date back a day in any timezone ahead of UTC (e.g. Cairo).
+    const iso = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`
     const weekday = date.getDay()
 
     for (const en of enrollments) {

@@ -22795,9 +22795,11 @@ ipcMain.handle("payments:get", async (_event, { month, year }) => {
 		].indexOf(month);
 		const payYear = Number(year);
 		const daysInMonth = monthIndex !== -1 ? new Date(payYear, monthIndex + 1, 0).getDate() : 30;
+		const today = /* @__PURE__ */ new Date();
+		const startDay = monthIndex === today.getMonth() && payYear === today.getFullYear() ? today.getDate() : 1;
 		const countLessonDayOccurrences = (lessonDays) => {
 			let count = 0;
-			for (let d = 1; d <= daysInMonth; d++) if (lessonDays.includes(new Date(payYear, monthIndex, d).getDay())) count++;
+			for (let d = startDay; d <= daysInMonth; d++) if (lessonDays.includes(new Date(payYear, monthIndex, d).getDay())) count++;
 			return count;
 		};
 		const computeExpectedQuantity = (p) => {
@@ -23907,7 +23909,7 @@ var ARABIC_MONTHS = {
 	"ديسمبر": 12
 };
 function monthBounds$1(month, year) {
-	const n = ARABIC_MONTHS[month] ?? Number(month) ?? 1;
+	const n = ARABIC_MONTHS[month] ?? (Number(month) || 1);
 	const mm = String(n).padStart(2, "0");
 	return {
 		start: `${year}-${mm}-01`,
@@ -24207,6 +24209,8 @@ ipcMain.handle("salary:getExpected", async (_event, { employee_id, month, year }
 			const y = startDate.getFullYear();
 			const m = startDate.getMonth();
 			const daysInMonth = new Date(y, m + 1, 0).getDate();
+			const today = /* @__PURE__ */ new Date();
+			const startDay = m === today.getMonth() && y === today.getFullYear() ? today.getDate() : 1;
 			let scheduleTotal = 0;
 			for (const row of assignedChildren) {
 				let days = [];
@@ -24219,7 +24223,7 @@ ipcMain.handle("salary:getExpected", async (_event, { employee_id, month, year }
 				const rate = row.teacher_session_rate ?? (salaryTypeMode === "per_child_session" ? salaryTypeSessionRate : salaryTypeMode === "per_session_pct" ? row.price != null && st?.session_pct != null ? Number((row.price * st.session_pct).toFixed(2)) : null : emp?.teacher_session_rate ?? salaryTypeSessionRate);
 				if (!rate) continue;
 				let sessionCount = 0;
-				for (let d = 1; d <= daysInMonth; d++) if (days.includes(new Date(y, m, d).getDay())) sessionCount++;
+				for (let d = startDay; d <= daysInMonth; d++) if (days.includes(new Date(y, m, d).getDay())) sessionCount++;
 				scheduleTotal += sessionCount * rate;
 			}
 			expectedTotal = scheduleTotal;
@@ -31524,7 +31528,7 @@ function buildMonthEntries(db, year, month) {
   `).all();
 	for (let d = 1; d <= daysInMonth; d++) {
 		const date = new Date(year, month - 1, d);
-		const iso = date.toISOString().slice(0, 10);
+		const iso = `${year}-${String(month).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
 		const weekday = date.getDay();
 		for (const en of enrollments) {
 			if (en.lesson_days != null && en.lesson_days !== "" && en.lesson_days !== "[]") {
