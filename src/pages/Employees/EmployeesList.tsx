@@ -220,8 +220,8 @@ export default function EmployeesList() {
       setFormError(isAr ? 'يجب اختيار الوظيفة.' : 'Role is required.')
       return
     }
-    if (baseSalary === '' || isNaN(Number(baseSalary))) {
-      setFormError(isAr ? 'الراتب الأساسي مطلوب ويجب أن يكون رقماً.' : 'Base salary is required and must be a number.')
+    if (baseSalary !== '' && isNaN(Number(baseSalary))) {
+      setFormError(isAr ? 'الراتب الأساسي يجب أن يكون رقماً.' : 'Base salary must be a number.')
       return
     }
     setIsSubmitLoading(true)
@@ -229,7 +229,7 @@ export default function EmployeesList() {
       name: name.trim(),
       role_id: Number(roleId),
       salary_type_override_id: salaryTypeOverrideId !== '' ? Number(salaryTypeOverrideId) : null,
-      base_salary: Number(baseSalary),
+      base_salary: Number(baseSalary) || 0,
       housing: Number(housing) || 0,
       transport: Number(transport) || 0,
       teacher_session_rate: teacherSessionRate !== '' ? Number(teacherSessionRate) : null,
@@ -466,7 +466,7 @@ export default function EmployeesList() {
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <Input label={isAr ? 'الراتب الأساسي' : 'Base Salary'} type="number" value={baseSalary} onChange={(e) => setBaseSalary(e.target.value)} disabled={isSubmitLoading} min={0} required />
+            <Input label={isAr ? 'الراتب الأساسي' : 'Base Salary'} type="number" value={baseSalary} onChange={(e) => setBaseSalary(e.target.value)} disabled={isSubmitLoading} min={0} />
             <Input label={isAr ? 'بدل سكن' : 'Housing'} type="number" value={housing} onChange={(e) => setHousing(e.target.value)} disabled={isSubmitLoading} min={0} />
             <Input label={isAr ? 'بدل مواصلات' : 'Transport'} type="number" value={transport} onChange={(e) => setTransport(e.target.value)} disabled={isSubmitLoading} min={0} />
           </div>

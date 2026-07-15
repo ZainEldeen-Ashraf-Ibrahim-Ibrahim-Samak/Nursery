@@ -136,9 +136,9 @@ ipcMain.handle('employees:add', async (_event, employeeInput) => {
   try {
     requireAdmin()
     const db = getDb()
-    const { name, role_id, base_salary, housing = 0, transport = 0, salary_type_override_id = null, teacher_session_rate = null } = employeeInput
+    const { name, role_id, base_salary = 0, housing = 0, transport = 0, salary_type_override_id = null, teacher_session_rate = null } = employeeInput
 
-    if (!name || base_salary === undefined) {
+    if (!name) {
       throw new Error('جميع الحقول الإلزامية مطلوبة / Missing required fields')
     }
 
