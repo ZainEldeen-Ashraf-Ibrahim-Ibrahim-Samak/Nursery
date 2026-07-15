@@ -24023,8 +24023,8 @@ ipcMain.handle("employees:add", async (_event, employeeInput) => {
 	try {
 		requireAdmin();
 		const db = getDb();
-		const { name, role_id, base_salary, housing = 0, transport = 0, salary_type_override_id = null, teacher_session_rate = null } = employeeInput;
-		if (!name || base_salary === void 0) throw new Error("جميع الحقول الإلزامية مطلوبة / Missing required fields");
+		const { name, role_id, base_salary = 0, housing = 0, transport = 0, salary_type_override_id = null, teacher_session_rate = null } = employeeInput;
+		if (!name) throw new Error("جميع الحقول الإلزامية مطلوبة / Missing required fields");
 		let roleText = employeeInput.role ?? "";
 		if (role_id) {
 			const roleRow = db.prepare("SELECT name FROM employee_roles WHERE id = ?").get(role_id);
