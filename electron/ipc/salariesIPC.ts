@@ -19,7 +19,7 @@ function monthBounds(month: string, year: number | string) {
  * Sums this employee's attendance-based teacher_payments for a month (feature 006), excluding
  * Void rows. This is the authoritative per-session earnings source for any employee who has
  * their own `teacher_session_rate` configured — it reflects their REAL rate and REAL attendance,
- * not the older session_teachers/salary_types estimate (which used a shared, role-level rate and
+* not the older session_teachers/salary_types estimate (which used a shared, role-level rate and
  * a cruder "was any child payable in this session" count).
  */
 function getTeacherPaymentsForMonth(db: any, employeeId: number, start: string, end: string) {

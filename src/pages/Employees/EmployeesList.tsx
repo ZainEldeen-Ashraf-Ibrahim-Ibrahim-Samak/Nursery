@@ -220,10 +220,6 @@ export default function EmployeesList() {
       setFormError(isAr ? 'يجب اختيار الوظيفة.' : 'Role is required.')
       return
     }
-    if (baseSalary !== '' && isNaN(Number(baseSalary))) {
-      setFormError(isAr ? 'الراتب الأساسي يجب أن يكون رقماً.' : 'Base salary must be a number.')
-      return
-    }
     setIsSubmitLoading(true)
     const payload: any = {
       name: name.trim(),
@@ -465,8 +461,9 @@ export default function EmployeesList() {
             />
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <Input label={isAr ? 'الراتب الأساسي' : 'Base Salary'} type="number" value={baseSalary} onChange={(e) => setBaseSalary(e.target.value)} disabled={isSubmitLoading} min={0} />
+          {/* Base salary input hidden — the fixed monthly amount is managed by salary types.
+              The existing value is preserved unchanged when editing (state still submitted). */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Input label={isAr ? 'بدل سكن' : 'Housing'} type="number" value={housing} onChange={(e) => setHousing(e.target.value)} disabled={isSubmitLoading} min={0} />
             <Input label={isAr ? 'بدل مواصلات' : 'Transport'} type="number" value={transport} onChange={(e) => setTransport(e.target.value)} disabled={isSubmitLoading} min={0} />
           </div>

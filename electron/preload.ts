@@ -22,6 +22,7 @@ const api = {
     add: (args: any) => ipcRenderer.invoke('children:add', args),
     update: (args: any) => ipcRenderer.invoke('children:update', args),
     deactivate: (args: any) => ipcRenderer.invoke('children:deactivate', args),
+    delete: (args: { id: number }) => ipcRenderer.invoke('children:delete', args),
     statement: (args: { childId: number }) => ipcRenderer.invoke('children:statement', args),
   },
   childServices: {

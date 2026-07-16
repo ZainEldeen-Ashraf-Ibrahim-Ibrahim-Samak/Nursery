@@ -19,6 +19,7 @@ interface ChildrenState {
   addChild: (childInput: Omit<Child, 'id' | 'created_at' | 'updated_at' | 'synced' | 'is_active'>) => Promise<Child | null>
   updateChild: (id: number, patch: Partial<Omit<Child, 'id' | 'created_at' | 'updated_at' | 'synced'>>) => Promise<Child | null>
   deactivateChild: (id: number) => Promise<boolean>
+  deleteChild: (id: number) => Promise<boolean>
   clearError: () => void
 }
 
@@ -116,6 +117,22 @@ export const useChildrenStore = create<ChildrenState>((set, get) => ({
       return true
     } catch (err: any) {
       const errorMsg = friendlyError(err, 'Failed to deactivate child')
+      set({ error: errorMsg, isLoading: false })
+      return false
+    }
+  },
+
+  deleteChild: async (id) => {
+    set({ isLoading: true, error: null })
+    try {
+      await window.api.children.delete({ id })
+      set((state) => ({
+        children: state.children.filter((child) => child.id !== id),
+        isLoading: false,
+      }))
+      return true
+    } catch (err: any) {
+      const errorMsg = friendlyError(err, 'Failed to delete child')
       set({ error: errorMsg, isLoading: false })
       return false
     }

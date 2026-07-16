@@ -33,6 +33,7 @@ export default function ChildrenList() {
     setFilters,
     fetchChildren,
     deactivateChild,
+    deleteChild,
     clearError,
   } = useChildrenStore()
 
@@ -45,6 +46,10 @@ export default function ChildrenList() {
   // Deactivate modal state
   const [deactivateTarget, setDeactivateTarget] = useState<Child | null>(null)
   const [isDeactivating, setIsDeactivating] = useState(false)
+
+  // Hard-delete modal state (only offered for inactive children)
+  const [deleteTarget, setDeleteTarget] = useState<Child | null>(null)
+  const [isDeleting, setIsDeleting] = useState(false)
 
   // Fetch children when filters change
   useEffect(() => {
@@ -100,6 +105,17 @@ export default function ChildrenList() {
     setIsDeactivating(false)
     if (success) {
       setDeactivateTarget(null)
+    }
+  }
+
+  // Handle permanent child deletion (inactive children only)
+  const handleConfirmDelete = async () => {
+    if (!deleteTarget) return
+    setIsDeleting(true)
+    const success = await deleteChild(deleteTarget.id)
+    setIsDeleting(false)
+    if (success) {
+      setDeleteTarget(null)
     }
   }
 
@@ -308,14 +324,25 @@ export default function ChildrenList() {
               >
                 {t('edit')}
               </Button>
-              <Button
-                variant="danger"
-                size="sm"
-                onClick={() => setDeactivateTarget(child)}
-                title={t('delete')}
-              >
-                {t('delete')}
-              </Button>
+              {child.is_active === 1 ? (
+                <Button
+                  variant="danger"
+                  size="sm"
+                  onClick={() => setDeactivateTarget(child)}
+                  title={t('delete')}
+                >
+                  {t('delete')}
+                </Button>
+              ) : (
+                <Button
+                  variant="danger"
+                  size="sm"
+                  onClick={() => setDeleteTarget(child)}
+                  title={i18n.language === 'ar' ? 'حذف نهائي' : 'Delete permanently'}
+                >
+                  {i18n.language === 'ar' ? 'حذف نهائي' : 'Delete permanently'}
+                </Button>
+              )}
             </>
           )}
         </div>
@@ -469,6 +496,38 @@ export default function ChildrenList() {
               isLoading={isDeactivating}
             >
               {t('delete')}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Permanent Delete Confirmation Modal (inactive children only) */}
+      <Modal
+        isOpen={deleteTarget !== null}
+        onClose={() => setDeleteTarget(null)}
+        title={i18n.language === 'ar' ? 'حذف نهائي' : 'Delete Permanently'}
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-slate-600">
+            {i18n.language === 'ar'
+              ? `سيتم حذف الطفل "${deleteTarget?.name}" نهائياً مع جميع سجلاته (الخدمات، المدفوعات، الحضور). لا يمكن التراجع عن هذا الإجراء.`
+              : `Child "${deleteTarget?.name}" will be permanently deleted along with all their records (services, payments, attendance). This action cannot be undone.`}
+          </p>
+
+          <div className="flex justify-end gap-3 pt-2">
+            <Button
+              variant="outline"
+              onClick={() => setDeleteTarget(null)}
+              disabled={isDeleting}
+            >
+              {t('cancel')}
+            </Button>
+            <Button
+              variant="danger"
+              onClick={handleConfirmDelete}
+              isLoading={isDeleting}
+            >
+              {i18n.language === 'ar' ? 'حذف نهائي' : 'Delete permanently'}
             </Button>
           </div>
         </div>

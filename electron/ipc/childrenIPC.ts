@@ -350,6 +350,32 @@ ipcMain.handle('children:deactivate', async (_event, { id }) => {
 })
 
 
+// Hard delete — only allowed for children already deactivated (is_active = 0).
+// All dependent tables reference children(id) with ON DELETE CASCADE, so their
+// rows (services, payments, attendance, ...) are removed with the child.
+ipcMain.handle('children:delete', async (_event, { id }) => {
+  try {
+    requireAdmin()
+    const db = getDb()
+
+    const child = db.prepare('SELECT id, is_active FROM children WHERE id = ?').get(id) as any
+    if (!child) {
+      throw new Error('الطفل غير موجود / Child not found')
+    }
+    if (child.is_active !== 0) {
+      throw new Error('لا يمكن حذف طفل نشط — يجب إلغاء تفعيله أولاً / Cannot delete an active child — deactivate first')
+    }
+
+    db.prepare('DELETE FROM children WHERE id = ?').run(id)
+
+    return { ok: true }
+  } catch (error: any) {
+    console.error('Failed to delete child:', error)
+    throw new Error(error.message || 'Failed to delete child')
+  }
+})
+
+
 ipcMain.handle('children:statement', async (_event, { childId }) => {
   try {
     checkAuth()
