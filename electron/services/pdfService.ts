@@ -192,13 +192,15 @@ export function buildPdfFile(
         const title = isAr ? `مطالبات واشتراكات شهر ${month} لسنة ${year}` : `Billing Sheet: ${month} ${year}`
         docDefinition.content.push(...getPdfHeader(brand, lang, title))
 
-        // Get monthly payments
+        // Get monthly payments — filtered to the selected payment IDs when provided (empty = all)
+        const hasSelection = Array.isArray(params.paymentIds) && params.paymentIds.length > 0
         const payments = db.prepare(`
           SELECT c.name as child_name, c.guardian, c.guardian_phone, p.service, p.unit, p.quantity, p.price, p.total, p.paid, p.balance, p.status, p.notes
           FROM payments p
           JOIN children c ON p.child_id = c.id
           WHERE p.month = ? AND p.year = ?
-        `).all(month, year) as any[]
+          ${hasSelection ? `AND p.id IN (${params.paymentIds.map(() => '?').join(',')})` : ''}
+        `).all(month, year, ...(hasSelection ? params.paymentIds : [])) as any[]
 
         // Table headers
         const headers = isAr

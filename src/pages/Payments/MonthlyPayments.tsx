@@ -218,10 +218,11 @@ export default function MonthlyPayments() {
     return <span className="inline-flex items-center rounded-full bg-red-50 px-2 py-1 text-xs font-medium text-red-700 ring-1 ring-inset ring-red-600/10">{t('unpaid', 'Unpaid')}</span>
   }
 
-  // Export handlers
-  const handleExport = async (format: 'xlsx' | 'pdf') => {
+  // Export handlers — export the current selection; if nothing is selected, export all payments
+  // for the period (select-to-export with "no selection = export all" fallback).
+  const handleExport = async (format: 'xlsx' | 'pdf' | 'csv') => {
     try {
-      const result = await exportMonth(currentMonth, currentYear, format)
+      const result = await exportMonth(currentMonth, currentYear, format, selectedIds.length > 0 ? selectedIds : undefined)
       if (result && result.filePath) {
         console.log(`Exported successfully to: ${result.filePath}`)
       }
@@ -231,7 +232,13 @@ export default function MonthlyPayments() {
   }
 
   const handlePrint = async () => {
-    const { html } = await window.api.print.preview({ reportType: 'month', month: currentMonth, year: currentYear, lang: i18n.language })
+    const { html } = await window.api.print.preview({
+      reportType: 'month',
+      month: currentMonth,
+      year: currentYear,
+      lang: i18n.language,
+      paymentIds: selectedIds.length > 0 ? selectedIds : undefined,
+    })
     const win = window.open('', '_blank')
     if (!win) return
     win.document.write(html)
@@ -260,6 +267,7 @@ export default function MonthlyPayments() {
               onPrint={handlePrint}
               onExportPdf={() => handleExport('pdf')}
               onExportExcel={() => handleExport('xlsx')}
+              onExportCsv={() => handleExport('csv')}
             />
           )}
           <Button variant="primary" onClick={handleGenerate} isLoading={isGenerating}>
@@ -429,8 +437,8 @@ export default function MonthlyPayments() {
               <div className="bg-primary/5 px-6 py-3 border-b border-slate-200 flex items-center justify-between transition-all">
                 <span className="text-sm font-semibold text-primary">
                   {isAr
-                    ? `تم تحديد ${selectedIds.length} من أصل ${payments.length} مطالبات`
-                    : `Selected ${selectedIds.length} of ${payments.length} records`}
+                    ? `تم تحديد ${selectedIds.length} من أصل ${payments.length} مطالبات — سيتم تصدير/طباعة المحدد فقط`
+                    : `Selected ${selectedIds.length} of ${payments.length} records — export/print will use only the selected rows`}
                 </span>
                 <div className="flex items-center gap-2">
                   <select
@@ -494,8 +502,44 @@ export default function MonthlyPayments() {
                       }
                     }
 
+                    const totalExpectedSessions = childGroup.totalExpectedSessions
+                    const totalExpectedPayment = childGroup.totalExpectedPayment
+                    // Expected total minus what's been collected this month minus any credit
+                    // carried in from prior months — how much more is needed to cover the month.
+                    const remainingToPay = childGroup.remainingAfterWallet
+
                     return (
                       <React.Fragment key={childGroup.child_id}>
+                        <tr className="bg-primary/5">
+                          <td colSpan={12} className="px-4 py-2">
+                            <div className="flex flex-wrap items-center gap-4 text-xs text-slate-600">
+                              <span>
+                                <span className="font-semibold text-slate-500">{isAr ? 'إجمالي الجلسات المتوقعة: ' : 'Total Expected Sessions: '}</span>
+                                <span className="font-bold text-slate-800">
+                                  {childGroup.totalSessions} {isAr ? 'من' : 'of'} {totalExpectedSessions}
+                                </span>
+                              </span>
+                              <span>
+                                <span className="font-semibold text-slate-500">{isAr ? 'إجمالي المطلوب المتوقع: ' : 'Total Expected Payment: '}</span>
+                                <span className="font-bold text-slate-800">{formatCurrency(totalExpectedPayment)}</span>
+                              </span>
+                              <span>
+                                <span className="font-semibold text-slate-500">{isAr ? 'رصيد المحفظة: ' : 'Wallet Balance: '}</span>
+                                {childGroup.walletCredit > 0 ? (
+                                  <span className="font-bold text-emerald-700">{formatCurrency(childGroup.walletCredit)}</span>
+                                ) : (
+                                  <span className="font-bold text-slate-400">{isAr ? 'لا يوجد رصيد في المحفظة' : 'Nothing in wallet'}</span>
+                                )}
+                              </span>
+                              <span>
+                                <span className="font-semibold text-slate-500">{isAr ? 'المتبقي للدفع: ' : 'Left To Pay: '}</span>
+                                <span className={`font-bold ${remainingToPay > 0 ? 'text-red-600' : 'text-emerald-700'}`}>
+                                  {formatCurrency(remainingToPay)}
+                                </span>
+                              </span>
+                            </div>
+                          </td>
+                        </tr>
                         <tr className="bg-slate-50/50 border-t-2 border-slate-200">
                           <td className="px-4 py-3 text-center">
                             <input

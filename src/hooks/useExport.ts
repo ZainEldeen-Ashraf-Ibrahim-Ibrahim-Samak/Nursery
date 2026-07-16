@@ -51,7 +51,8 @@ export function useExport() {
     isExporting,
     error,
     exportFull: (year: number, format: 'xlsx' | 'pdf') => handleExport('full', { year, format }),
-    exportMonth: (month: string, year: number, format: 'xlsx' | 'pdf') => handleExport('month', { month, year, format }),
+    exportMonth: (month: string, year: number, format: 'xlsx' | 'pdf' | 'csv', paymentIds?: number[]) =>
+      handleExport('month', { month, year, format, paymentIds }),
     exportChild: (childId: number, format: 'xlsx' | 'pdf' | 'csv') => handleExport('child', { childId, format }),
     exportSalaries: (month: string, year: number, format: 'xlsx' | 'pdf') => handleExport('salaries', { month, year, format }),
     exportExpenses: (year: number, format: 'xlsx' | 'pdf' | 'csv') => handleExport('expenses', { year, format }),

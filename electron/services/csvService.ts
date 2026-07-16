@@ -44,13 +44,52 @@ function buildHeaderLines(title: string, filterSummary: string): string[] {
 }
 
 export async function buildCsvFile(
-  type: 'payrollReport' | 'expenses' | 'child' | 'childReport',
+  type: 'payrollReport' | 'expenses' | 'child' | 'childReport' | 'month',
   params: any,
   savePath: string
 ): Promise<void> {
   const { lang = 'ar' } = params
   const isAr = lang === 'ar'
   let lines: string[] = []
+
+  // Monthly billing sheet — same query (and same optional selection filter) as the Excel/PDF/Print
+  // month export, so every format shows identical rows (FR-003).
+  if (type === 'month') {
+    const db = getDb()
+    const month = params.month
+    const year = Number(params.year)
+    const hasSelection = Array.isArray(params.paymentIds) && params.paymentIds.length > 0
+
+    const title = isAr ? `مطالبات شهر ${month} لسنة ${year}` : `Billing Sheet: ${month} ${year}`
+    const filterSummary = isAr
+      ? `الفترة: ${month} ${year}${hasSelection ? ` — ${params.paymentIds.length} سجل محدد` : ''}`
+      : `Period: ${month} ${year}${hasSelection ? ` — ${params.paymentIds.length} selected record(s)` : ''}`
+    lines = buildHeaderLines(title, filterSummary)
+    lines.push(toCsvLine(
+      isAr
+        ? ['اسم الطفل', 'ولي الأمر', 'الهاتف', 'الخدمة', 'الوحدة', 'الكمية', 'السعر', 'الإجمالي', 'المدفوع', 'المتأخرات', 'الحالة', 'ملاحظات']
+        : ['Child Name', 'Guardian', 'Phone', 'Service', 'Unit', 'Qty', 'Price', 'Total', 'Paid', 'Arrears', 'Status', 'Notes']
+    ))
+
+    const payments = db.prepare(`
+      SELECT c.name as child_name, c.guardian, c.guardian_phone, p.service, p.unit, p.quantity, p.price, p.total, p.paid, p.balance, p.status, p.notes
+      FROM payments p
+      JOIN children c ON p.child_id = c.id
+      WHERE p.month = ? AND p.year = ?
+      ${hasSelection ? `AND p.id IN (${params.paymentIds.map(() => '?').join(',')})` : ''}
+    `).all(month, year, ...(hasSelection ? params.paymentIds : [])) as any[]
+
+    let totalInvoiced = 0, totalCollected = 0, arrears = 0
+    for (const p of payments) {
+      totalInvoiced += p.total; totalCollected += p.paid; arrears += p.balance
+      lines.push(toCsvLine([p.child_name, p.guardian, p.guardian_phone, p.service, p.unit, p.quantity, p.price, p.total, p.paid, p.balance, p.status, p.notes || '']))
+    }
+    if (payments.length === 0) {
+      lines.push(toCsvLine([isAr ? 'لا توجد مطالبات مسجلة لهذا الشهر.' : 'No billing records for this month.']))
+    } else {
+      lines.push(toCsvLine([isAr ? 'الإجمالي' : 'Total', '', '', '', '', '', '', totalInvoiced, totalCollected, arrears, '', '']))
+    }
+  }
 
   // Full Child Report (feature 007, US3/FR-007) — personal info, services & teachers, attendance
   // history + percentage, payment history, and notes, each as its own labeled block.

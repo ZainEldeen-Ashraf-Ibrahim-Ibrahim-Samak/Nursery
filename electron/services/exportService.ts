@@ -202,10 +202,11 @@ function generateMonthSheet(
   brand: ExportHeaderData,
   month: string,
   year: number,
-  lang: string
+  lang: string,
+  paymentIds?: number[]
 ) {
   const db = getDb()
-  const title = lang === 'ar' 
+  const title = lang === 'ar'
     ? `مطالبات شهر ${month} لسنة ${year}`
     : `Billing Sheet: ${month} ${year}`
 
@@ -227,13 +228,15 @@ function generateMonthSheet(
     cell.alignment = { vertical: 'middle', horizontal: 'center' }
   })
 
-  // Fetch payments
+  // Fetch payments — filtered to the selected payment IDs when provided (empty/omitted = all)
+  const hasSelection = Array.isArray(paymentIds) && paymentIds.length > 0
   const payments = db.prepare(`
     SELECT p.id, c.name as child_name, c.guardian, c.guardian_phone, p.service, p.unit, p.quantity, p.price, p.total, p.paid, p.balance, p.status, p.notes
     FROM payments p
     JOIN children c ON p.child_id = c.id
     WHERE p.month = ? AND p.year = ?
-  `).all(month, year) as any[]
+    ${hasSelection ? `AND p.id IN (${paymentIds!.map(() => '?').join(',')})` : ''}
+  `).all(month, year, ...(hasSelection ? paymentIds! : [])) as any[]
 
   // Add payments data
   let currentRow = startRow + 1
@@ -962,7 +965,7 @@ export async function buildExcelFile(
   if (type === 'month') {
     const sheetName = lang === 'ar' ? `${month} ${year}` : `${month}_${year}`
     const ws = workbook.addWorksheet(sheetName)
-    generateMonthSheet(ws, workbook, brand, month, year, lang)
+    generateMonthSheet(ws, workbook, brand, month, year, lang, params.paymentIds)
   }
 
   else if (type === 'payrollReport') {

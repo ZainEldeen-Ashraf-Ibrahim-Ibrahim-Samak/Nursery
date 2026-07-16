@@ -308,16 +308,14 @@ export default function ChildrenList() {
               >
                 {t('edit')}
               </Button>
-              {child.is_active === 1 && (
-                <Button
-                  variant="danger"
-                  size="sm"
-                  onClick={() => setDeactivateTarget(child)}
-                  title={t('delete')}
-                >
-                  {t('delete')}
-                </Button>
-              )}
+              <Button
+                variant="danger"
+                size="sm"
+                onClick={() => setDeactivateTarget(child)}
+                title={t('delete')}
+              >
+                {t('delete')}
+              </Button>
             </>
           )}
         </div>

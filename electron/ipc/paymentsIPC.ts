@@ -126,25 +126,60 @@ ipcMain.handle('payments:get', async (_event, { month, year }) => {
           services: [],
           totalInvoiced: 0,
           totalCollected: 0,
+          totalExpectedSessions: 0,
+          totalExpectedPayment: 0,
           balance: 0,
           status: 'unpaid'
         })
       }
-      
+
       const rollUp = childMap.get(p.child_id)
       rollUp.services.push(p)
       rollUp.totalInvoiced += p.total
       rollUp.totalCollected += p.paid
       rollUp.balance += p.balance
+      rollUp.totalExpectedSessions += (p as any).expected_quantity ?? p.quantity
+      rollUp.totalExpectedPayment += (p as any).expected_total ?? p.total
     }
-    
+
+    // Wallet credit — the child's LIFETIME balance across every month (including this one), same
+    // sign convention as the per-child "balance" column: negative = they've paid more than owed
+    // (credit sitting in their wallet), positive = arrears still owed. Shown as "Wallet Balance" so
+    // it always agrees with the "(Credit)" badge on the child's row — a child who overpaid THIS
+    // month must not show "nothing in wallet".
+    const lifetimeBalanceStmt = db.prepare(`
+      SELECT COALESCE(SUM(balance), 0) as lifetime_balance
+      FROM payments
+      WHERE child_id = ?
+    `)
+    // Credit carried in from OTHER months only — used (instead of the lifetime figure above) to
+    // work out "Left To Pay" against the month's full EXPECTED total, since this month's own
+    // collected amount is already subtracted directly and must not be subtracted twice.
+    const priorCreditStmt = db.prepare(`
+      SELECT COALESCE(SUM(balance), 0) as prior_balance
+      FROM payments
+      WHERE child_id = ? AND NOT (month = ? AND year = ?)
+    `)
+
     for (const rollUp of childMap.values()) {
       rollUp.status = calculateChildStatusRollup(rollUp.services)
       rollUp.totalInvoiced = Number(rollUp.totalInvoiced.toFixed(2))
       rollUp.totalCollected = Number(rollUp.totalCollected.toFixed(2))
+      rollUp.totalExpectedPayment = Number(rollUp.totalExpectedPayment.toFixed(2))
       rollUp.balance = Number(rollUp.balance.toFixed(2))
+
+      const totalSessions = rollUp.services.reduce((sum: number, s: any) => sum + (s.quantity || 0), 0)
+      const { lifetime_balance } = lifetimeBalanceStmt.get(rollUp.child_id) as { lifetime_balance: number }
+      const { prior_balance } = priorCreditStmt.get(rollUp.child_id, month, year) as { prior_balance: number }
+      const priorCredit = Math.max(0, -prior_balance)
+
+      rollUp.totalSessions = totalSessions
+      rollUp.walletCredit = Number(Math.max(0, -lifetime_balance).toFixed(2))
+      // Left to pay = what's still needed to fully cover the month's EXPECTED total, after
+      // subtracting what's already been collected this month and any credit carried from before.
+      rollUp.remainingAfterWallet = Number(Math.max(0, rollUp.totalExpectedPayment - rollUp.totalCollected - priorCredit).toFixed(2))
     }
-    
+
     return {
       payments,
       byChild: Array.from(childMap.values()).sort((a, b) => a.child_name.localeCompare(b.child_name)),

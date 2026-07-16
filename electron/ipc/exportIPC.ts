@@ -42,7 +42,7 @@ async function executeExport(
   if (params.format === 'xlsx') {
     await buildExcelFile(type, params, savePath)
   } else if (params.format === 'csv') {
-    await buildCsvFile(type as 'payrollReport' | 'expenses' | 'childReport', params, savePath)
+    await buildCsvFile(type as 'payrollReport' | 'expenses' | 'childReport' | 'month', params, savePath)
   } else {
     await buildPdfFile(type, params, savePath)
   }
@@ -65,13 +65,15 @@ ipcMain.handle('export:full', async (_event, { year, format, lang }) => {
 })
 
 // 2. Month payments sheet export (All authenticated users)
-ipcMain.handle('export:month', async (_event, { month, year, format, lang }) => {
+// paymentIds — optional list of selected payment row IDs; when omitted/empty, all rows for the
+// period are exported (select-to-export with "no selection = export all" fallback).
+ipcMain.handle('export:month', async (_event, { month, year, format, lang, paymentIds }) => {
   try {
     checkAuth()
     const filename = lang === 'ar'
       ? `مطالبات_${month}_${year}.${format}`
       : `billing_${month}_${year}.${format}`
-    return await executeExport('month', { month, year, format, lang }, filename)
+    return await executeExport('month', { month, year, format, lang, paymentIds }, filename)
   } catch (error: any) {
     console.error('Failed to run month payments export:', error)
     throw new Error(error.message || 'Failed to export monthly payments')

@@ -22832,6 +22832,8 @@ ipcMain.handle("payments:get", async (_event, { month, year }) => {
 				services: [],
 				totalInvoiced: 0,
 				totalCollected: 0,
+				totalExpectedSessions: 0,
+				totalExpectedPayment: 0,
 				balance: 0,
 				status: "unpaid"
 			});
@@ -22840,12 +22842,32 @@ ipcMain.handle("payments:get", async (_event, { month, year }) => {
 			rollUp.totalInvoiced += p.total;
 			rollUp.totalCollected += p.paid;
 			rollUp.balance += p.balance;
+			rollUp.totalExpectedSessions += p.expected_quantity ?? p.quantity;
+			rollUp.totalExpectedPayment += p.expected_total ?? p.total;
 		}
+		const lifetimeBalanceStmt = db.prepare(`
+      SELECT COALESCE(SUM(balance), 0) as lifetime_balance
+      FROM payments
+      WHERE child_id = ?
+    `);
+		const priorCreditStmt = db.prepare(`
+      SELECT COALESCE(SUM(balance), 0) as prior_balance
+      FROM payments
+      WHERE child_id = ? AND NOT (month = ? AND year = ?)
+    `);
 		for (const rollUp of childMap.values()) {
 			rollUp.status = calculateChildStatusRollup(rollUp.services);
 			rollUp.totalInvoiced = Number(rollUp.totalInvoiced.toFixed(2));
 			rollUp.totalCollected = Number(rollUp.totalCollected.toFixed(2));
+			rollUp.totalExpectedPayment = Number(rollUp.totalExpectedPayment.toFixed(2));
 			rollUp.balance = Number(rollUp.balance.toFixed(2));
+			const totalSessions = rollUp.services.reduce((sum, s) => sum + (s.quantity || 0), 0);
+			const { lifetime_balance } = lifetimeBalanceStmt.get(rollUp.child_id);
+			const { prior_balance } = priorCreditStmt.get(rollUp.child_id, month, year);
+			const priorCredit = Math.max(0, -prior_balance);
+			rollUp.totalSessions = totalSessions;
+			rollUp.walletCredit = Number(Math.max(0, -lifetime_balance).toFixed(2));
+			rollUp.remainingAfterWallet = Number(Math.max(0, rollUp.totalExpectedPayment - rollUp.totalCollected - priorCredit).toFixed(2));
 		}
 		return {
 			payments,
@@ -24941,7 +24963,7 @@ function formatGridData(worksheet, startRow, currencyCols = [], percentCols = []
 		}
 	});
 }
-function generateMonthSheet(worksheet, workbook, brand, month, year, lang) {
+function generateMonthSheet(worksheet, workbook, brand, month, year, lang, paymentIds) {
 	const db = getDb();
 	const startRow = writeBrandingHeader(worksheet, workbook, brand, lang, lang === "ar" ? `مطالبات شهر ${month} لسنة ${year}` : `Billing Sheet: ${month} ${year}`);
 	const headers = lang === "ar" ? [
@@ -24988,12 +25010,14 @@ function generateMonthSheet(worksheet, workbook, brand, month, year, lang) {
 			horizontal: "center"
 		};
 	});
+	const hasSelection = Array.isArray(paymentIds) && paymentIds.length > 0;
 	const payments = db.prepare(`
     SELECT p.id, c.name as child_name, c.guardian, c.guardian_phone, p.service, p.unit, p.quantity, p.price, p.total, p.paid, p.balance, p.status, p.notes
     FROM payments p
     JOIN children c ON p.child_id = c.id
     WHERE p.month = ? AND p.year = ?
-  `).all(month, year);
+    ${hasSelection ? `AND p.id IN (${paymentIds.map(() => "?").join(",")})` : ""}
+  `).all(month, year, ...hasSelection ? paymentIds : []);
 	let currentRow = startRow + 1;
 	for (const p of payments) {
 		const rowValues = [
@@ -25843,7 +25867,7 @@ async function buildExcelFile(type, params, savePath) {
 	const brand = getExportHeader();
 	if (type === "month") {
 		const sheetName = lang === "ar" ? `${month} ${year}` : `${month}_${year}`;
-		generateMonthSheet(workbook.addWorksheet(sheetName), workbook, brand, month, year, lang);
+		generateMonthSheet(workbook.addWorksheet(sheetName), workbook, brand, month, year, lang, params.paymentIds);
 	} else if (type === "payrollReport") {
 		const sheetName = lang === "ar" ? "تقرير الرواتب" : "Payroll Report";
 		generatePayrollReportSheet(workbook.addWorksheet(sheetName), workbook, brand, {
@@ -27008,12 +27032,14 @@ function buildPdfFile(type, params, savePath) {
 			if (type === "month") {
 				const title = isAr ? `مطالبات واشتراكات شهر ${month} لسنة ${year}` : `Billing Sheet: ${month} ${year}`;
 				docDefinition.content.push(...getPdfHeader(brand, lang, title));
+				const hasSelection = Array.isArray(params.paymentIds) && params.paymentIds.length > 0;
 				const payments = db.prepare(`
           SELECT c.name as child_name, c.guardian, c.guardian_phone, p.service, p.unit, p.quantity, p.price, p.total, p.paid, p.balance, p.status, p.notes
           FROM payments p
           JOIN children c ON p.child_id = c.id
           WHERE p.month = ? AND p.year = ?
-        `).all(month, year);
+          ${hasSelection ? `AND p.id IN (${params.paymentIds.map(() => "?").join(",")})` : ""}
+        `).all(month, year, ...hasSelection ? params.paymentIds : []);
 				const body = [(isAr ? [
 					"اسم الطفل",
 					"ولي الأمر",
@@ -28441,6 +28467,82 @@ async function buildCsvFile(type, params, savePath) {
 	const { lang = "ar" } = params;
 	const isAr = lang === "ar";
 	let lines = [];
+	if (type === "month") {
+		const db = getDb();
+		const month = params.month;
+		const year = Number(params.year);
+		const hasSelection = Array.isArray(params.paymentIds) && params.paymentIds.length > 0;
+		lines = buildHeaderLines(isAr ? `مطالبات شهر ${month} لسنة ${year}` : `Billing Sheet: ${month} ${year}`, isAr ? `الفترة: ${month} ${year}${hasSelection ? ` — ${params.paymentIds.length} سجل محدد` : ""}` : `Period: ${month} ${year}${hasSelection ? ` — ${params.paymentIds.length} selected record(s)` : ""}`);
+		lines.push(toCsvLine(isAr ? [
+			"اسم الطفل",
+			"ولي الأمر",
+			"الهاتف",
+			"الخدمة",
+			"الوحدة",
+			"الكمية",
+			"السعر",
+			"الإجمالي",
+			"المدفوع",
+			"المتأخرات",
+			"الحالة",
+			"ملاحظات"
+		] : [
+			"Child Name",
+			"Guardian",
+			"Phone",
+			"Service",
+			"Unit",
+			"Qty",
+			"Price",
+			"Total",
+			"Paid",
+			"Arrears",
+			"Status",
+			"Notes"
+		]));
+		const payments = db.prepare(`
+      SELECT c.name as child_name, c.guardian, c.guardian_phone, p.service, p.unit, p.quantity, p.price, p.total, p.paid, p.balance, p.status, p.notes
+      FROM payments p
+      JOIN children c ON p.child_id = c.id
+      WHERE p.month = ? AND p.year = ?
+      ${hasSelection ? `AND p.id IN (${params.paymentIds.map(() => "?").join(",")})` : ""}
+    `).all(month, year, ...hasSelection ? params.paymentIds : []);
+		let totalInvoiced = 0, totalCollected = 0, arrears = 0;
+		for (const p of payments) {
+			totalInvoiced += p.total;
+			totalCollected += p.paid;
+			arrears += p.balance;
+			lines.push(toCsvLine([
+				p.child_name,
+				p.guardian,
+				p.guardian_phone,
+				p.service,
+				p.unit,
+				p.quantity,
+				p.price,
+				p.total,
+				p.paid,
+				p.balance,
+				p.status,
+				p.notes || ""
+			]));
+		}
+		if (payments.length === 0) lines.push(toCsvLine([isAr ? "لا توجد مطالبات مسجلة لهذا الشهر." : "No billing records for this month."]));
+		else lines.push(toCsvLine([
+			isAr ? "الإجمالي" : "Total",
+			"",
+			"",
+			"",
+			"",
+			"",
+			"",
+			totalInvoiced,
+			totalCollected,
+			arrears,
+			"",
+			""
+		]));
+	}
 	if (type === "childReport") {
 		const db = getDb();
 		const childId = Number(params.childId);
@@ -28750,13 +28852,15 @@ function buildPrintPreviewHtml(reportType, params) {
 		const month = params.month;
 		const year = Number(params.year);
 		title = isAr ? `مطالبات واشتراكات شهر ${month} لسنة ${year}` : `Billing Sheet: ${month} ${year}`;
-		filterSummary = isAr ? `الفترة: ${month} ${year}` : `Period: ${month} ${year}`;
+		const hasSelection = Array.isArray(params.paymentIds) && params.paymentIds.length > 0;
+		filterSummary = isAr ? `الفترة: ${month} ${year}${hasSelection ? ` — ${params.paymentIds.length} سجل محدد` : ""}` : `Period: ${month} ${year}${hasSelection ? ` — ${params.paymentIds.length} selected record(s)` : ""}`;
 		const payments = db.prepare(`
       SELECT c.name as child_name, c.guardian, c.guardian_phone, p.service, p.unit, p.quantity, p.price, p.total, p.paid, p.balance, p.status
       FROM payments p
       JOIN children c ON p.child_id = c.id
       WHERE p.month = ? AND p.year = ?
-    `).all(month, year);
+      ${hasSelection ? `AND p.id IN (${params.paymentIds.map(() => "?").join(",")})` : ""}
+    `).all(month, year, ...hasSelection ? params.paymentIds : []);
 		const headers = isAr ? [
 			"اسم الطفل",
 			"ولي الأمر",
@@ -29041,7 +29145,7 @@ ipcMain.handle("export:full", async (_event, { year, format, lang }) => {
 		throw new Error(error.message || "Failed to complete full database export");
 	}
 });
-ipcMain.handle("export:month", async (_event, { month, year, format, lang }) => {
+ipcMain.handle("export:month", async (_event, { month, year, format, lang, paymentIds }) => {
 	try {
 		checkAuth$6();
 		const filename = lang === "ar" ? `مطالبات_${month}_${year}.${format}` : `billing_${month}_${year}.${format}`;
@@ -29049,7 +29153,8 @@ ipcMain.handle("export:month", async (_event, { month, year, format, lang }) => 
 			month,
 			year,
 			format,
-			lang
+			lang,
+			paymentIds
 		}, filename);
 	} catch (error) {
 		console.error("Failed to run month payments export:", error);

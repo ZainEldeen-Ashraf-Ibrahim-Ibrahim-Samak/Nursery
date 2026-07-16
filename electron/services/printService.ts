@@ -40,14 +40,17 @@ export function buildPrintPreviewHtml(reportType: 'payroll' | 'expenses' | 'chil
     const month = params.month
     const year = Number(params.year)
     title = isAr ? `مطالبات واشتراكات شهر ${month} لسنة ${year}` : `Billing Sheet: ${month} ${year}`
-    filterSummary = isAr ? `الفترة: ${month} ${year}` : `Period: ${month} ${year}`
-
+    const hasSelection = Array.isArray(params.paymentIds) && params.paymentIds.length > 0
+    filterSummary = isAr
+      ? `الفترة: ${month} ${year}${hasSelection ? ` — ${params.paymentIds.length} سجل محدد` : ''}`
+      : `Period: ${month} ${year}${hasSelection ? ` — ${params.paymentIds.length} selected record(s)` : ''}`
     const payments = db.prepare(`
       SELECT c.name as child_name, c.guardian, c.guardian_phone, p.service, p.unit, p.quantity, p.price, p.total, p.paid, p.balance, p.status
       FROM payments p
       JOIN children c ON p.child_id = c.id
       WHERE p.month = ? AND p.year = ?
-    `).all(month, year) as any[]
+      ${hasSelection ? `AND p.id IN (${params.paymentIds.map(() => '?').join(',')})` : ''}
+    `).all(month, year, ...(hasSelection ? params.paymentIds : [])) as any[]
 
     const headers = isAr
       ? ['اسم الطفل', 'ولي الأمر', 'الهاتف', 'الخدمة', 'الوحدة', 'الكمية', 'السعر', 'الإجمالي', 'المدفوع', 'المتأخرات', 'الحالة']
