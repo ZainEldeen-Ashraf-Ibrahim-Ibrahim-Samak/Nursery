@@ -22540,6 +22540,20 @@ ipcMain.handle("children:deactivate", async (_event, { id }) => {
 		throw new Error(error.message || "Failed to deactivate child");
 	}
 });
+ipcMain.handle("children:delete", async (_event, { id }) => {
+	try {
+		requireAdmin();
+		const db = getDb();
+		const child = db.prepare("SELECT id, is_active FROM children WHERE id = ?").get(id);
+		if (!child) throw new Error("الطفل غير موجود / Child not found");
+		if (child.is_active !== 0) throw new Error("لا يمكن حذف طفل نشط — يجب إلغاء تفعيله أولاً / Cannot delete an active child — deactivate first");
+		db.prepare("DELETE FROM children WHERE id = ?").run(id);
+		return { ok: true };
+	} catch (error) {
+		console.error("Failed to delete child:", error);
+		throw new Error(error.message || "Failed to delete child");
+	}
+});
 ipcMain.handle("children:statement", async (_event, { childId }) => {
 	try {
 		checkAuth$9();

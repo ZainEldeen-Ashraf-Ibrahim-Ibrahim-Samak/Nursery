@@ -19,6 +19,7 @@ electron.contextBridge.exposeInMainWorld("api", {
 		add: (args) => electron.ipcRenderer.invoke("children:add", args),
 		update: (args) => electron.ipcRenderer.invoke("children:update", args),
 		deactivate: (args) => electron.ipcRenderer.invoke("children:deactivate", args),
+		delete: (args) => electron.ipcRenderer.invoke("children:delete", args),
 		statement: (args) => electron.ipcRenderer.invoke("children:statement", args)
 	},
 	childServices: {
