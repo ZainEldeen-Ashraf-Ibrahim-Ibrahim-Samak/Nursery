@@ -379,10 +379,11 @@ ipcMain.handle('salary:update', async (_event, { employee_id, month, year, bonus
 })
 
 // 7. salary:getExpected (Admin only) — live forecast for the Employee details panel:
-// the FULL month's scheduled sessions × each child's resolved rate (child override → salary
-// type's session rate in per_child_session mode → teacher rate → salary type rate), reported next to
-// what the ledger says has actually been earned so far. Attendance status does not change the
-// expected total — only the earned figure.
+// the REMAINING scheduled sessions (today onward for the month in progress; the whole month for
+// past/future periods) × each child's resolved rate (child override → salary type's session rate
+// in per_child_session mode → teacher rate → salary type rate), reported next to what the ledger
+// says has actually been earned so far. Attendance status does not change the expected total —
+// only the earned figure.
 ipcMain.handle('salary:getExpected', async (_event, { employee_id, month, year }) => {
   try {
     requireAdmin()

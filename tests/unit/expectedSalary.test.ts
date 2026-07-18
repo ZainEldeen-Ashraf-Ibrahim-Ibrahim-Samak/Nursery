@@ -18,7 +18,7 @@ function getHandler(channel: string) {
   return found[1]
 }
 
-describe('salary:getExpected — full-month schedule forecast (per_child_session mode)', () => {
+describe('salary:getExpected — remaining-schedule forecast (per_child_session mode)', () => {
   let db: any
   let teacherId: number
 
@@ -56,19 +56,22 @@ describe('salary:getExpected — full-month schedule forecast (per_child_session
     `).run(childId, teacherId, now, now)
   })
 
-  it('expected_total = full month scheduled sessions × the salary type\'s session rate, regardless of attendance', async () => {
+  it('expected_total = remaining scheduled sessions (today onward) × the salary type\'s session rate, regardless of attendance', async () => {
     const today = new Date()
     const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate()
     const month = String(today.getMonth() + 1)
     const year = today.getFullYear()
+    // Every day is a lesson day, so for the month in progress the projection covers
+    // today (inclusive) through the end of the month — elapsed days don't inflate it.
+    const remainingDays = daysInMonth - today.getDate() + 1
 
     const result = await getExpected(null, { employee_id: teacherId, month, year })
 
-    // No attendance recorded at all — the expected total must still be the full schedule
+    // No attendance recorded at all — the expected total must still be the remaining schedule
     // at the salary type's session rate (130), not the child's price (200), not the
     // teacher's flat rate (90), and not 0.
-    expect(result.expected_total).toBe(daysInMonth * 130)
+    expect(result.expected_total).toBe(remainingDays * 130)
     expect(result.actual_to_date).toBe(0)
-    expect(result.projected_remaining).toBe(daysInMonth * 130)
+    expect(result.projected_remaining).toBe(remainingDays * 130)
   })
 })

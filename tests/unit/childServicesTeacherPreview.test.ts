@@ -32,18 +32,20 @@ describe('childServices:previewTeacherCost — remaining-sessions/cost preview (
   const add = getHandler('employees:add')
   const preview = getHandler('childServices:previewTeacherCost')
 
-  it('computes the full month\'s sessions and expected cost from lesson_days and the teacher rate', async () => {
+  it('computes the remaining sessions (today through month end) and expected cost from lesson_days and the teacher rate', async () => {
     const emp = await add(null, { name: 'Ahmed', base_salary: 0, teacher_session_rate: 200 })
     teacherId = emp.id
 
-    // Every weekday (0-6) — so every day of the month counts, not just from today onward.
+    // Every weekday (0-6) — so every remaining day of the month counts (FR-002: from the
+    // current date through the end of the calendar month, elapsed days excluded).
     const result = await preview(null, { teacher_id: teacherId, lesson_days: [0, 1, 2, 3, 4, 5, 6] })
 
     const today = new Date()
     const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate()
+    const remainingDays = daysInMonth - today.getDate() + 1
 
-    expect(result.remaining_sessions).toBe(daysInMonth)
-    expect(result.expected_cost).toBe(daysInMonth * 200)
+    expect(result.remaining_sessions).toBe(remainingDays)
+    expect(result.expected_cost).toBe(remainingDays * 200)
   })
 
   it('returns zero sessions when lesson_days is empty', async () => {

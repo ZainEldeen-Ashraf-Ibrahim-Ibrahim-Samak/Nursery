@@ -30178,6 +30178,50 @@ var childActivitySchema = new Schema({
 	synced: Number
 }, sharedOptions);
 var ChildActivityModel = mongoose.models["sync_child_activities"] || mongoose.model("sync_child_activities", childActivitySchema);
+var dailyPaymentSchema = new Schema({
+	id: {
+		type: Number,
+		required: true,
+		unique: true
+	},
+	child_id: Number,
+	service_id: Number,
+	billing_date: String,
+	month: String,
+	year: Number,
+	service: String,
+	unit: String,
+	quantity: Number,
+	price: Number,
+	total: Number,
+	paid: Number,
+	balance: Number,
+	status: String,
+	notes: String,
+	payment_method_id: Number,
+	payment_method_name: String,
+	created_at: String,
+	updated_at: String,
+	synced: Number
+}, sharedOptions);
+var DailyPaymentModel = mongoose.models["sync_daily_payments"] || mongoose.model("sync_daily_payments", dailyPaymentSchema);
+var dailyPaymentTransactionSchema = new Schema({
+	id: {
+		type: Number,
+		required: true,
+		unique: true
+	},
+	daily_payment_id: Number,
+	amount: Number,
+	payment_method_id: Number,
+	payment_method_name: String,
+	paid_date: String,
+	notes: String,
+	created_at: String,
+	updated_at: String,
+	synced: Number
+}, sharedOptions);
+var DailyPaymentTransactionModel = mongoose.models["sync_daily_payment_transactions"] || mongoose.model("sync_daily_payment_transactions", dailyPaymentTransactionSchema);
 var SYNC_ENTITIES = [
 	{
 		name: "children",
@@ -30313,6 +30357,16 @@ var SYNC_ENTITIES = [
 		name: "child_activities",
 		model: ChildActivityModel,
 		table: "child_activities"
+	},
+	{
+		name: "daily_payments",
+		model: DailyPaymentModel,
+		table: "daily_payments"
+	},
+	{
+		name: "daily_payment_transactions",
+		model: DailyPaymentTransactionModel,
+		table: "daily_payment_transactions"
 	}
 ];
 //#endregion
@@ -30449,24 +30503,26 @@ ipcMain.handle("sync:status", async () => {
 		throw new Error(error.message || "Failed to get sync status");
 	}
 });
+var noopReport = () => {};
+/** Connect (or reconnect) using the saved URI if the connection is down. */
+async function ensureConnected() {
+	const { connected } = getConnectionStatus();
+	if (!connected) {
+		const mongoUri = getMongoUri();
+		if (!mongoUri) throw new Error("No MongoDB URI configured. Please connect first.");
+		await connectMongo(mongoUri);
+	}
+}
 /**
-* sync:push — Push all unsynced records to MongoDB.
-* Admin only. Graceful: reports pushed/failed counts per entity.
+* Push records to MongoDB for every entity in SYNC_ENTITIES.
+* Default mode pushes rows with synced = 0; force pushes every row (overwriting cloud).
 */
-ipcMain.handle("sync:push", async (event, args) => {
+async function runPush(force, report = noopReport) {
 	try {
-		requireAdmin();
-		const force = args?.force === true;
 		const db = getDb();
-		const { connected } = getConnectionStatus();
-		if (!connected) {
-			const mongoUri = getMongoUri();
-			if (!mongoUri) throw new Error("No MongoDB URI configured. Please connect first.");
-			await connectMongo(mongoUri);
-		}
+		await ensureConnected();
 		const results = {};
 		const now = (/* @__PURE__ */ new Date()).toISOString();
-		const report = progressReporter(event, "push");
 		let totalWork = 0;
 		for (const entity of SYNC_ENTITIES) {
 			let cq = force ? `SELECT COUNT(*) AS c FROM ${entity.table}` : `SELECT COUNT(*) AS c FROM ${entity.table} WHERE synced = 0`;
@@ -30524,28 +30580,18 @@ ipcMain.handle("sync:push", async (event, args) => {
 		console.error("sync:push error:", error);
 		throw new Error(error.message || "Push failed");
 	}
-});
+}
 /**
-* sync:pull — Pull records from MongoDB that are newer than local.
-* Applies conflict resolution (most-recent updated_at wins, id tie-break), unless
-* `force: true` is passed, in which case every matching cloud record overwrites local
-* unconditionally — for restoring/importing known-good cloud data onto a machine whose local
-* rows have stale-but-technically-"newer" timestamps (e.g. from an old migration backfill bug)
-* that would otherwise make sync:pull report everything as "skipped".
-* Admin only.
+* Pull records from MongoDB for every entity in SYNC_ENTITIES.
+* Default mode applies conflict resolution (most-recent updated_at wins, id tie-break);
+* `force` makes every cloud record overwrite local unconditionally — for restoring/importing
+* known-good cloud data onto a machine whose local rows have stale-but-technically-"newer"
+* timestamps that would otherwise make the pull report everything as "skipped".
 */
-ipcMain.handle("sync:pull", async (event, args) => {
+async function runPull(force, report = noopReport) {
 	try {
-		requireAdmin();
-		const force = args?.force === true;
 		const db = getDb();
-		const { connected } = getConnectionStatus();
-		if (!connected) {
-			const mongoUri = getMongoUri();
-			if (!mongoUri) throw new Error("No MongoDB URI configured.");
-			await connectMongo(mongoUri);
-		}
-		const report = progressReporter(event, "pull");
+		await ensureConnected();
 		let totalWork = 0;
 		for (const entity of SYNC_ENTITIES) try {
 			totalWork += await entity.model.estimatedDocumentCount();
@@ -30686,22 +30732,51 @@ ipcMain.handle("sync:pull", async (event, args) => {
 		console.error("sync:pull error:", error);
 		throw new Error(error.message || "Pull failed");
 	}
+}
+/**
+* sync:push — Push all unsynced records to MongoDB (all rows when force: true).
+* Admin only. Graceful: reports pushed/failed counts per entity.
+*/
+ipcMain.handle("sync:push", async (event, args) => {
+	requireAdmin();
+	return runPush(args?.force === true, progressReporter(event, "push"));
+});
+/**
+* sync:pull — Pull records from MongoDB (cloud always wins when force: true).
+* Admin only.
+*/
+ipcMain.handle("sync:pull", async (event, args) => {
+	requireAdmin();
+	return runPull(args?.force === true, progressReporter(event, "pull"));
 });
 var autoSyncTimer = null;
+var autoSyncRunning = false;
+/**
+* One auto-sync cycle: push first (force — overwrite cloud with local so auto-sync never
+* silently skips records the `synced` flag missed), then pull (force — cloud wins conflicts,
+* which after the push means only records this machine doesn't have yet get written locally).
+* Calls runPush/runPull directly — ipcMain.handle() handlers are NOT reachable through
+* ipcMain.listeners(), which is why the previous listener-based approach never ran.
+*/
+async function runAutoSyncCycle() {
+	if (autoSyncRunning) return;
+	autoSyncRunning = true;
+	try {
+		await ensureConnected();
+		await runPush(true);
+		await runPull(true);
+	} catch (err) {
+		console.error("Auto-sync error:", err);
+	} finally {
+		autoSyncRunning = false;
+	}
+}
 function startAutoSync(intervalMs) {
 	if (autoSyncTimer) clearInterval(autoSyncTimer);
-	autoSyncTimer = setInterval(async () => {
-		const { connected } = getConnectionStatus();
-		if (!connected) return;
-		try {
-			const pushHandler = ipcMain.listeners?.("sync:push")?.[0];
-			if (typeof pushHandler === "function") await pushHandler({ force: true });
-			const pullHandler = ipcMain.listeners?.("sync:pull")?.[0];
-			if (typeof pullHandler === "function") await pullHandler({ force: true });
-		} catch (err) {
-			console.error("Auto-sync error:", err);
-		}
+	autoSyncTimer = setInterval(() => {
+		runAutoSyncCycle();
 	}, intervalMs);
+	runAutoSyncCycle();
 }
 function stopAutoSync() {
 	if (autoSyncTimer) {
