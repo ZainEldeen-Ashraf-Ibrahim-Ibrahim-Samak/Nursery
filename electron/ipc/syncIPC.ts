@@ -1,4 +1,4 @@
-import { ipcMain } from 'electron'
+import { ipcMain, BrowserWindow } from 'electron'
 import { getDb } from '../db/connection.js'
 import { applyCloudTombstones } from '../services/tombstones.js'
 import { requireAdmin, checkAuth } from './_guard.js'
@@ -501,15 +501,34 @@ let autoSyncRunning = false
  * Calls runPush/runPull directly — ipcMain.handle() handlers are NOT reachable through
  * ipcMain.listeners(), which is why the previous listener-based approach never ran.
  */
+/** Broadcast the auto-sync cycle state so the renderer can show a loading banner. */
+type AutoSyncState = 'connecting' | 'pushing' | 'pulling' | 'done' | 'error'
+let lastAutoSyncState: AutoSyncState | 'idle' = 'idle'
+function broadcastAutoSyncStatus(state: AutoSyncState): void {
+  lastAutoSyncState = state
+  for (const win of BrowserWindow.getAllWindows()) {
+    win.webContents.send('sync:auto-status', { state })
+  }
+}
+
+// The startup cycle can begin before the renderer finishes loading, so the banner
+// asks for the current state on mount instead of relying only on the push events.
+ipcMain.handle('sync:auto-status:get', () => ({ state: lastAutoSyncState, running: autoSyncRunning }))
+
 async function runAutoSyncCycle(): Promise<void> {
   if (autoSyncRunning) return // previous cycle still in flight — skip this tick
   autoSyncRunning = true
   try {
+    broadcastAutoSyncStatus('connecting')
     await ensureConnected()
+    broadcastAutoSyncStatus('pushing')
     await runPush(true)
+    broadcastAutoSyncStatus('pulling')
     await runPull(true)
+    broadcastAutoSyncStatus('done')
   } catch (err) {
     console.error('Auto-sync error:', err)
+    broadcastAutoSyncStatus('error')
   } finally {
     autoSyncRunning = false
   }

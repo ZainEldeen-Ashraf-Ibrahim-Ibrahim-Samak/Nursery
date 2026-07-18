@@ -182,6 +182,14 @@ const api = {
     status: () => ipcRenderer.invoke('sync:status'),
     autoSync: (args: { enabled: boolean; intervalMinutes?: number }) =>
       ipcRenderer.invoke('sync:auto-sync', args),
+    autoSyncStatus: () => ipcRenderer.invoke('sync:auto-status:get'),
+    onAutoSyncStatus: (
+      callback: (payload: { state: 'connecting' | 'pushing' | 'pulling' | 'done' | 'error' }) => void
+    ) => {
+      const handler = (_e: unknown, payload: any) => callback(payload)
+      ipcRenderer.on('sync:auto-status', handler)
+      return () => ipcRenderer.removeListener('sync:auto-status', handler)
+    },
   },
 
   // Roles

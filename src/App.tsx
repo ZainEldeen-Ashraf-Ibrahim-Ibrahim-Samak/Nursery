@@ -8,6 +8,7 @@ import { Sidebar } from './components/layout/Sidebar.js'
 import { Header } from './components/layout/Header.js'
 import { RoleGuard } from './components/layout/RoleGuard.js'
 import { UpdateBanner } from './components/layout/UpdateBanner.js'
+import { SyncBanner } from './components/layout/SyncBanner.js'
 import { useBranding } from './hooks/useBranding.js'
 
 // Import Pages
@@ -49,6 +50,7 @@ const AppLayout: React.FC = () => {
       <Sidebar />
       <div className="flex-1 flex flex-col overflow-hidden">
         <UpdateBanner />
+        <SyncBanner />
         <Header />
         <main className="flex-1 overflow-y-auto">
           <Outlet />
