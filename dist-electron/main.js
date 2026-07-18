@@ -31955,7 +31955,12 @@ function initAutoUpdater() {
 		const isNetworkError = !isRateLimit && (msg.includes("ERR_HTTP2") || msg.includes("net::") || msg.includes("ECONNRESET") || msg.includes("ETIMEDOUT"));
 		if (isRateLimit) {
 			console.warn("[updater] GitHub rate limit (429); will retry after cooldown");
-			mainWindow?.webContents.send("updater:status", { event: "update-not-available" });
+			lastOutcome = null;
+			mainWindow?.webContents.send("updater:status", {
+				event: "error",
+				error: msg,
+				errorCode: "rate_limit"
+			});
 			if (!rateLimitRetryTimer) rateLimitRetryTimer = setTimeout(() => {
 				rateLimitRetryTimer = null;
 				import_main.autoUpdater.checkForUpdates().catch(() => {});
@@ -31967,6 +31972,7 @@ function initAutoUpdater() {
 			setTimeout(() => import_main.autoUpdater.downloadUpdate().catch(() => {}), 3e3);
 			return;
 		}
+		lastOutcome = null;
 		mainWindow?.webContents.send("updater:status", {
 			event: "error",
 			error: msg,
