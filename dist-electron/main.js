@@ -30178,50 +30178,6 @@ var childActivitySchema = new Schema({
 	synced: Number
 }, sharedOptions);
 var ChildActivityModel = mongoose.models["sync_child_activities"] || mongoose.model("sync_child_activities", childActivitySchema);
-var dailyPaymentSchema = new Schema({
-	id: {
-		type: Number,
-		required: true,
-		unique: true
-	},
-	child_id: Number,
-	service_id: Number,
-	billing_date: String,
-	month: String,
-	year: Number,
-	service: String,
-	unit: String,
-	quantity: Number,
-	price: Number,
-	total: Number,
-	paid: Number,
-	balance: Number,
-	status: String,
-	notes: String,
-	payment_method_id: Number,
-	payment_method_name: String,
-	created_at: String,
-	updated_at: String,
-	synced: Number
-}, sharedOptions);
-var DailyPaymentModel = mongoose.models["sync_daily_payments"] || mongoose.model("sync_daily_payments", dailyPaymentSchema);
-var dailyPaymentTransactionSchema = new Schema({
-	id: {
-		type: Number,
-		required: true,
-		unique: true
-	},
-	daily_payment_id: Number,
-	amount: Number,
-	payment_method_id: Number,
-	payment_method_name: String,
-	paid_date: String,
-	notes: String,
-	created_at: String,
-	updated_at: String,
-	synced: Number
-}, sharedOptions);
-var DailyPaymentTransactionModel = mongoose.models["sync_daily_payment_transactions"] || mongoose.model("sync_daily_payment_transactions", dailyPaymentTransactionSchema);
 var SYNC_ENTITIES = [
 	{
 		name: "children",
@@ -30357,16 +30313,6 @@ var SYNC_ENTITIES = [
 		name: "child_activities",
 		model: ChildActivityModel,
 		table: "child_activities"
-	},
-	{
-		name: "daily_payments",
-		model: DailyPaymentModel,
-		table: "daily_payments"
-	},
-	{
-		name: "daily_payment_transactions",
-		model: DailyPaymentTransactionModel,
-		table: "daily_payment_transactions"
 	}
 ];
 //#endregion

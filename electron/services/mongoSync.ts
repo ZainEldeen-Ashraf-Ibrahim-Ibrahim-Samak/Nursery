@@ -627,50 +627,6 @@ const childActivitySchema = new Schema({
 export const ChildActivityModel: Model<any> = mongoose.models['sync_child_activities'] ||
   mongoose.model('sync_child_activities', childActivitySchema)
 
-// ── Daily Billing (feature 008) ────────────────────────────────────────────────
-
-const dailyPaymentSchema = new Schema({
-  id: { type: Number, required: true, unique: true },
-  child_id: Number,
-  service_id: Number,
-  billing_date: String,
-  month: String,
-  year: Number,
-  service: String,
-  unit: String,
-  quantity: Number,
-  price: Number,
-  total: Number,
-  paid: Number,
-  balance: Number,
-  status: String,
-  notes: String,
-  payment_method_id: Number,
-  payment_method_name: String,
-  created_at: String,
-  updated_at: String,
-  synced: Number
-}, sharedOptions)
-
-export const DailyPaymentModel: Model<any> = mongoose.models['sync_daily_payments'] ||
-  mongoose.model('sync_daily_payments', dailyPaymentSchema)
-
-const dailyPaymentTransactionSchema = new Schema({
-  id: { type: Number, required: true, unique: true },
-  daily_payment_id: Number,
-  amount: Number,
-  payment_method_id: Number,
-  payment_method_name: String,
-  paid_date: String,
-  notes: String,
-  created_at: String,
-  updated_at: String,
-  synced: Number
-}, sharedOptions)
-
-export const DailyPaymentTransactionModel: Model<any> = mongoose.models['sync_daily_payment_transactions'] ||
-  mongoose.model('sync_daily_payment_transactions', dailyPaymentTransactionSchema)
-
 // ── Entity registry ───────────────────────────────────────────────────────────
 
 export const SYNC_ENTITIES: {
@@ -705,7 +661,4 @@ export const SYNC_ENTITIES: {
   { name: 'notifications', model: NotificationModel, table: 'notifications' },
   { name: 'child_illness_cases', model: ChildIllnessCaseModel, table: 'child_illness_cases' },
   { name: 'child_activities', model: ChildActivityModel, table: 'child_activities' },
-  // daily_payments must come before daily_payment_transactions so pull can satisfy the FK.
-  { name: 'daily_payments', model: DailyPaymentModel, table: 'daily_payments' },
-  { name: 'daily_payment_transactions', model: DailyPaymentTransactionModel, table: 'daily_payment_transactions' },
 ]
