@@ -187,29 +187,34 @@ ipcMain.handle('sync:status', async () => {
   }
 })
 
-/**
- * sync:push — Push all unsynced records to MongoDB.
- * Admin only. Graceful: reports pushed/failed counts per entity.
- */
-ipcMain.handle('sync:push', async (event, args) => {
-  try {
-    requireAdmin()
-    const force = args?.force === true
-    const db = getDb()
-    const { connected } = getConnectionStatus()
+// ── Core push/pull (callable directly by auto-sync, not only via IPC) ─────────
 
-    if (!connected) {
-      // Try to auto-reconnect
-      const mongoUri = getMongoUri()
-      if (!mongoUri) throw new Error('No MongoDB URI configured. Please connect first.')
-      await connectMongo(mongoUri)
-    }
+type Reporter = (current: number, total: number, phase?: string) => void
+const noopReport: Reporter = () => {}
+
+/** Connect (or reconnect) using the saved URI if the connection is down. */
+async function ensureConnected(): Promise<void> {
+  const { connected } = getConnectionStatus()
+  if (!connected) {
+    const mongoUri = getMongoUri()
+    if (!mongoUri) throw new Error('No MongoDB URI configured. Please connect first.')
+    await connectMongo(mongoUri)
+  }
+}
+
+/**
+ * Push records to MongoDB for every entity in SYNC_ENTITIES.
+ * Default mode pushes rows with synced = 0; force pushes every row (overwriting cloud).
+ */
+export async function runPush(force: boolean, report: Reporter = noopReport) {
+  try {
+    const db = getDb()
+    await ensureConnected()
 
     const results: Record<string, { pushed: number; failed: number }> = {}
     const now = new Date().toISOString()
 
     // Total work = all unsynced rows across every entity, so the bar is determinate.
-    const report = progressReporter(event, 'push')
     let totalWork = 0
     for (const entity of SYNC_ENTITIES) {
       let cq = force ? `SELECT COUNT(*) AS c FROM ${entity.table}` : `SELECT COUNT(*) AS c FROM ${entity.table} WHERE synced = 0`
@@ -268,32 +273,21 @@ ipcMain.handle('sync:push', async (event, args) => {
     console.error('sync:push error:', error)
     throw new Error(error.message || 'Push failed')
   }
-})
+}
 
 /**
- * sync:pull — Pull records from MongoDB that are newer than local.
- * Applies conflict resolution (most-recent updated_at wins, id tie-break), unless
- * `force: true` is passed, in which case every matching cloud record overwrites local
- * unconditionally — for restoring/importing known-good cloud data onto a machine whose local
- * rows have stale-but-technically-"newer" timestamps (e.g. from an old migration backfill bug)
- * that would otherwise make sync:pull report everything as "skipped".
- * Admin only.
+ * Pull records from MongoDB for every entity in SYNC_ENTITIES.
+ * Default mode applies conflict resolution (most-recent updated_at wins, id tie-break);
+ * `force` makes every cloud record overwrite local unconditionally — for restoring/importing
+ * known-good cloud data onto a machine whose local rows have stale-but-technically-"newer"
+ * timestamps that would otherwise make the pull report everything as "skipped".
  */
-ipcMain.handle('sync:pull', async (event, args) => {
+export async function runPull(force: boolean, report: Reporter = noopReport) {
   try {
-    requireAdmin()
-    const force = args?.force === true
     const db = getDb()
-    const { connected } = getConnectionStatus()
-
-    if (!connected) {
-      const mongoUri = getMongoUri()
-      if (!mongoUri) throw new Error('No MongoDB URI configured.')
-      await connectMongo(mongoUri)
-    }
+    await ensureConnected()
 
     // Pre-count cloud documents so the progress bar is determinate.
-    const report = progressReporter(event, 'pull')
     let totalWork = 0
     for (const entity of SYNC_ENTITIES) {
       try { totalWork += await entity.model.estimatedDocumentCount() } catch { /* ignore */ }
@@ -474,36 +468,57 @@ ipcMain.handle('sync:pull', async (event, args) => {
     console.error('sync:pull error:', error)
     throw new Error(error.message || 'Pull failed')
   }
+}
+
+/**
+ * sync:push — Push all unsynced records to MongoDB (all rows when force: true).
+ * Admin only. Graceful: reports pushed/failed counts per entity.
+ */
+ipcMain.handle('sync:push', async (event, args) => {
+  requireAdmin()
+  return runPush(args?.force === true, progressReporter(event, 'push'))
+})
+
+/**
+ * sync:pull — Pull records from MongoDB (cloud always wins when force: true).
+ * Admin only.
+ */
+ipcMain.handle('sync:pull', async (event, args) => {
+  requireAdmin()
+  return runPull(args?.force === true, progressReporter(event, 'pull'))
 })
 
 // ── Auto-sync interval (T090) ─────────────────────────────────────────────────
 
 let autoSyncTimer: ReturnType<typeof setInterval> | null = null
+let autoSyncRunning = false
+
+/**
+ * One auto-sync cycle: push first (force — overwrite cloud with local so auto-sync never
+ * silently skips records the `synced` flag missed), then pull (force — cloud wins conflicts,
+ * which after the push means only records this machine doesn't have yet get written locally).
+ * Calls runPush/runPull directly — ipcMain.handle() handlers are NOT reachable through
+ * ipcMain.listeners(), which is why the previous listener-based approach never ran.
+ */
+async function runAutoSyncCycle(): Promise<void> {
+  if (autoSyncRunning) return // previous cycle still in flight — skip this tick
+  autoSyncRunning = true
+  try {
+    await ensureConnected()
+    await runPush(true)
+    await runPull(true)
+  } catch (err) {
+    console.error('Auto-sync error:', err)
+  } finally {
+    autoSyncRunning = false
+  }
+}
 
 export function startAutoSync(intervalMs: number): void {
   if (autoSyncTimer) clearInterval(autoSyncTimer)
-
-  autoSyncTimer = setInterval(async () => {
-    const { connected } = getConnectionStatus()
-    if (!connected) return
-
-    try {
-      // Trigger push via ipcMain internally (force: overwrite cloud with local so
-      // auto-sync never silently skips records the `synced` flag missed)
-      const pushHandler = ipcMain.listeners?.('sync:push')?.[0]
-      if (typeof pushHandler === 'function') {
-        await (pushHandler as any)({ force: true } as any)
-      }
-
-      // Trigger pull via ipcMain internally (force: cloud always wins conflicts)
-      const pullHandler = ipcMain.listeners?.('sync:pull')?.[0]
-      if (typeof pullHandler === 'function') {
-        await (pullHandler as any)({ force: true } as any)
-      }
-    } catch (err) {
-      console.error('Auto-sync error:', err)
-    }
-  }, intervalMs)
+  autoSyncTimer = setInterval(() => { void runAutoSyncCycle() }, intervalMs)
+  // Kick off a first cycle immediately instead of waiting a full interval.
+  void runAutoSyncCycle()
 }
 
 export function stopAutoSync(): void {
