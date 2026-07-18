@@ -30471,11 +30471,11 @@ ipcMain.handle("sync:disconnect", async () => {
 });
 /**
 * sync:status — Returns sync status: connection, pending counts per entity.
-* Admin only.
+* Any logged-in user (auto-sync runs for every role, so every role may see its status).
 */
 ipcMain.handle("sync:status", async () => {
 	try {
-		requireAdmin();
+		checkAuth$10();
 		const db = getDb();
 		const { connected, error } = getConnectionStatus();
 		const pending = {};
@@ -30735,18 +30735,19 @@ async function runPull(force, report = noopReport) {
 }
 /**
 * sync:push — Push all unsynced records to MongoDB (all rows when force: true).
-* Admin only. Graceful: reports pushed/failed counts per entity.
+* Any logged-in user — sync must work for every role, same as the automatic cycle.
+* Graceful: reports pushed/failed counts per entity.
 */
 ipcMain.handle("sync:push", async (event, args) => {
-	requireAdmin();
+	checkAuth$10();
 	return runPush(args?.force === true, progressReporter(event, "push"));
 });
 /**
 * sync:pull — Pull records from MongoDB (cloud always wins when force: true).
-* Admin only.
+* Any logged-in user — sync must work for every role, same as the automatic cycle.
 */
 ipcMain.handle("sync:pull", async (event, args) => {
-	requireAdmin();
+	checkAuth$10();
 	return runPull(args?.force === true, progressReporter(event, "pull"));
 });
 var autoSyncTimer = null;
@@ -30786,11 +30787,11 @@ function stopAutoSync() {
 }
 /**
 * sync:auto-sync — Enable/disable auto-sync and set the interval.
-* Admin only.
+* Any logged-in user — employees can turn on the forced auto-sync cycle too.
 */
 ipcMain.handle("sync:auto-sync", async (_event, { enabled, intervalMinutes = 1 }) => {
 	try {
-		requireAdmin();
+		checkAuth$10();
 		const db = getDb();
 		if (enabled) {
 			startAutoSync(intervalMinutes * 60 * 1e3);
@@ -31897,8 +31898,8 @@ app.whenReady().then(async () => {
 		console.log("Connecting to MongoDB on startup...");
 		connectMongo(resolvedMongoUri).then(() => console.log("Successfully connected to MongoDB on startup.")).catch((err) => console.error("Failed to connect to MongoDB on startup:", err.message));
 		const autoIntervalRow = db.prepare("SELECT value FROM settings WHERE key = 'sync_auto_interval'").get();
-		const savedInterval = autoIntervalRow ? Number(autoIntervalRow.value) : 1;
-		if (savedInterval > 0) startAutoSync(savedInterval * 60 * 1e3);
+		const savedInterval = Number(autoIntervalRow?.value);
+		startAutoSync((Number.isFinite(savedInterval) && savedInterval > 0 ? savedInterval : 1) * 60 * 1e3);
 	} catch (error) {
 		console.error("Failed to initialize database or branding assets:", error);
 	}

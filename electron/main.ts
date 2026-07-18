@@ -174,13 +174,14 @@ app.whenReady().then(async () => {
       .then(() => console.log('Successfully connected to MongoDB on startup.'))
       .catch((err) => console.error('Failed to connect to MongoDB on startup:', err.message))
 
-    // Auto-sync every minute by default (force push+pull), unless the user
-    // has explicitly turned it off in Settings (sync_auto_interval = '0').
+    // Auto-sync ALWAYS starts on launch (force push+pull), for every role and even before
+    // login — a saved interval > 0 is honored, anything else (off/0/invalid/missing) falls
+    // back to every 1 minute so no machine can end up permanently not syncing. Turning it
+    // off in Settings only stops it for the current session.
     const autoIntervalRow = db.prepare("SELECT value FROM settings WHERE key = 'sync_auto_interval'").get() as { value: string } | undefined
-    const savedInterval = autoIntervalRow ? Number(autoIntervalRow.value) : 1
-    if (savedInterval > 0) {
-      startAutoSync(savedInterval * 60 * 1000)
-    }
+    const savedInterval = Number(autoIntervalRow?.value)
+    const intervalMinutes = Number.isFinite(savedInterval) && savedInterval > 0 ? savedInterval : 1
+    startAutoSync(intervalMinutes * 60 * 1000)
   } catch (error) {
     console.error('Failed to initialize database or branding assets:', error)
   }

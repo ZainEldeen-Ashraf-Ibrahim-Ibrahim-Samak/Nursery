@@ -1,7 +1,7 @@
 import { ipcMain } from 'electron'
 import { getDb } from '../db/connection.js'
 import { applyCloudTombstones } from '../services/tombstones.js'
-import { requireAdmin } from './_guard.js'
+import { requireAdmin, checkAuth } from './_guard.js'
 import { progressReporter } from './progress.js'
 import {
   connectMongo,
@@ -148,11 +148,11 @@ ipcMain.handle('sync:disconnect', async () => {
 
 /**
  * sync:status — Returns sync status: connection, pending counts per entity.
- * Admin only.
+ * Any logged-in user (auto-sync runs for every role, so every role may see its status).
  */
 ipcMain.handle('sync:status', async () => {
   try {
-    requireAdmin()
+    checkAuth()
     const db = getDb()
     const { connected, error } = getConnectionStatus()
 
@@ -472,19 +472,20 @@ export async function runPull(force: boolean, report: Reporter = noopReport) {
 
 /**
  * sync:push — Push all unsynced records to MongoDB (all rows when force: true).
- * Admin only. Graceful: reports pushed/failed counts per entity.
+ * Any logged-in user — sync must work for every role, same as the automatic cycle.
+ * Graceful: reports pushed/failed counts per entity.
  */
 ipcMain.handle('sync:push', async (event, args) => {
-  requireAdmin()
+  checkAuth()
   return runPush(args?.force === true, progressReporter(event, 'push'))
 })
 
 /**
  * sync:pull — Pull records from MongoDB (cloud always wins when force: true).
- * Admin only.
+ * Any logged-in user — sync must work for every role, same as the automatic cycle.
  */
 ipcMain.handle('sync:pull', async (event, args) => {
-  requireAdmin()
+  checkAuth()
   return runPull(args?.force === true, progressReporter(event, 'pull'))
 })
 
@@ -530,11 +531,11 @@ export function stopAutoSync(): void {
 
 /**
  * sync:auto-sync — Enable/disable auto-sync and set the interval.
- * Admin only.
+ * Any logged-in user — employees can turn on the forced auto-sync cycle too.
  */
 ipcMain.handle('sync:auto-sync', async (_event, { enabled, intervalMinutes = 1 }) => {
   try {
-    requireAdmin()
+    checkAuth()
     const db = getDb()
 
     if (enabled) {

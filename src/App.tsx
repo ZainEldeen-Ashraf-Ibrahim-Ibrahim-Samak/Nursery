@@ -176,11 +176,11 @@ export default function App() {
             }
           />
 
-          {/* Cloud Sync - Admin only */}
+          {/* Cloud Sync - all roles (auto-sync runs for everyone; config stays admin-only in IPC) */}
           <Route
             path="sync"
             element={
-              <RoleGuard allowedRoles={['admin']}>
+              <RoleGuard allowedRoles={['admin', 'employee']}>
                 <SyncManager />
               </RoleGuard>
             }
