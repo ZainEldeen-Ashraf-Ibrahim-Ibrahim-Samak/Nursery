@@ -258,10 +258,17 @@ function initAutoUpdater() {
     const isNetworkError = !isRateLimit && (msg.includes('ERR_HTTP2') || msg.includes('net::') || msg.includes('ECONNRESET') || msg.includes('ETIMEDOUT'))
 
     if (isRateLimit) {
-      // Transient GitHub throttling — nothing the user can act on, so resolve the banner
-      // quietly (no sticky error) and retry once in the background after the cooldown.
+      // Transient GitHub throttling. Never report this as "up to date" — the check didn't
+      // run, so we don't know. Surface it honestly (renderer offers a manual download) and
+      // retry once in the background after the cooldown. Drop any cached outcome so the
+      // cooldown cache can't keep replaying a stale "update-not-available".
       console.warn('[updater] GitHub rate limit (429); will retry after cooldown')
-      mainWindow?.webContents.send('updater:status', { event: 'update-not-available' })
+      lastOutcome = null
+      mainWindow?.webContents.send('updater:status', {
+        event: 'error',
+        error: msg,
+        errorCode: 'rate_limit',
+      })
       if (!rateLimitRetryTimer) {
         rateLimitRetryTimer = setTimeout(() => {
           rateLimitRetryTimer = null
@@ -277,6 +284,7 @@ function initAutoUpdater() {
       return
     }
 
+    lastOutcome = null
     mainWindow?.webContents.send('updater:status', {
       event: 'error',
       error: msg,
