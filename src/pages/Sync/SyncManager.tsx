@@ -46,6 +46,7 @@ export default function SyncManager() {
     lastPullResults,
     error,
     autoSyncEnabled,
+    autoSyncIntervalMinutes,
     fetchStatus,
     connect,
     disconnect,
@@ -66,6 +67,12 @@ export default function SyncManager() {
     fetchStatus()
   }, [])
 
+  // Reflect the persisted interval instead of the hardcoded default, so the
+  // field shows the saved value after a restart or when returning to this page.
+  useEffect(() => {
+    setAutoInterval(String(autoSyncIntervalMinutes))
+  }, [autoSyncIntervalMinutes])
+
   const handleConnect = async () => {
     if (!mongoUri.trim()) return
     await connect(mongoUri.trim())
@@ -74,6 +81,21 @@ export default function SyncManager() {
   const handleToggleAutoSync = async () => {
     await setAutoSync(!autoSyncEnabled, Number(autoInterval) || 30)
   }
+
+  // Applying while enabled restarts the timer with the new interval and
+  // persists it — otherwise the edit only takes effect after Stop/Start.
+  const handleIntervalCommit = async () => {
+    const minutes = Number(autoInterval)
+    if (!autoSyncEnabled || !Number.isFinite(minutes) || minutes < 1) return
+    if (minutes === autoSyncIntervalMinutes) return
+    await setAutoSync(true, minutes)
+  }
+
+  // Auto-save shortly after typing stops, so no Enter/blur is required.
+  useEffect(() => {
+    const timer = setTimeout(() => { void handleIntervalCommit() }, 800)
+    return () => clearTimeout(timer)
+  }, [autoInterval])
 
   const isConnected = status?.connected ?? false
 
@@ -390,6 +412,8 @@ export default function SyncManager() {
             max="1440"
             value={autoInterval}
             onChange={(e) => setAutoInterval(e.target.value)}
+            onBlur={handleIntervalCommit}
+            onKeyDown={(e) => { if (e.key === 'Enter') handleIntervalCommit() }}
             className="w-32"
           />
           <Button
