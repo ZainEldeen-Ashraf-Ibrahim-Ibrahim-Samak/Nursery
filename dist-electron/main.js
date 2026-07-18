@@ -30698,22 +30698,29 @@ ipcMain.handle("sync:pull", async (event, args) => {
 });
 var autoSyncTimer = null;
 var autoSyncRunning = false;
-/**
-* One auto-sync cycle: push first (force — overwrite cloud with local so auto-sync never
-* silently skips records the `synced` flag missed), then pull (force — cloud wins conflicts,
-* which after the push means only records this machine doesn't have yet get written locally).
-* Calls runPush/runPull directly — ipcMain.handle() handlers are NOT reachable through
-* ipcMain.listeners(), which is why the previous listener-based approach never ran.
-*/
+var lastAutoSyncState = "idle";
+function broadcastAutoSyncStatus(state) {
+	lastAutoSyncState = state;
+	for (const win of BrowserWindow.getAllWindows()) win.webContents.send("sync:auto-status", { state });
+}
+ipcMain.handle("sync:auto-status:get", () => ({
+	state: lastAutoSyncState,
+	running: autoSyncRunning
+}));
 async function runAutoSyncCycle() {
 	if (autoSyncRunning) return;
 	autoSyncRunning = true;
 	try {
+		broadcastAutoSyncStatus("connecting");
 		await ensureConnected();
+		broadcastAutoSyncStatus("pushing");
 		await runPush(true);
+		broadcastAutoSyncStatus("pulling");
 		await runPull(true);
+		broadcastAutoSyncStatus("done");
 	} catch (err) {
 		console.error("Auto-sync error:", err);
+		broadcastAutoSyncStatus("error");
 	} finally {
 		autoSyncRunning = false;
 	}

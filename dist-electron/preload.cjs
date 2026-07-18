@@ -142,7 +142,13 @@ electron.contextBridge.exposeInMainWorld("api", {
 		push: (force) => electron.ipcRenderer.invoke("sync:push", { force: force === true }),
 		pull: (force) => electron.ipcRenderer.invoke("sync:pull", { force: force === true }),
 		status: () => electron.ipcRenderer.invoke("sync:status"),
-		autoSync: (args) => electron.ipcRenderer.invoke("sync:auto-sync", args)
+		autoSync: (args) => electron.ipcRenderer.invoke("sync:auto-sync", args),
+		autoSyncStatus: () => electron.ipcRenderer.invoke("sync:auto-status:get"),
+		onAutoSyncStatus: (callback) => {
+			const handler = (_e, payload) => callback(payload);
+			electron.ipcRenderer.on("sync:auto-status", handler);
+			return () => electron.ipcRenderer.removeListener("sync:auto-status", handler);
+		}
 	},
 	roles: {
 		list: () => electron.ipcRenderer.invoke("roles:list"),
