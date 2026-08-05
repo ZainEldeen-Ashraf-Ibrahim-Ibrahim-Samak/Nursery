@@ -19,6 +19,16 @@ export default function CollectionDonut({ data }: CollectionDonutProps) {
     'جلسة': { color: '#10b981', labelAr: 'جلسة', labelEn: 'Session' }, // Emerald 500
   }
 
+  // Custom services (and 'حصص إضافية') now reach this chart too, so they need distinguishable
+  // colours instead of every one of them rendering in the same grey.
+  const fallbackColors = ['#6366f1', '#ec4899', '#f97316', '#14b8a6', '#8b5cf6', '#64748b']
+  let fallbackIdx = 0
+  const colorFor = (service: string): string => {
+    const known = serviceConfigs[service]
+    if (known) return known.color
+    return fallbackColors[fallbackIdx++ % fallbackColors.length]
+  }
+
   // Calculate percentages and angles
   const radius = 50
   const circ = 2 * Math.PI * radius
@@ -26,7 +36,7 @@ export default function CollectionDonut({ data }: CollectionDonutProps) {
   const segments = data
     .filter((d) => d.collected > 0)
     .map((d, idx, arr) => {
-      const config = serviceConfigs[d.service] || { color: '#cbd5e1', labelAr: d.service, labelEn: d.service }
+      const config = serviceConfigs[d.service] ?? { color: colorFor(d.service), labelAr: d.service, labelEn: d.service }
       const percent = totalCollected > 0 ? d.collected / totalCollected : 0
       const strokeDasharray = `${(percent * circ).toFixed(2)} ${(circ * (1 - percent)).toFixed(2)}`
 

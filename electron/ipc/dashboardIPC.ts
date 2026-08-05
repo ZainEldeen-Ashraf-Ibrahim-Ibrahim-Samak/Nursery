@@ -98,16 +98,22 @@ ipcMain.handle('dashboard:get', async (_event, { month, year }) => {
 
     const kpi = calculateDashboard(payments, expenses, salaries, targetProfitPct)
 
-    // 3. Revenue broken down by service
-    const services = ['حضانة', 'استضافة', 'جلسة']
-    const revenueByService = services.map((srv) => {
-      const srvPayments = payments.filter((p) => p.service === srv)
-      const collectedSrv = srvPayments.reduce((sum, p) => sum + p.paid, 0)
-      return {
-        service: srv,
-        collected: Number(collectedSrv.toFixed(2)),
-      }
-    })
+    // 3. Revenue broken down by service.
+    // Derived from the month's actual payment rows rather than a hardcoded service list:
+    // services are user-definable (service_definitions.is_custom) and payments:generate also
+    // creates 'حصص إضافية' (extra lessons) rows, so a fixed list of three silently dropped
+    // every custom service and all extra-lesson revenue — the breakdown never added up to the
+    // Collected KPI. Zero-revenue services are kept out; the donut/legend render whatever
+    // services actually collected money, and label unknown ones by their own name.
+    const revenueByServiceMap = new Map<string, number>()
+    for (const p of payments) {
+      const service = p.service || 'غير محدد'
+      revenueByServiceMap.set(service, (revenueByServiceMap.get(service) ?? 0) + p.paid)
+    }
+    const revenueByService = [...revenueByServiceMap.entries()]
+      .map(([service, collected]) => ({ service, collected: Number(collected.toFixed(2)) }))
+      .filter((s) => s.collected !== 0)
+      .sort((a, b) => b.collected - a.collected)
 
     // 3b. Collected broken down by payment method (for the Collected card drill-down).
     // Prefer per-installment transactions; fall back to the payment's own method for
@@ -146,7 +152,10 @@ ipcMain.handle('dashboard:get', async (_event, { month, year }) => {
         collected: mKpi.collected,
         expenses: totalExp,
         netProfit: mKpi.netProfit,
-        status: mKpi.collected >= mKpi.targetRequired ? 'target_met' : 'target_missed',
+        // A month with no data at all has collected = 0 AND targetRequired = 0, and 0 >= 0 is
+        // true — which used to paint every empty and future month green. Require a real target
+        // before a month can count as met, matching the guard on the main target KPI below.
+        status: mKpi.targetRequired > 0 && mKpi.collected >= mKpi.targetRequired ? 'target_met' : 'target_missed',
       })
     }
 

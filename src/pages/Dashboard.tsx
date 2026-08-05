@@ -465,14 +465,19 @@ export default function Dashboard() {
                         const totalRev = data.revenueByService.reduce((sum, item) => sum + item.collected, 0)
                         const pct = totalRev > 0 ? Math.round((srv.collected / totalRev) * 100) : 0
                         
-                        // Color matching
-                        const colorClass = 
+                        // The backend now returns whichever services actually collected money,
+                        // including custom ones and 'حصص إضافية' — so anything outside the three
+                        // built-ins must fall back to its own name rather than being mislabelled
+                        // as "Session".
+                        const colorClass =
                           srv.service === 'حضانة' ? 'bg-teal-500' :
-                          srv.service === 'استضافة' ? 'bg-amber-500' : 'bg-emerald-500'
+                          srv.service === 'استضافة' ? 'bg-amber-500' :
+                          srv.service === 'جلسة' ? 'bg-emerald-500' : 'bg-slate-400'
 
-                        const label = 
+                        const label =
                           srv.service === 'حضانة' ? t('services.nursery') :
-                          srv.service === 'استضافة' ? t('services.hosting') : t('services.session')
+                          srv.service === 'استضافة' ? t('services.hosting') :
+                          srv.service === 'جلسة' ? t('services.session') : srv.service
 
                         return (
                           <div key={srv.service} className="border border-slate-100 rounded-lg p-3 space-y-2 hover:bg-slate-50/50 transition-all">

@@ -25,6 +25,37 @@ export function calculatePayment(quantity: number, price: number, paid: number):
   return { total, balance, status }
 }
 
+/**
+ * Same as calculatePayment, but never destroys a pro-rated invoice.
+ *
+ * A child who enrolls mid-month is billed only for the remaining days: `payments:generate`
+ * stores that discounted amount in both `total` and `prorated_calculated`, while `quantity`
+ * stays 1 and `price` stays the FULL monthly rate. So re-deriving the total as quantity × price
+ * — which is exactly what calculatePayment does — silently re-inflates the bill to a whole
+ * month the first time anyone edits the payment or records an installment against it.
+ *
+ * Every path that recomputes an existing payment row must go through here and pass the row, so
+ * the discount survives. Only monthly ('شهر') rows carry this shape: the 'جلسة' pro-rate is
+ * applied by reducing `quantity` instead, so quantity × price is already correct there.
+ */
+export function calculatePaymentPreservingProrate(
+  row: { unit?: string | null; prorated_calculated?: number | null } | undefined | null,
+  quantity: number,
+  price: number,
+  paid: number
+): { total: number; balance: number; status: PaymentStatus } {
+  const prorated = row?.prorated_calculated
+  if (row?.unit === 'شهر' && prorated != null) {
+    // Scale by quantity so the non-pro-rated branch's semantics still hold (quantity is 1 for
+    // every generated monthly row, so in practice this is the stored pro-rated amount).
+    const total = Number((Number(prorated) * quantity).toFixed(2))
+    const balance = Number((total - paid).toFixed(2))
+    const status: PaymentStatus = paid <= 0 ? 'unpaid' : paid >= total ? 'paid' : 'partial'
+    return { total, balance, status }
+  }
+  return calculatePayment(quantity, price, paid)
+}
+
 export function calculateChildStatusRollup(payments: { status: PaymentStatus }[]): PaymentStatus {
   if (payments.length === 0) return 'unpaid'
   const allPaid = payments.every(p => p.status === 'paid')
@@ -218,7 +249,11 @@ ipcMain.handle('payments:generate', async (_event, { month, year }) => {
     let updatedCount = 0
     const now = new Date().toISOString()
 
-    const checkStmt = db.prepare('SELECT id FROM payments WHERE child_id = ? AND service_id = ? AND month = ? AND year = ?')
+    // The 'حصص إضافية' (extra lessons) row is inserted with the SAME service_id as its parent
+    // enrollment, so it must be excluded here — otherwise this lookup can return the extras row
+    // instead of the enrollment's own row, and the regeneration branch below would overwrite the
+    // admin-entered extra-lesson quantity with an attendance/session count.
+    const checkStmt = db.prepare(`SELECT id FROM payments WHERE child_id = ? AND service_id = ? AND month = ? AND year = ? AND service != 'حصص إضافية'`)
     const checkExtraStmt = db.prepare(`SELECT id FROM payments WHERE child_id = ? AND month = ? AND year = ? AND service = 'حصص إضافية'`)
     const insertStmt = db.prepare(`
       INSERT INTO payments (
@@ -241,6 +276,25 @@ ipcMain.handle('payments:generate', async (_event, { month, year }) => {
         AND (ss.service_id IS NULL OR sd.name = ?)
     `)
 
+    // Sessions this child is actually enrolled in, for THIS service, in the period — the basis
+    // for billing a per-session ('جلسة') enrollment.
+    //
+    // `scheduled_sessions` carries no roster of its own: a child's link to a session is its
+    // `attendance_records` row. Counting scheduled_sessions directly (as this used to) charged
+    // a session-billed child for every session held anywhere in the centre that month,
+    // including other children's and other services' sessions. Same service-matching rule as
+    // billableAttendanceStmt above; attendance STATUS is deliberately not filtered, because a
+    // per-session enrollment is billed for the sessions it was scheduled for.
+    const scheduledSessionsStmt = db.prepare(`
+      SELECT COUNT(DISTINCT ar.session_id) as cnt
+      FROM attendance_records ar
+      JOIN scheduled_sessions ss ON ss.id = ar.session_id
+      LEFT JOIN service_definitions sd ON sd.id = ss.service_id
+      WHERE ar.child_id = ?
+        AND ss.session_date >= ? AND ss.session_date <= ?
+        AND (ss.service_id IS NULL OR sd.name = ?)
+    `)
+
     const transaction = db.transaction(() => {
       for (const enrollment of activeEnrollments) {
         const arabicMonthNames = ['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر']
@@ -256,15 +310,24 @@ ipcMain.handle('payments:generate', async (_event, { month, year }) => {
           return Number(row?.cnt) || 0
         }
 
+        // Sessions this child is enrolled in for this service, from `from` through month end.
+        const countScheduledSessions = (from: string = monthStartStr) => {
+          const row = scheduledSessionsStmt.get(enrollment.child_id, from, monthEndStr, enrollment.service) as any
+          return Number(row?.cnt) || 0
+        }
+
         const existing = checkStmt.get(enrollment.child_id, enrollment.id, month, year) as any
-        if (existing && (enrollment.unit === 'يوم' || enrollment.unit === 'ساعة')) {
+        if (existing && (enrollment.unit === 'يوم' || enrollment.unit === 'ساعة' || enrollment.unit === 'جلسة')) {
           // Attendance-driven units: refresh the quantity on regeneration so charges track
           // attendance recorded after the row was first created. Paid amounts are preserved;
           // total/balance/status are recomputed from the new quantity.
+          // 'جلسة' is included because it is now scoped to the child's own sessions, which are
+          // only known once those sessions exist — a row generated early in the month would
+          // otherwise stay stuck at whatever count was visible on generation day.
           const current = db.prepare('SELECT * FROM payments WHERE id = ?').get(existing.id) as any
-          const newQuantity = countBillableAttendance()
+          const newQuantity = enrollment.unit === 'جلسة' ? countScheduledSessions() : countBillableAttendance()
           if (current && current.quantity !== newQuantity) {
-            const { total, balance, status } = calculatePayment(newQuantity, current.price, current.paid)
+            const { total, balance, status } = calculatePaymentPreservingProrate(current, newQuantity, current.price, current.paid)
             db.prepare(`
               UPDATE payments SET quantity = ?, total = ?, balance = ?, status = ?, updated_at = ?, synced = 0
               WHERE id = ?
@@ -284,12 +347,10 @@ ipcMain.handle('payments:generate', async (_event, { month, year }) => {
             // one hour per billable attendance; admin can adjust actual hours manually
             quantity = countBillableAttendance()
           } else if (enrollment.unit === 'جلسة') {
-            // count scheduled sessions in this month
-            const monthPad = monthIndex !== -1 ? String(monthIndex + 1).padStart(2, '0') : '01'
-            const monthStart = `${payYear}-${monthPad}-01`
-            const monthEnd = `${payYear}-${monthPad}-${String(daysInMonth).padStart(2, '0')}`
-            const sessRow = db.prepare(`SELECT COUNT(*) as cnt FROM scheduled_sessions WHERE session_date >= ? AND session_date <= ?`).get(monthStart, monthEnd) as any
-            quantity = sessRow?.cnt || 1
+            // count this child's own sessions for this service in the month (0 is a valid
+            // answer — an enrollment with no sessions yet owes nothing, same as 'يوم'/'ساعة';
+            // the regeneration branch above refreshes it as sessions are added)
+            quantity = countScheduledSessions()
           } else {
             quantity = 1
           }
@@ -309,12 +370,11 @@ ipcMain.handle('payments:generate', async (_event, { month, year }) => {
                 // attendance-driven units: quantity already counts only billable attendance,
                 // which cannot predate registration — no extra pro-rating needed
               } else if (enrollment.unit === 'جلسة') {
-                // count sessions from reg_date to end of month
-                const regDateStr = enrollment.reg_date
-                const monthPad = String(monthIndex + 1).padStart(2, '0')
-                const monthEnd = `${payYear}-${monthPad}-${String(daysInMonth).padStart(2, '0')}`
-                const sessRow = db.prepare(`SELECT COUNT(*) as cnt FROM scheduled_sessions WHERE session_date >= ? AND session_date <= ?`).get(regDateStr, monthEnd) as any
-                quantity = sessRow?.cnt || quantity
+                // count this child's own sessions from reg_date to end of month — the pro-rate
+                // for a per-session enrollment is expressed as a reduced quantity, so
+                // quantity × price stays the correct total (unlike the monthly case, which
+                // needs prorated_calculated to survive later recomputation)
+                quantity = countScheduledSessions(enrollment.reg_date)
                 proratedCalc = Math.round(enrollment.price * quantity)
               }
             }
@@ -419,7 +479,7 @@ ipcMain.handle('payments:update', async (_event, { id, quantity, paid, notes, pa
       }
     }
 
-    const { total, balance, status } = calculatePayment(newQuantity, payment.price, newPaid)
+    const { total, balance, status } = calculatePaymentPreservingProrate(payment, newQuantity, payment.price, newPaid)
     const now = new Date().toISOString()
 
     db.prepare(`
@@ -501,7 +561,7 @@ function recomputePaymentFromTransactions(db: any, paymentId: number) {
   const last = db.prepare(
     'SELECT payment_method_id, payment_method_name FROM payment_transactions WHERE payment_id = ? ORDER BY paid_date DESC, id DESC LIMIT 1'
   ).get(paymentId) as any
-  const { total, balance, status } = calculatePayment(payment.quantity, payment.price, paid)
+  const { total, balance, status } = calculatePaymentPreservingProrate(payment, payment.quantity, payment.price, paid)
   db.prepare(`
     UPDATE payments SET paid = ?, total = ?, balance = ?, status = ?,
       payment_method_id = ?, payment_method_name = ?, updated_at = ?, synced = 0

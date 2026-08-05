@@ -402,11 +402,10 @@ ipcMain.handle('salary:getExpected', async (_event, { employee_id, month, year }
     // all). Only fixed-monthly isn't schedule-driven.
     const projectable = salaryTypeMode === null || ['per_session_fixed', 'hybrid', 'per_child_session', 'per_session_pct'].includes(salaryTypeMode ?? '')
 
-    // Expected total = the remaining scheduled sessions (today onward, for the month in
-    // progress) × each child's resolved rate — independent of what has been attended so far, so
-    // it never mixes stale ledger amounts into the forecast. "Earned so far" (the ledger) is
-    // reported alongside, not added in.
-    let expectedTotal = actualToDate
+    // The schedule scan below counts only the sessions still to come (today onward, for the
+    // month in progress), so it is the REMAINING projection — not the month's total. The full
+    // month is what's already been earned plus what's still to come.
+    let projectedRemaining = 0
     if (projectable) {
       const st = db.prepare(`
         SELECT st.session_rate as session_rate, st.monthly_rate as monthly_rate, st.session_pct as session_pct
@@ -458,14 +457,20 @@ ipcMain.handle('salary:getExpected', async (_event, { employee_id, month, year }
         scheduleTotal += sessionCount * rate
       }
 
-      expectedTotal = scheduleTotal
-      // Hybrid pay adds the fixed monthly component on top of per-session earnings.
-      if (salaryTypeMode === 'hybrid') expectedTotal += st?.monthly_rate ?? 0
+      projectedRemaining = scheduleTotal
+      // No monthly_rate is added here: for hybrid pay computeBaseSalary already includes the
+      // fixed monthly component in `actualToDate`, so adding it again would double-count it.
     }
+
+    // Full month = banked earnings + what the schedule still has to come. Subtracting one from
+    // the other (as this used to) is incoherent — they cover disjoint parts of the month, so a
+    // teacher who had earned 1000 with 800 still to come was reported as a 800 "full month"
+    // total, less than they had already been paid, and 0 remaining.
+    const expectedTotal = actualToDate + projectedRemaining
 
     return {
       actual_to_date: actualToDate,
-      projected_remaining: Number(Math.max(0, expectedTotal - actualToDate).toFixed(2)),
+      projected_remaining: Number(projectedRemaining.toFixed(2)),
       expected_total: Number(expectedTotal.toFixed(2)),
       salary_type_mode: salaryTypeMode,
     }

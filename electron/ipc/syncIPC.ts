@@ -2,6 +2,7 @@ import { ipcMain, BrowserWindow } from 'electron'
 import { getDb } from '../db/connection.js'
 import { applyCloudTombstones } from '../services/tombstones.js'
 import { requireAdmin, checkAuth } from './_guard.js'
+import { calculatePaymentPreservingProrate } from './paymentsIPC.js'
 import { progressReporter } from './progress.js'
 import {
   connectMongo,
@@ -50,6 +51,55 @@ export function computeMergeColumns(local: SyncRecord, cloud: SyncRecord): { col
     }
   }
   return { columns, values }
+}
+
+/**
+ * `payments.paid` is a derived column — it is the SUM of that payment's rows in
+ * `payment_transactions` (see recomputePaymentFromTransactions in paymentsIPC.ts). Sync copies
+ * the two tables independently, so a pull can legitimately land a `payments` row whose `paid`
+ * predates the installment rows that arrived with it (or that were already here), leaving a
+ * payment showing 0 next to transactions that clearly total more.
+ *
+ * This runs once at the END of a pull — after every entity, so `payment_transactions` is fully
+ * populated — and re-derives paid/total/balance/status for any payment that disagrees with its
+ * own transactions.
+ *
+ * Deliberately one-directional — it only ever RAISES `paid` to match transactions that prove
+ * money was received, never lowers it:
+ *   - a payment with no transaction rows at all (paid set directly, pre-installments) is never
+ *     touched, so it can't be zeroed out;
+ *   - `payments:bulkPay` and `payments:update` legitimately set `paid` ABOVE the transaction sum
+ *     without writing a matching transaction row, and this must not silently undo them.
+ * Recovering under-reported money is safe; reducing a recorded payment never is.
+ */
+function reconcilePaymentTotals(db: any): number {
+  const drifted = db.prepare(`
+    SELECT p.id AS id, p.quantity AS quantity, p.price AS price, p.paid AS paid,
+           p.unit AS unit, p.prorated_calculated AS prorated_calculated,
+           ROUND(SUM(t.amount), 2) AS tx_total
+    FROM payments p
+    JOIN payment_transactions t ON t.payment_id = p.id
+    GROUP BY p.id
+    HAVING ROUND(SUM(t.amount), 2) - COALESCE(p.paid, 0) > 0.005
+  `).all() as any[]
+
+  if (drifted.length === 0) return 0
+
+  const now = new Date().toISOString()
+  const update = db.prepare(`
+    UPDATE payments SET paid = ?, total = ?, balance = ?, status = ?, updated_at = ?, synced = 0
+    WHERE id = ?
+  `)
+  for (const row of drifted) {
+    const paid = Number(Number(row.tx_total ?? 0).toFixed(2))
+    // Via the shared helper so a mid-month pro-rated invoice isn't re-inflated to a full month.
+    const { total, balance, status } = calculatePaymentPreservingProrate(row, row.quantity, row.price, paid)
+    update.run(paid, total, balance, status, now, row.id)
+    logSync('pull-reconcile', 'payments', row.id, 'success',
+      `paid ${row.paid} -> ${paid} (re-derived from payment_transactions)`)
+  }
+  console.warn(`[sync:pull] re-derived paid/balance for ${drifted.length} payment(s) from their transactions`)
+  return drifted.length
 }
 
 // ── Helper: log sync action ───────────────────────────────────────────────────
@@ -211,7 +261,7 @@ export async function runPush(force: boolean, report: Reporter = noopReport) {
     const db = getDb()
     await ensureConnected()
 
-    const results: Record<string, { pushed: number; failed: number }> = {}
+    const results: Record<string, { pushed: number; failed: number; skipped: number }> = {}
     const now = new Date().toISOString()
 
     // Total work = all unsynced rows across every entity, so the bar is determinate.
@@ -235,9 +285,27 @@ export async function runPush(force: boolean, report: Reporter = noopReport) {
       const unsynced = db.prepare(query).all() as SyncRecord[]
       let pushed = 0
       let failed = 0
+      let skipped = 0
 
       for (const record of unsynced) {
+        const recordKey = entity.name === 'settings' ? record.key : record.id
         try {
+          // Non-force push must never blindly clobber the cloud: another device may have
+          // written a NEWER version of this same row. Compare timestamps with the exact same
+          // resolveConflict() the pull uses, and when the cloud wins leave both the cloud doc
+          // and the local `synced = 0` flag alone — the pull that follows brings the cloud
+          // version down and marks it synced, which closes the loop.
+          // (Forced push is the explicit "my machine is the source of truth" escape hatch.)
+          if (!force) {
+            const cloudDoc = (await entity.model.findOne({ id: recordKey }).lean()) as SyncRecord | null
+            if (cloudDoc && resolveConflict({ ...record, id: recordKey as any }, cloudDoc) === 'cloud') {
+              logSync('push-skip', entity.name, recordKey, 'skipped', 'cloud copy is newer — pull will reconcile')
+              skipped++
+              report(++done, totalWork, entity.name)
+              continue
+            }
+          }
+
           if (entity.name === 'settings') {
             await entity.model.findOneAndUpdate(
               { id: record.key }, // use key as id for mongo
@@ -257,13 +325,13 @@ export async function runPush(force: boolean, report: Reporter = noopReport) {
           }
           pushed++
         } catch (err: any) {
-          logSync('push', entity.name, record.id, 'error', err.message)
+          logSync('push', entity.name, recordKey, 'error', err.message)
           failed++
         }
         report(++done, totalWork, entity.name)
       }
 
-      results[entity.name] = { pushed, failed }
+      results[entity.name] = { pushed, failed, skipped }
     }
     report(totalWork, totalWork, 'done')
 
@@ -461,8 +529,17 @@ export async function runPull(force: boolean, report: Reporter = noopReport) {
       results[entity.name] = { pulled, merged, skipped, failed, errors, skipReasons }
     }
 
+    // Every table is now in place — safe to re-derive payment totals from their installments.
+    let reconciledPayments = 0
+    try {
+      reconciledPayments = reconcilePaymentTotals(db)
+    } catch (err: any) {
+      logSync('pull-reconcile', 'payments', 'batch', 'error', err?.message ?? String(err))
+      console.error('[sync:pull] payment reconciliation failed:', err)
+    }
+
     report(totalWork, totalWork, 'done')
-    return { results }
+    return { results, reconciledPayments }
   } catch (error: any) {
     logSync('pull', 'all', 'batch', 'error', error.message)
     console.error('sync:pull error:', error)
@@ -495,9 +572,16 @@ let autoSyncTimer: ReturnType<typeof setInterval> | null = null
 let autoSyncRunning = false
 
 /**
- * One auto-sync cycle: push first (force — overwrite cloud with local so auto-sync never
- * silently skips records the `synced` flag missed), then pull (force — cloud wins conflicts,
- * which after the push means only records this machine doesn't have yet get written locally).
+ * One auto-sync cycle: push, then pull — both in NON-forced mode, so every write on both legs
+ * goes through resolveConflict() and the most recently edited copy of a row wins.
+ *
+ * This must never use force. A forced cycle means "push every local row over the cloud, then
+ * let every cloud row overwrite local", with no timestamp check on either leg — so a device
+ * holding a stale copy of a payment would force-push its old paid = 0 over the cloud's real
+ * amount, and the force-pull on the other device would then wipe the real amount there too,
+ * zeroing the record on BOTH machines. The `force` flags stay available for the manual
+ * push/pull buttons, where an admin has deliberately chosen a source of truth.
+ *
  * Calls runPush/runPull directly — ipcMain.handle() handlers are NOT reachable through
  * ipcMain.listeners(), which is why the previous listener-based approach never ran.
  */
@@ -522,9 +606,9 @@ async function runAutoSyncCycle(): Promise<void> {
     broadcastAutoSyncStatus('connecting')
     await ensureConnected()
     broadcastAutoSyncStatus('pushing')
-    await runPush(true)
+    await runPush(false)
     broadcastAutoSyncStatus('pulling')
-    await runPull(true)
+    await runPull(false)
     broadcastAutoSyncStatus('done')
   } catch (err) {
     console.error('Auto-sync error:', err)
