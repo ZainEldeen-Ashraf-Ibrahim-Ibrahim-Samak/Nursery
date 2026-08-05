@@ -1,5 +1,6 @@
 import mongoose, { Schema, Model } from 'mongoose'
-import { promises as dnsPromises } from 'dns'
+import { promises as dnsPromises } from 'node:dns'
+import type { SrvRecord } from 'node:dns'
 
 /**
  * mongoSync.ts — Mongoose models for cloud sync collections.
@@ -27,7 +28,7 @@ async function convertSrvToStandardUri(uri: string): Promise<string> {
     const hostname = url.hostname;
 
     // Fetch SRV records
-    const srvRecords = await resolver.resolveSrv(`_mongodb._tcp.${hostname}`);
+    const srvRecords: SrvRecord[] = await resolver.resolveSrv(`_mongodb._tcp.${hostname}`);
     if (!srvRecords || srvRecords.length === 0) throw new Error('No SRV records found');
 
     // Fetch TXT records
@@ -35,7 +36,7 @@ async function convertSrvToStandardUri(uri: string): Promise<string> {
     const txtOptions = txtRecords.flat().join('&');
 
     // Construct hosts string
-    const hosts = srvRecords.map(r => `${r.name}:${r.port}`).join(',');
+    const hosts = srvRecords.map((r: SrvRecord) => `${r.name}:${r.port}`).join(',');
 
     // Extract credentials
     const credentials = url.username ? `${url.username}:${url.password}@` : '';
