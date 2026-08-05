@@ -28,6 +28,8 @@ interface PushPullResults {
     merged?: number
     skipped?: number
     failed?: number
+    /** Records sharing an id with a DIFFERENT record on the other device — left unapplied. */
+    collisions?: number
     errors?: { recordId: string; message: string }[]
     skipReasons?: { recordId: string; message: string }[]
   }

@@ -111,10 +111,19 @@ export default function SyncManager() {
       merged: stats.merged ?? 0,
       failed: stats.failed ?? 0,
       skipped: stats.skipped ?? 0,
+      collisions: stats.collisions ?? 0,
       errors: (stats.errors ?? []) as { recordId: string; message: string }[],
       skipReasons: (stats.skipReasons ?? []) as { recordId: string; message: string }[]
     }))
   }
+
+  // Records that two devices independently gave the same id. Sync refuses to apply these
+  // (applying one would destroy the other), so they need a person to resolve them — surfaced
+  // as a standing banner rather than buried in the per-entity detail lists.
+  const collisionCount = [lastPushResults, lastPullResults].reduce((total, results) => {
+    if (!results) return total
+    return total + Object.values(results).reduce((s: number, st: any) => s + (st.collisions ?? 0), 0)
+  }, 0)
 
   return (
     <div className="p-6 space-y-6">
@@ -133,6 +142,14 @@ export default function SyncManager() {
       {error && (
         <Alert variant="danger" title={isAr ? 'خطأ في المزامنة' : 'Sync Error'} onClose={clearError}>
           {error}
+        </Alert>
+      )}
+
+      {collisionCount > 0 && (
+        <Alert variant="danger" title={isAr ? 'تعارض في أرقام السجلات' : 'Record ID Collision'}>
+          {isAr
+            ? `${collisionCount} سجل(ات) لها نفس الرقم على جهازين مختلفين ولكنها سجلات مختلفة. لم تتم مزامنتها حتى لا يُحذف أحدهما. راجع "تفاصيل" أدناه، ثم أعد إدخال أحد السجلين ليأخذ رقماً جديداً.`
+            : `${collisionCount} record(s) carry the same id on two devices but are different records. They were NOT synced, so neither one gets destroyed. Check the details below, then re-enter one of each pair so it is assigned a fresh id.`}
         </Alert>
       )}
 

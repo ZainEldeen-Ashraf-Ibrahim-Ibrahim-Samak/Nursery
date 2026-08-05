@@ -416,17 +416,19 @@ export async function runPull(force: boolean, report: Reporter = noopReport) {
     const results: Record<
       string,
       {
-        pulled: number; merged: number; skipped: number; failed: number
+        pulled: number; merged: number; skipped: number; failed: number; collisions: number
         errors: { recordId: string; message: string }[]
         skipReasons: { recordId: string; message: string }[]
       }
     > = {}
+    let totalCollisions = 0
 
     for (const entity of SYNC_ENTITIES) {
       let pulled = 0
       let merged = 0
       let skipped = 0
       let failed = 0
+      let collisions = 0
       let orphanSkipped = 0
       const errors: { recordId: string; message: string }[] = []
       const skipReasons: { recordId: string; message: string }[] = []
@@ -491,12 +493,27 @@ export async function runPull(force: boolean, report: Reporter = noopReport) {
               logSync('pull-insert', entity.name, cloudRecord.id, 'success')
               pulled++
             } else {
+              // Same id but a different record entirely (two devices numbered independently)?
+              // Overwriting would destroy the local record, so refuse and report it. This is
+              // checked even under `force`: force means "cloud wins conflicts", not "discard a
+              // record that has no cloud counterpart at all".
+              const collision = detectIdCollision(local, cloudRecord)
+              if (collision) {
+                logSync('pull-collision', entity.name, cloudRecord.id, 'skipped-collision', collision)
+                console.error(`[sync:pull] ${entity.name}: ${collision}`)
+                noteSkip(cloudRecord.id, collision)
+                collisions++
+                skipped++
+                report(++done, totalWork, entity.name)
+                continue
+              }
+
               // Conflict check
               // for settings, local uses `key`, let's map it to `id` for resolveConflict
               if (entity.name === 'settings') {
                  local.id = local.key as any
               }
-              
+
               const winner = force ? 'cloud' : resolveConflict(local, cloudRecord)
               if (winner === 'cloud') {
                 // Update local with cloud data
@@ -576,7 +593,15 @@ export async function runPull(force: boolean, report: Reporter = noopReport) {
         }
       }
 
-      results[entity.name] = { pulled, merged, skipped, failed, errors, skipReasons }
+      if (collisions > 0) {
+        console.error(`[sync:pull] ${entity.name}: ${collisions} id collision(s) — cloud records left unapplied to avoid destroying local records with the same id`)
+        if (errors.length < 25) {
+          errors.push({ recordId: 'collisions', message: `${collisions} record(s) share an id with a DIFFERENT local record and were not applied — see the sync log` })
+        }
+      }
+
+      results[entity.name] = { pulled, merged, skipped, failed, collisions, errors, skipReasons }
+      totalCollisions += collisions
     }
 
     // Every table is now in place — safe to re-derive payment totals from their installments.
@@ -589,7 +614,7 @@ export async function runPull(force: boolean, report: Reporter = noopReport) {
     }
 
     report(totalWork, totalWork, 'done')
-    return { results, reconciledPayments }
+    return { results, reconciledPayments, collisions: totalCollisions }
   } catch (error: any) {
     logSync('pull', 'all', 'batch', 'error', error.message)
     console.error('sync:pull error:', error)
