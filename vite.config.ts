@@ -1,9 +1,11 @@
-/// <reference types="vitest/config" />
-import { defineConfig } from 'vite'
-import { configDefaults } from 'vitest/config'
+import { defineConfig, configDefaults } from 'vitest/config'
 import path from 'node:path'
+import fs from 'node:fs'
 import react from '@vitejs/plugin-react'
 import electron from 'vite-plugin-electron'
+
+const pkg = JSON.parse(fs.readFileSync(path.resolve(import.meta.dirname, 'package.json'), 'utf-8'))
+const externalDependencies = ['electron', ...Object.keys(pkg.dependencies || {})]
 
 export default defineConfig({
   // Playwright owns tests/e2e (run via `npm run test:e2e`); keep them out of Vitest.
@@ -12,7 +14,7 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './src'),
+      '@': path.resolve(import.meta.dirname, './src'),
     },
   },
   plugins: [
@@ -30,11 +32,7 @@ export default defineConfig({
             minify: false,
             outDir: 'dist-electron',
             rollupOptions: {
-              external: [
-                'mongoose',
-                'exceljs',
-                'pdfmake'
-              ]
+              external: externalDependencies
             }
           },
           // Watch all electron source files so any IPC/service change restarts the app
@@ -60,7 +58,7 @@ export default defineConfig({
             // The package is `"type": "module"`, so force a CJS build emitted as
             // `.cjs` (unambiguously CommonJS regardless of package "type").
             lib: {
-              entry: path.resolve(__dirname, 'electron/preload.ts'),
+              entry: path.resolve(import.meta.dirname, 'electron/preload.ts'),
               formats: ['cjs'],
               fileName: () => 'preload.cjs',
             },
