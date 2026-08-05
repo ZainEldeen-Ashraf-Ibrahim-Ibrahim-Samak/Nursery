@@ -54,6 +54,36 @@ export function computeMergeColumns(local: SyncRecord, cloud: SyncRecord): { col
 }
 
 /**
+ * Detects two DIFFERENT records that were independently assigned the same id on two devices.
+ *
+ * Every synced table uses SQLite's per-device `INTEGER PRIMARY KEY AUTOINCREMENT` and Mongo keys
+ * each document on that integer, with no device component anywhere. So if two devices each add a
+ * payment between syncs, both get the same next id — and sync treats them as the same row, with
+ * one silently overwriting the other and that record being lost for good.
+ *
+ * `created_at` is the tell: the same record synced between devices keeps the timestamp it was
+ * created with, while two independently-created records have different ones. When they disagree,
+ * this is NOT a conflict to resolve — it is two distinct records — so the caller must refuse the
+ * write and surface it rather than picking a "winner" and destroying real data.
+ *
+ * A 2-second tolerance absorbs the format difference between the two timestamp styles in the
+ * codebase (`strftime(...)` truncates to whole seconds, `toISOString()` keeps milliseconds).
+ * Returns a human-readable explanation, or null when there's no collision.
+ */
+export function detectIdCollision(local: SyncRecord, cloud: SyncRecord): string | null {
+  const localCreated = (local as any)?.created_at
+  const cloudCreated = (cloud as any)?.created_at
+  if (!localCreated || !cloudCreated) return null // table has no created_at — can't tell
+
+  const localMs = new Date(localCreated).getTime()
+  const cloudMs = new Date(cloudCreated).getTime()
+  if (!Number.isFinite(localMs) || !Number.isFinite(cloudMs)) return null
+  if (Math.abs(localMs - cloudMs) <= 2000) return null
+
+  return `ID COLLISION on id ${cloud.id} — the local row was created ${localCreated} but the cloud row with the same id was created ${cloudCreated}. These are two different records that two devices each numbered ${cloud.id}. Refusing to overwrite; one of them has to be re-entered so it gets a fresh id.`
+}
+
+/**
  * `payments.paid` is a derived column — it is the SUM of that payment's rows in
  * `payment_transactions` (see recomputePaymentFromTransactions in paymentsIPC.ts). Sync copies
  * the two tables independently, so a pull can legitimately land a `payments` row whose `paid`
@@ -261,7 +291,8 @@ export async function runPush(force: boolean, report: Reporter = noopReport) {
     const db = getDb()
     await ensureConnected()
 
-    const results: Record<string, { pushed: number; failed: number; skipped: number }> = {}
+    const results: Record<string, { pushed: number; failed: number; skipped: number; collisions: number }> = {}
+    let totalCollisions = 0
     const now = new Date().toISOString()
 
     // Total work = all unsynced rows across every entity, so the bar is determinate.
@@ -286,6 +317,7 @@ export async function runPush(force: boolean, report: Reporter = noopReport) {
       let pushed = 0
       let failed = 0
       let skipped = 0
+      let collisions = 0
 
       for (const record of unsynced) {
         const recordKey = entity.name === 'settings' ? record.key : record.id
@@ -298,6 +330,19 @@ export async function runPush(force: boolean, report: Reporter = noopReport) {
           // (Forced push is the explicit "my machine is the source of truth" escape hatch.)
           if (!force) {
             const cloudDoc = (await entity.model.findOne({ id: recordKey }).lean()) as SyncRecord | null
+
+            // Two devices independently numbering different records the same is not a conflict
+            // to resolve — pushing would destroy the other device's record in the cloud.
+            const collision = cloudDoc ? detectIdCollision(record, cloudDoc) : null
+            if (collision) {
+              logSync('push-collision', entity.name, recordKey, 'skipped-collision', collision)
+              console.error(`[sync:push] ${entity.name}: ${collision}`)
+              collisions++
+              skipped++
+              report(++done, totalWork, entity.name)
+              continue
+            }
+
             if (cloudDoc && resolveConflict({ ...record, id: recordKey as any }, cloudDoc) === 'cloud') {
               logSync('push-skip', entity.name, recordKey, 'skipped', 'cloud copy is newer — pull will reconcile')
               skipped++
@@ -331,11 +376,16 @@ export async function runPush(force: boolean, report: Reporter = noopReport) {
         report(++done, totalWork, entity.name)
       }
 
-      results[entity.name] = { pushed, failed, skipped }
+      results[entity.name] = { pushed, failed, skipped, collisions }
+      totalCollisions += collisions
     }
     report(totalWork, totalWork, 'done')
 
-    return { results }
+    if (totalCollisions > 0) {
+      console.error(`[sync:push] ${totalCollisions} record(s) NOT pushed — same id, different record on the other device. See the sync log.`)
+    }
+
+    return { results, collisions: totalCollisions }
   } catch (error: any) {
     logSync('push', 'all', 'batch', 'error', error.message)
     console.error('sync:push error:', error)

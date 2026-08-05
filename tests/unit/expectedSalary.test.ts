@@ -74,4 +74,43 @@ describe('salary:getExpected — remaining-schedule forecast (per_child_session 
     expect(result.actual_to_date).toBe(0)
     expect(result.projected_remaining).toBe(remainingDays * 130)
   })
+
+  /**
+   * Regression: the full-month total used to be the REMAINING schedule alone, with
+   * `projected_remaining` computed as `max(0, remaining − earned)`. Those two figures cover
+   * disjoint parts of the month, so subtracting one from the other was incoherent — a teacher
+   * who had already banked more than the remaining schedule was reported with a "full month"
+   * total BELOW what they'd been paid, and 0 remaining. Full month = earned + still to come.
+   */
+  it('expected_total = earnings already banked + the remaining schedule', async () => {
+    const today = new Date()
+    const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate()
+    const month = String(today.getMonth() + 1)
+    const year = today.getFullYear()
+    const remainingDays = daysInMonth - today.getDate() + 1
+    const now = new Date().toISOString()
+
+    // A paid (frozen — not re-snapshotted) ledger entry dated earlier this month.
+    const earnedDate = `${year}-${String(today.getMonth() + 1).padStart(2, '0')}-01`
+    const childId = (db.prepare('SELECT id FROM children LIMIT 1').get() as any).id
+    const sessionId = Number(db.prepare(`
+      INSERT INTO scheduled_sessions (session_date, created_at, updated_at, synced) VALUES (?, ?, ?, 0)
+    `).run(earnedDate, now, now).lastInsertRowid)
+    const recordId = Number(db.prepare(`
+      INSERT INTO attendance_records (session_id, child_id, status, recorded_at, updated_at, synced)
+      VALUES (?, ?, 'attended', ?, ?, 0)
+    `).run(sessionId, childId, now, now).lastInsertRowid)
+    db.prepare(`
+      INSERT INTO teacher_payments (teacher_id, child_id, attendance_record_id, attendance_date, session_cost, status, created_at, updated_at, synced)
+      VALUES (?, ?, ?, ?, 130, 'paid', ?, ?, 0)
+    `).run(teacherId, childId, recordId, earnedDate, now, now)
+
+    const result = await getExpected(null, { employee_id: teacherId, month, year })
+
+    expect(result.actual_to_date).toBe(130)
+    expect(result.projected_remaining).toBe(remainingDays * 130)
+    expect(result.expected_total).toBe(130 + remainingDays * 130)
+    // The full month can never come out below what has already been earned.
+    expect(result.expected_total).toBeGreaterThanOrEqual(result.actual_to_date)
+  })
 })

@@ -521,27 +521,44 @@ ipcMain.handle('payments:bulkPay', async (_event, { ids, payment_method_id }) =>
 
     const now = new Date().toISOString()
     let updatedCount = 0
+    let alreadySettled = 0
 
     const loadStmt = db.prepare('SELECT * FROM payments WHERE id = ?')
-    const updateStmt = db.prepare(`
-      UPDATE payments
-      SET paid = total, balance = 0, status = 'paid',
-          payment_method_id = ?, payment_method_name = ?, updated_at = ?, synced = 0
-      WHERE id = ?
+    // Settling a payment now writes a real transaction row for the outstanding amount instead
+    // of assigning `paid = total` directly. `paid` is derived from SUM(payment_transactions),
+    // so the old direct write left the payment's own installment list unable to explain its
+    // paid figure — the Collected-by-method drill-down under-reported the money, and any later
+    // recompute (adding an installment, the post-pull sync reconciliation) disagreed with it.
+    const insertTxStmt = db.prepare(`
+      INSERT INTO payment_transactions (payment_id, amount, payment_method_id, payment_method_name, paid_date, notes, created_at, updated_at, synced)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
     `)
 
     const transaction = db.transaction(() => {
       for (const id of ids) {
-        const payment = loadStmt.get(id) as Payment | undefined
-        if (payment) {
-          updateStmt.run(methodId, methodName, now, id)
-          updatedCount++
+        const payment = loadStmt.get(id) as any
+        if (!payment) continue
+
+        const outstanding = Number((Number(payment.total || 0) - Number(payment.paid || 0)).toFixed(2))
+        if (outstanding <= 0) {
+          // Nothing left to collect — recording a zero/negative transaction would corrupt the
+          // ledger, so leave it untouched rather than counting it as a payment.
+          alreadySettled++
+          continue
         }
+
+        seedLegacyPaidAsTransaction(db, payment, now)
+        insertTxStmt.run(
+          id, outstanding, methodId, methodName, now.slice(0, 10),
+          'تحصيل جماعي / Bulk payment', now, now
+        )
+        recomputePaymentFromTransactions(db, id)
+        updatedCount++
       }
     })
 
     transaction()
-    return { updated: updatedCount }
+    return { updated: updatedCount, alreadySettled }
   } catch (error: any) {
     console.error('Failed to bulk pay payments:', error)
     throw new Error(error.message || 'Failed to process bulk payments')
@@ -549,6 +566,29 @@ ipcMain.handle('payments:bulkPay', async (_event, { ids, payment_method_id }) =>
 })
 
 // ── Partial payments / installments ───────────────────────────────────────────
+
+/**
+ * Preserves a payment's pre-existing `paid` amount as a seed transaction row.
+ *
+ * `paid` is derived from SUM(payment_transactions), but rows created before installments
+ * existed (or settled by an older bulk-pay) carry a `paid` figure with no transaction behind it.
+ * Writing the first real transaction against such a row would otherwise make the sum drop to
+ * just that new amount, silently erasing the money already collected. Called before every
+ * transaction insert; a no-op once the row has any transactions of its own.
+ */
+function seedLegacyPaidAsTransaction(db: any, payment: any, now: string): void {
+  const existing = (db.prepare(
+    'SELECT COUNT(*) as c FROM payment_transactions WHERE payment_id = ?'
+  ).get(payment.id) as any).c
+  if (existing > 0 || Number(payment.paid) <= 0) return
+  db.prepare(`
+    INSERT INTO payment_transactions (payment_id, amount, payment_method_id, payment_method_name, paid_date, notes, created_at, updated_at, synced)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
+  `).run(
+    payment.id, Number(payment.paid), payment.payment_method_id ?? null, payment.payment_method_name ?? null,
+    (payment.updated_at || payment.created_at || now).slice(0, 10), 'رصيد سابق / Previous balance', now, now
+  )
+}
 
 // Recomputes a payment's paid/balance/status from the sum of its transactions and
 // mirrors the most recent transaction's method onto the payment row (legacy single field).
@@ -603,18 +643,9 @@ ipcMain.handle('payments:addTransaction', async (_event, { payment_id, amount, p
     const date = paid_date || now.slice(0, 10)
 
     db.transaction(() => {
-      const existing = (db.prepare(
-        'SELECT COUNT(*) as c FROM payment_transactions WHERE payment_id = ?'
-      ).get(payment_id) as any).c
       // Preserve any pre-existing paid amount (set before installments existed) as a seed row
       // so paid = SUM(transactions) stays correct.
-      if (existing === 0 && Number(payment.paid) > 0) {
-        db.prepare(`
-          INSERT INTO payment_transactions (payment_id, amount, payment_method_id, payment_method_name, paid_date, notes, created_at, updated_at, synced)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
-        `).run(payment_id, Number(payment.paid), payment.payment_method_id ?? null, payment.payment_method_name ?? null,
-          (payment.updated_at || payment.created_at || now).slice(0, 10), 'رصيد سابق / Previous balance', now, now)
-      }
+      seedLegacyPaidAsTransaction(db, payment, now)
       db.prepare(`
         INSERT INTO payment_transactions (payment_id, amount, payment_method_id, payment_method_name, paid_date, notes, created_at, updated_at, synced)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
