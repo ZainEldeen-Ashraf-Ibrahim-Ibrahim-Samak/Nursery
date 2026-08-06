@@ -1,7 +1,10 @@
 // MUST be first: loads .env into process.env before any module reads it.
 import { checkRequiredConfig } from './env.js'
 import { app, BrowserWindow, Menu, protocol, net, dialog, ipcMain, shell } from 'electron'
-import { autoUpdater } from 'electron-updater'
+// electron-updater is CommonJS; under Node's ESM loader its named exports are
+// not statically detectable, so import the default export and destructure.
+import electronUpdater from 'electron-updater'
+const { autoUpdater } = electronUpdater
 import path from 'node:path'
 import fs from 'node:fs'
 import { fileURLToPath, pathToFileURL } from 'node:url'
