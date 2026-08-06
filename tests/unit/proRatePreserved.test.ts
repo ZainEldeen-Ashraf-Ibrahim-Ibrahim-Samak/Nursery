@@ -1,4 +1,12 @@
-import { describe, it, expect } from 'vitest'
+import { vi, describe, it, expect } from 'vitest'
+
+// paymentsIPC registers its IPC handlers on import, so `electron` has to be stubbed before the
+// module is pulled in — otherwise importing these two pure helpers tries to boot real Electron.
+vi.mock('electron', () => ({
+  ipcMain: { handle: vi.fn() },
+  app: { getPath: () => 'mock-user-data' },
+}))
+
 import { calculatePayment, calculatePaymentPreservingProrate } from '../../electron/ipc/paymentsIPC.js'
 
 /**
