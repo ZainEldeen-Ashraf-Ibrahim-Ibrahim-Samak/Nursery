@@ -2,7 +2,7 @@ import { n as getDb, r as initDb, t as closeDb } from "./connection-DNiMlhbf.js"
 import path from "node:path";
 import dotenv from "dotenv";
 import { BrowserWindow, Menu, app, dialog, ipcMain, net, protocol, shell } from "electron";
-import { autoUpdater } from "electron-updater";
+import electronUpdater from "electron-updater";
 import fs from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import bcrypt from "bcryptjs";
@@ -10389,6 +10389,7 @@ ipcMain.handle("calendar:getDay", async (_event, { date }) => {
 });
 //#endregion
 //#region electron/main.ts
+var { autoUpdater } = electronUpdater;
 var __filename = fileURLToPath(import.meta.url);
 var __dirname = path.dirname(__filename);
 app.commandLine.appendSwitch("disable-http2");
