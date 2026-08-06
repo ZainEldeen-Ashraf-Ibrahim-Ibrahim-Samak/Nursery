@@ -1,13 +1,99 @@
 import * as React from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '../../store/useAuthStore.js'
+import { useSyncStore } from '../../store/useSyncStore.js'
 import { LanguageSwitcher } from './LanguageSwitcher.js'
 import { NotificationsBell } from './NotificationsBell.js'
 import { Button } from '../ui/Button.js'
+import clsx from 'clsx'
 
 export const Header: React.FC = () => {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
+  const isAr = i18n.language === 'ar'
   const { user, logout } = useAuthStore()
+
+  const { status, fetchStatus, reconnect, push, pull, isPushing, isPulling } = useSyncStore()
+  const [localLoading, setLocalLoading] = useState(false)
+  const [syncStatusMsg, setSyncStatusMsg] = useState<{ textAr: string; textEn: string; type: 'success' | 'error' | 'info' } | null>(null)
+  const messageTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    fetchStatus().catch(console.error)
+  }, [fetchStatus])
+
+  const handleRefresh = async () => {
+    if (localLoading || isPushing || isPulling) return
+
+    if (messageTimer.current) {
+      clearTimeout(messageTimer.current)
+    }
+    setSyncStatusMsg(null)
+    setLocalLoading(true)
+
+    try {
+      let currentStatus = status
+      if (!currentStatus) {
+        await fetchStatus()
+        currentStatus = useSyncStore.getState().status
+      }
+
+      if (!currentStatus?.connected) {
+        setSyncStatusMsg({
+          textAr: 'جاري الاتصال بقاعدة البيانات...',
+          textEn: 'Connecting to database...',
+          type: 'info',
+        })
+        const ok = await reconnect()
+        if (!ok) {
+          throw new Error('Database disconnected. Please check settings / قاعدة البيانات غير متصلة')
+        }
+      }
+
+      setSyncStatusMsg({
+        textAr: 'جاري رفع البيانات (إجباري)...',
+        textEn: 'Uploading data (force)...',
+        type: 'info',
+      })
+      await push(true)
+
+      setSyncStatusMsg({
+        textAr: 'جاري تنزيل البيانات (إجباري)...',
+        textEn: 'Downloading data (force)...',
+        type: 'info',
+      })
+      await pull(true)
+
+      const latestError = useSyncStore.getState().error
+      if (latestError) {
+        throw new Error(latestError)
+      }
+
+      setSyncStatusMsg({
+        textAr: 'تمت المزامنة والتحديث بنجاح ✓',
+        textEn: 'Sync & refresh completed ✓',
+        type: 'success',
+      })
+    } catch (err: any) {
+      console.error('Manual refresh failed:', err)
+      setSyncStatusMsg({
+        textAr: `فشلت المزامنة: ${err.message || 'خطأ غير معروف'}`,
+        textEn: `Sync failed: ${err.message || 'Unknown error'}`,
+        type: 'error',
+      })
+    } finally {
+      setLocalLoading(false)
+      messageTimer.current = setTimeout(() => {
+        setSyncStatusMsg(null)
+      }, 4000)
+    }
+  }
+
+  useEffect(() => {
+    return () => {
+      if (messageTimer.current) clearTimeout(messageTimer.current)
+    }
+  }, [])
 
   return (
     <header className="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between shadow-sm">
@@ -23,6 +109,51 @@ export const Header: React.FC = () => {
 
       {/* Actions */}
       <div className="flex items-center gap-4">
+        {/* Sync Status Message */}
+        {syncStatusMsg && (
+          <span
+            className={clsx(
+              "text-xs px-2.5 py-1 rounded-full font-semibold border transition-all duration-300 shadow-sm animate-fade-in",
+              {
+                "bg-emerald-50 border-emerald-200 text-emerald-700": syncStatusMsg.type === 'success',
+                "bg-amber-50 border-amber-200 text-amber-700": syncStatusMsg.type === 'error',
+                "bg-sky-50 border-sky-200 text-sky-700": syncStatusMsg.type === 'info',
+              }
+            )}
+          >
+            {isAr ? syncStatusMsg.textAr : syncStatusMsg.textEn}
+          </span>
+        )}
+
+        {/* Force Sync Refresh Button */}
+        <button
+          onClick={handleRefresh}
+          disabled={localLoading || isPushing || isPulling}
+          title={isAr ? "مزامنة وتحديث إجباري" : "Force Sync & Refresh"}
+          className={clsx(
+            "p-2 rounded-lg text-slate-500 hover:text-primary hover:bg-slate-50 border border-slate-200 shadow-sm transition-all focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex items-center justify-center gap-1.5",
+            {
+              "border-primary text-primary bg-primary/5": localLoading || isPushing || isPulling
+            }
+          )}
+        >
+          <svg
+            className={clsx("h-5 w-5", {
+              "animate-spin": localLoading || isPushing || isPulling,
+            })}
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth="2"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M4 4v5h.582m15.356 2A8.001 8.001 0 1121.21 8H18.2"
+            />
+          </svg>
+        </button>
+
         {/* Notifications */}
         <NotificationsBell />
 
