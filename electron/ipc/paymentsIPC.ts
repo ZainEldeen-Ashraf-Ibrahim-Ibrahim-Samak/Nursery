@@ -2,6 +2,7 @@ import { ipcMain } from 'electron'
 import { getDb } from '../db/connection.js'
 import { getCurrentUser } from './authIPC.js'
 import { requireAdmin } from './_guard.js'
+import { attachExpectedTotals } from '../services/monthlyTotals.js'
 import type { Payment, PaymentStatus } from '../../src/types/index.js'
 
 // Pure function for payment calculations (exported for unit testing)
@@ -95,58 +96,32 @@ ipcMain.handle('payments:get', async (_event, { month, year }) => {
       ORDER BY c.name ASC
     `).all(month, year) as (Payment & { service_lesson_days: string | null })[]
 
-    // Expected quantity: the full scheduled amount for the month regardless of attendance
-    // (unlike the billed `quantity`, which for attendance-driven units only counts days/hours
-    // actually attended or absent-unexcused so far). Shown to admins as a preview total.
-    const arabicMonthNames = ['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر']
-    const monthIndex = arabicMonthNames.indexOf(month)
-    const payYear = Number(year)
-    const daysInMonth = monthIndex !== -1 ? new Date(payYear, monthIndex + 1, 0).getDate() : 30
+    // Expected quantity/total: the FULL scheduled amount for the month — what the child owes by
+    // month end — as opposed to the billed `quantity`, which for attendance-driven units only
+    // counts days/hours already attended (or absent-unexcused). Shared with the Dashboard via
+    // monthlyTotals so the two screens can never report different figures for the same month.
+    attachExpectedTotals(payments as any, month, year)
 
-    // Same calendar-based counting as the ChildForm's ServiceCostPreview banner: occurrences of
-    // the service's lesson days from today (inclusive) through the end of the month count, for
-    // the month currently in progress — already-elapsed days don't inflate the expected total.
-    // Past/future months (not the one in progress) count the whole month, since there's no
-    // "today" boundary inside them.
-    const today = new Date()
-    const isCurrentMonth = monthIndex === today.getMonth() && payYear === today.getFullYear()
-    const startDay = isCurrentMonth ? today.getDate() : 1
-    const countLessonDayOccurrences = (lessonDays: number[]): number => {
-      let count = 0
-      for (let d = startDay; d <= daysInMonth; d++) {
-        if (lessonDays.includes(new Date(payYear, monthIndex, d).getDay())) count++
-      }
-      return count
-    }
-
-    const computeExpectedQuantity = (p: Payment & { service_lesson_days: string | null }): number => {
-      if (p.unit === 'شهر') return 1
-      // 'يوم' / 'ساعة' / 'جلسة' — expected = all lesson-day occurrences in the calendar month
-      let lessonDays: number[] = []
-      try { lessonDays = JSON.parse(p.service_lesson_days || '[]') } catch { /* no schedule set */ }
-      if (lessonDays.length === 0 || monthIndex === -1) return p.quantity
-      return countLessonDayOccurrences(lessonDays)
-    }
-
-    for (const p of payments as any[]) {
-      p.expected_quantity = computeExpectedQuantity(p)
-      p.expected_total = Number((p.expected_quantity * p.price).toFixed(2))
-    }
-
-    // Compute summaries
+    // Compute summaries. `totalInvoiced` and `arrears` are stated on the EXPECTED total: an
+    // attendance-billed enrollment half-way through the month has only accrued half its charge
+    // in `total`, and reporting that as the month's invoiced/outstanding figure understated the
+    // whole book by exactly the part of the month that hadn't happened yet.
     let totalInvoiced = 0
+    let totalBilled = 0
     let totalCollected = 0
     let arrears = 0
-    
+
     const childMap = new Map<number, any>()
-    
-    for (const p of payments) {
-      totalInvoiced += p.total
+
+    for (const p of payments as (Payment & { expected_total: number })[]) {
+      totalInvoiced += p.expected_total
+      totalBilled += p.total
       totalCollected += p.paid
-      if (p.balance > 0) {
-        arrears += p.balance
+      const outstanding = p.expected_total - p.paid
+      if (outstanding > 0) {
+        arrears += outstanding
       }
-      
+
       if (!childMap.has(p.child_id)) {
         childMap.set(p.child_id, {
           child_id: p.child_id,
@@ -216,6 +191,10 @@ ipcMain.handle('payments:get', async (_event, { month, year }) => {
       byChild: Array.from(childMap.values()).sort((a, b) => a.child_name.localeCompare(b.child_name)),
       summary: {
         totalInvoiced: Number(totalInvoiced.toFixed(2)),
+        // What has actually accrued so far (SUM of payments.total) — kept alongside the
+        // expected figure so the difference between "owed by month end" and "billed to date"
+        // stays visible instead of silently changing what totalInvoiced means.
+        totalBilled: Number(totalBilled.toFixed(2)),
         totalCollected: Number(totalCollected.toFixed(2)),
         arrears: Number(arrears.toFixed(2))
       }

@@ -1,13 +1,30 @@
 import { useState, useEffect, useCallback } from 'react'
 import { friendlyError } from '../utils/errors.js'
 
+export interface ArrearsBreakdown {
+  /** Still owed BY families: expected total for the month minus what they have paid. */
+  children: number
+  /** Still owed TO staff: payroll due for the month minus what has been paid out. */
+  salaries: number
+  /** The month's expenses (the expenses table has no paid/unpaid split, so all of it counts). */
+  expenses: number
+}
+
 export interface DashboardKPIs {
+  /** What the month should bring in by month end — the full scheduled/expected total. */
   invoiced: number
+  /** What has accrued so far (attendance-billed services only accrue as days are attended). */
+  billed: number
   collected: number
+  /** Every obligation the month still carries — the three parts of `arrearsBreakdown`. */
   arrears: number
+  arrearsBreakdown: ArrearsBreakdown
   collectionRate: number
   expensesTotal: number
+  /** Payroll actually paid out this month. */
   salariesTotal: number
+  /** Payroll owed for this month, whether or not it has been paid. */
+  salariesDue: number
   netProfit: number
 }
 

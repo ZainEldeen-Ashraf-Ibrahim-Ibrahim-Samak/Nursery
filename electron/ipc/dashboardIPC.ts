@@ -1,73 +1,136 @@
 import { ipcMain } from 'electron'
 import { getDb } from '../db/connection.js'
 import { getCurrentUser } from './authIPC.js'
+import { computeBaseSalary } from './salariesIPC.js'
+import { ARABIC_MONTH_NAMES, getMonthBillableRows } from '../services/monthlyTotals.js'
 
-const arabicMonths = [
-  'يناير',
-  'فبراير',
-  'مارس',
-  'أبريل',
-  'مايو',
-  'يونيو',
-  'يوليو',
-  'أغسطس',
-  'سبتمبر',
-  'أكتوبر',
-  'نوفمبر',
-  'ديسمبر',
-]
+const arabicMonths = ARABIC_MONTH_NAMES
 
-// Pure calculation helper
+/** What the month's payroll costs, and how much of it is still owed to staff. */
+export interface SalaryTotals {
+  /** Everything the month's payroll is worth (net + bonus − deductions, per active employee). */
+  due: number
+  /** Actually paid out — the recorded `salary_payments.actual_paid` rows. */
+  paid: number
+  /** Still owed to staff, floored at zero per employee so overpaying one can't mask another. */
+  remaining: number
+}
+
+// Pure calculation helper.
+//
+// `expected_total` (not `total`) is the revenue basis: `payments.total` for attendance-billed
+// units only covers days already attended, so mid-month it reports a fraction of the real book.
+// A payment row's outstanding amount is therefore expected_total − paid, not the stored
+// `balance` column (which is total − paid).
 export function calculateDashboard(
-  payments: { total: number; paid: number; balance: number; service: string }[],
+  payments: { expected_total: number; total: number; paid: number; balance: number; service: string }[],
   expenses: { amount: number }[],
-  salaries: { actual_paid: number }[],
+  salaries: SalaryTotals,
   targetProfitPct: number
 ) {
   let invoiced = 0
+  let billed = 0
   let collected = 0
-  let arrears = 0
+  let childrenArrears = 0
 
   for (const p of payments) {
-    invoiced += p.total
+    invoiced += p.expected_total
+    billed += p.total
     collected += p.paid
-    if (p.balance > 0) {
-      arrears += p.balance
+    const outstanding = p.expected_total - p.paid
+    if (outstanding > 0) {
+      childrenArrears += outstanding
     }
   }
 
   const collectionRate = invoiced > 0 ? Number((collected / invoiced).toFixed(2)) : 0
-  
+
   let expensesTotal = 0
   for (const e of expenses) {
     expensesTotal += e.amount
   }
 
-  let salariesTotal = 0
-  for (const s of salaries) {
-    salariesTotal += s.actual_paid
-  }
+  const salariesTotal = salaries.paid
+
+  // Arrears = every obligation the month still carries, in three parts: what families have yet
+  // to pay in, plus what the nursery has yet to pay out (unpaid staff salaries and the month's
+  // running expenses). Reported with the breakdown attached so the card is auditable rather
+  // than one opaque number.
+  const arrearsChildren = Number(childrenArrears.toFixed(2))
+  const arrearsSalaries = Number(salaries.remaining.toFixed(2))
+  const arrearsExpenses = Number(expensesTotal.toFixed(2))
+  const arrears = Number((arrearsChildren + arrearsSalaries + arrearsExpenses).toFixed(2))
 
   const netProfit = Number((collected - (expensesTotal + salariesTotal)).toFixed(2))
-  
+
   // Target calculations
   const totalExpenses = expensesTotal + salariesTotal
-  const targetRequired = targetProfitPct < 1 
+  const targetRequired = targetProfitPct < 1
     ? Number((totalExpenses / (1 - targetProfitPct)).toFixed(2))
     : 0
-  
+
   const gap = Number(Math.max(0, targetRequired - collected).toFixed(2))
 
   return {
     invoiced: Number(invoiced.toFixed(2)),
+    billed: Number(billed.toFixed(2)),
     collected: Number(collected.toFixed(2)),
-    arrears: Number(arrears.toFixed(2)),
+    arrears,
+    arrearsBreakdown: {
+      children: arrearsChildren,
+      salaries: arrearsSalaries,
+      expenses: arrearsExpenses,
+    },
     collectionRate,
     expensesTotal: Number(expensesTotal.toFixed(2)),
     salariesTotal: Number(salariesTotal.toFixed(2)),
+    salariesDue: Number(salaries.due.toFixed(2)),
     netProfit,
     targetRequired,
     gap,
+  }
+}
+
+/**
+ * Payroll cost and outstanding payroll for a month.
+ *
+ * A `salary_payments` row only exists once payroll has been recorded, so "unpaid salaries"
+ * cannot be read from a column — it is derived the same way the Salaries screen derives it
+ * (`computeBaseSalary` + bonus − itemised deductions), less whatever was actually paid.
+ * Active employees with no payroll row yet therefore count as fully outstanding.
+ */
+export function getSalaryTotals(db: any, month: string, year: number | string): SalaryTotals {
+  const rows = db.prepare(`
+    SELECT e.id as employee_id, COALESCE(s.bonus, 0) as bonus, s.actual_paid as stored_actual_paid
+    FROM employees e
+    LEFT JOIN salary_payments s ON e.id = s.employee_id AND s.month = ? AND s.year = ?
+    WHERE e.is_active = 1 OR s.id IS NOT NULL
+  `).all(month, year) as { employee_id: number; bonus: number; stored_actual_paid: number | null }[]
+
+  const deductionStmt = db.prepare(
+    'SELECT COALESCE(SUM(amount), 0) as total FROM employee_deductions WHERE employee_id = ? AND month = ? AND year = ?'
+  )
+
+  let due = 0
+  let paid = 0
+  let remaining = 0
+
+  for (const row of rows) {
+    const { base } = computeBaseSalary(db, row.employee_id, month, year)
+    const deductions = (deductionStmt.get(row.employee_id, month, Number(year)) as any)?.total ?? 0
+    const employeeDue = base + (row.bonus ?? 0) - deductions
+    const employeePaid = row.stored_actual_paid ?? 0
+
+    due += employeeDue
+    paid += employeePaid
+    // Floored per employee: an overpaid employee must not cancel out a colleague who is owed.
+    remaining += Math.max(0, employeeDue - employeePaid)
+  }
+
+  return {
+    due: Number(due.toFixed(2)),
+    paid: Number(paid.toFixed(2)),
+    remaining: Number(remaining.toFixed(2)),
   }
 }
 
@@ -91,12 +154,14 @@ ipcMain.handle('dashboard:get', async (_event, { month, year }) => {
     const targetProfitRow = db.prepare("SELECT value FROM settings WHERE key = 'target_profit_pct'").get() as any
     const targetProfitPct = targetProfitRow ? Number(targetProfitRow.value) : 0.20
 
-    // 2. Fetch payments, expenses, salaries for selected month/year
-    const payments = db.prepare('SELECT total, paid, balance, service FROM payments WHERE month = ? AND year = ?').all(month, year) as any[]
+    // 2. Fetch payments, expenses, salaries for selected month/year.
+    // Payments come through getMonthBillableRows (not a raw SELECT) so the Dashboard's revenue
+    // basis is byte-for-byte the same expected-total maths the Payments screen shows.
+    const payments = getMonthBillableRows(db, month, year)
     const expenses = db.prepare('SELECT amount FROM expenses WHERE month = ? AND year = ?').all(month, year) as any[]
-    const salaries = db.prepare('SELECT actual_paid FROM salary_payments WHERE month = ? AND year = ?').all(month, year) as any[]
+    const salaries = getSalaryTotals(db, month, year)
 
-    const kpi = calculateDashboard(payments, expenses, salaries, targetProfitPct)
+    const kpi = calculateDashboard(payments as any, expenses, salaries, targetProfitPct)
 
     // 3. Revenue broken down by service.
     // Derived from the month's actual payment rows rather than a hardcoded service list:
@@ -140,11 +205,16 @@ ipcMain.handle('dashboard:get', async (_event, { month, year }) => {
     // 4. 12-Month Summary for the selected year
     const summary12Month = []
     for (const m of arabicMonths) {
-      const mPayments = db.prepare('SELECT total, paid, balance FROM payments WHERE month = ? AND year = ?').all(m, year) as any[]
+      const mPayments = getMonthBillableRows(db, m, year)
       const mExpenses = db.prepare('SELECT amount FROM expenses WHERE month = ? AND year = ?').all(m, year) as any[]
-      const mSalaries = db.prepare('SELECT actual_paid FROM salary_payments WHERE month = ? AND year = ?').all(m, year) as any[]
+      // This panel plots collected / cost / net profit only — no arrears — so it uses the cheap
+      // cash-out figure instead of running the full per-employee payroll derivation twelve times.
+      const mPaidOut = (db.prepare(
+        'SELECT COALESCE(SUM(actual_paid), 0) as total FROM salary_payments WHERE month = ? AND year = ?'
+      ).get(m, year) as any)?.total ?? 0
+      const mSalaries = { due: mPaidOut, paid: mPaidOut, remaining: 0 }
 
-      const mKpi = calculateDashboard(mPayments, mExpenses, mSalaries, targetProfitPct)
+      const mKpi = calculateDashboard(mPayments as any, mExpenses, mSalaries, targetProfitPct)
       const totalExp = mKpi.expensesTotal + mKpi.salariesTotal
 
       summary12Month.push({
@@ -171,10 +241,11 @@ ipcMain.handle('dashboard:get', async (_event, { month, year }) => {
     }
     
     if (kpi.arrears > 0) {
+      const b = kpi.arrearsBreakdown
       alerts.push({
         type: 'danger',
-        messageAr: `هناك متأخرات مستحقة بقيمة ${kpi.arrears} ج.م على الأطفال هذا الشهر`,
-        messageEn: `There are outstanding arrears of ${kpi.arrears} EGP this month`,
+        messageAr: `التزامات مستحقة بقيمة ${kpi.arrears} ج.م هذا الشهر (متأخرات الأطفال ${b.children} + رواتب غير مدفوعة ${b.salaries} + مصروفات ${b.expenses})`,
+        messageEn: `Outstanding obligations of ${kpi.arrears} EGP this month (children ${b.children} + unpaid salaries ${b.salaries} + expenses ${b.expenses})`,
       })
     }
     
@@ -190,11 +261,14 @@ ipcMain.handle('dashboard:get', async (_event, { month, year }) => {
     return {
       kpis: {
         invoiced: kpi.invoiced,
+        billed: kpi.billed,
         collected: kpi.collected,
         arrears: kpi.arrears,
+        arrearsBreakdown: kpi.arrearsBreakdown,
         collectionRate: kpi.collectionRate,
         expensesTotal: kpi.expensesTotal,
         salariesTotal: kpi.salariesTotal,
+        salariesDue: kpi.salariesDue,
         netProfit: kpi.netProfit,
       },
       target: {

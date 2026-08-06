@@ -41,7 +41,7 @@ function getTeacherPaymentsForMonth(db: any, employeeId: number, start: string, 
  * per-session earnings come from the teacher_payments ledger instead of the salary-type
  * estimate — that ledger is what attendance actually generated, at their real rate.
  */
-function computeBaseSalary(db: any, employeeId: number, month: string, year: number | string) {
+export function computeBaseSalary(db: any, employeeId: number, month: string, year: number | string) {
   // Heal any stale Pending snapshots first — rate sources can change from several places
   // (salary type edited in Settings, per-child override in the child form) that don't know
   // about this teacher's ledger. Pending is always "current rate"; Paid is frozen.

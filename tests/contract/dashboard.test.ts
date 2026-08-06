@@ -132,6 +132,29 @@ describe('dashboard:get IPC contract', () => {
     expect(result.kpis.salariesTotal).toBe(1000)
   })
 
+  it('counts unpaid salaries and the month expenses in arrears, with a breakdown', async () => {
+    admin()
+    const cid = insertChild(db, { price: 3000 })
+    const sid = insertService(db, cid, 3000)
+    insertPayment(db, cid, sid, { month: 'مارس', year: 2026, price: 3000, total: 3000, paid: 1000, balance: 2000, status: 'partial' })
+
+    db.prepare(`INSERT INTO expenses (item, month, year, amount, created_at) VALUES ('إيجار', 'مارس', 2026, 500, '2026-06-01')`).run()
+
+    // Active employee earning 1000/month with no salary_payments row at all — payroll for the
+    // month has not been run, so the whole 1000 is still owed to them.
+    db.prepare(`
+      INSERT INTO employees (name, role, base_salary, net_salary, is_active, created_at, updated_at, synced)
+      VALUES ('موظف', 'معلم', 1000, 1000, 1, '2026-06-01', '2026-06-01', 0)
+    `).run()
+
+    const result = await h()(null, { month: 'مارس', year: 2026 })
+    expect(result.kpis.arrearsBreakdown).toEqual({ children: 2000, salaries: 1000, expenses: 500 })
+    expect(result.kpis.arrears).toBe(3500)
+    // Nothing has been paid out, so the cash-based cost figure stays at zero for salaries.
+    expect(result.kpis.salariesTotal).toBe(0)
+    expect(result.kpis.salariesDue).toBe(1000)
+  })
+
   it('returns 12-month summary array with one entry per month', async () => {
     admin()
     const result = await h()(null, { month: 'يونيو', year: 2026 })
@@ -140,8 +163,19 @@ describe('dashboard:get IPC contract', () => {
     expect(result.summary12Month[11].month).toBe('ديسمبر')
   })
 
-  it('returns revenueByService array with 3 services', async () => {
+  it('returns revenueByService for every service that collected money', async () => {
     admin()
+    // The breakdown is derived from the month's own payment rows (services are user-definable),
+    // so it has to be seeded — it is not a fixed list of three built-in services.
+    for (const service of ['حضانة', 'استضافة', 'جلسة']) {
+      const cid = insertChild(db, { name: `طفل ${service}` })
+      const sid = insertService(db, cid, 3000)
+      db.prepare(`
+        INSERT INTO payments (child_id, service_id, month, year, service, unit, quantity, price, total, paid, balance, status, created_at, updated_at, synced)
+        VALUES (?, ?, 'يونيو', 2026, ?, 'شهر', 1, 3000, 3000, 3000, 0, 'paid', '2026-06-01', '2026-06-01', 0)
+      `).run(cid, sid, service)
+    }
+
     const result = await h()(null, { month: 'يونيو', year: 2026 })
     expect(result.revenueByService).toHaveLength(3)
     const services = result.revenueByService.map((r: any) => r.service)

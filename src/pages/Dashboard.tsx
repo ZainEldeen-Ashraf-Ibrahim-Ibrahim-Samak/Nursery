@@ -224,6 +224,11 @@ export default function Dashboard() {
                 <Stat
                   title={t('invoiced')}
                   value={formatCurrency(data.kpis.invoiced)}
+                  description={
+                    i18n.language === 'ar'
+                      ? `المستحق حتى الآن: ${formatCurrency(data.kpis.billed)}`
+                      : `Accrued to date: ${formatCurrency(data.kpis.billed)}`
+                  }
                   icon="💰"
                 />
                 <div
@@ -262,6 +267,22 @@ export default function Dashboard() {
                     }`}>
                       {formatCurrency(data.kpis.arrears)}
                     </span>
+                    {/* The three parts spelled out — the total mixes money owed BY families with
+                        money the nursery still owes OUT, so an unexplained figure is unreadable. */}
+                    <div className="mt-1.5 space-y-0.5 text-[10px] text-slate-500">
+                      <div className="flex justify-between gap-2">
+                        <span>{i18n.language === 'ar' ? 'متأخرات الأطفال' : 'Children'}</span>
+                        <span className="font-mono font-semibold text-slate-600">{formatCurrency(data.kpis.arrearsBreakdown.children)}</span>
+                      </div>
+                      <div className="flex justify-between gap-2">
+                        <span>{i18n.language === 'ar' ? 'رواتب غير مدفوعة' : 'Unpaid salaries'}</span>
+                        <span className="font-mono font-semibold text-slate-600">{formatCurrency(data.kpis.arrearsBreakdown.salaries)}</span>
+                      </div>
+                      <div className="flex justify-between gap-2">
+                        <span>{i18n.language === 'ar' ? 'مصروفات الشهر' : 'Month expenses'}</span>
+                        <span className="font-mono font-semibold text-slate-600">{formatCurrency(data.kpis.arrearsBreakdown.expenses)}</span>
+                      </div>
+                    </div>
                   </div>
                   <span className={`text-2xl p-2.5 rounded-lg flex-shrink-0 ${
                     data.kpis.arrears > 0 ? 'bg-rose-50 text-rose-500' : 'bg-slate-50 text-slate-500'
