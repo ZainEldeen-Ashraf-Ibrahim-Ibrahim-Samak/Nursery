@@ -8871,6 +8871,42 @@ var SYNC_ENTITIES = [
 ];
 //#endregion
 //#region electron/ipc/syncIPC.ts
+/**
+* Cloud documents are read with `.lean()`, which returns the raw BSON — including any field that
+* is NOT in the mongoose schema. Documents written by older versions of the app (or by another
+* app sharing the database) carry columns this schema no longer has, e.g. the legacy `student_id`
+* that predates `child_id`. Every pull write path builds its SQL from the document's own keys, so
+* one such field turns into `no such column: student_id` and fails the record outright.
+*
+* Filtering the cloud record down to the columns the local table actually has makes the pull
+* tolerant of any extra cloud field, not just the ones we know about today.
+*/
+var tableColumnsCache = /* @__PURE__ */ new Map();
+function getTableColumns(db, table) {
+	const cached = tableColumnsCache.get(table);
+	if (cached) return cached;
+	const rows = db.prepare("SELECT name FROM pragma_table_info(?)").all(table);
+	const columns = new Set(rows.map((r) => r.name));
+	tableColumnsCache.set(table, columns);
+	return columns;
+}
+/**
+* Strip cloud-only fields the local table can't store. `id` is always kept even when the table
+* has no `id` column (settings keys on `key`, and the pull maps it across itself).
+*/
+function stripUnknownColumns(cloud, localColumns) {
+	const record = { id: cloud.id };
+	const dropped = [];
+	for (const key of Object.keys(cloud)) {
+		if (key === "_id" || key === "__v") continue;
+		if (key === "id" || localColumns.has(key)) record[key] = cloud[key];
+		else dropped.push(key);
+	}
+	return {
+		record,
+		dropped
+	};
+}
 function resolveConflict(local, cloud) {
 	const localTs = local.updated_at ? new Date(local.updated_at).getTime() : 0;
 	const cloudTs = cloud.updated_at ? new Date(cloud.updated_at).getTime() : 0;
@@ -9210,6 +9246,7 @@ async function runPull(force, report = noopReport) {
 			let failed = 0;
 			let collisions = 0;
 			let orphanSkipped = 0;
+			const droppedFields = /* @__PURE__ */ new Set();
 			const errors = [];
 			const skipReasons = [];
 			/** Record a pull failure with its reason (logged + returned to the UI). */
@@ -9234,8 +9271,10 @@ async function runPull(force, report = noopReport) {
 			};
 			try {
 				const cloudRecords = await entity.model.find({}).lean();
+				const localColumns = getTableColumns(db, entity.table);
 				for (const cloud of cloudRecords) {
-					const cloudRecord = cloud;
+					const { record: cloudRecord, dropped } = stripUnknownColumns(cloud, localColumns);
+					for (const field of dropped) droppedFields.add(field);
 					try {
 						if (entity.name === "tombstones") {
 							if (!db.prepare(`SELECT * FROM tombstones WHERE entity = ? AND record_id = ?`).get(cloudRecord.entity, cloudRecord.record_id)) {
@@ -9323,6 +9362,10 @@ async function runPull(force, report = noopReport) {
 				logSync("pull", entity.name, "batch", "error", err.message);
 				noteError("batch", err);
 				failed++;
+			}
+			if (droppedFields.size > 0) {
+				console.warn(`[sync:pull] ${entity.name}: ignored cloud field(s) with no local column: ${[...droppedFields].join(", ")}`);
+				logSync("pull", entity.name, "batch", "success", `ignored unknown cloud field(s): ${[...droppedFields].join(", ")}`);
 			}
 			if (orphanSkipped > 0) {
 				console.warn(`[sync:pull] ${entity.name}: skipped ${orphanSkipped} orphaned cloud row(s) (missing parent record)`);

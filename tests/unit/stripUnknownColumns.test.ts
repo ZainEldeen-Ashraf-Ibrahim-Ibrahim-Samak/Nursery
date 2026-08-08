@@ -1,4 +1,11 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
+
+vi.mock('electron', () => ({
+  ipcMain: { handle: vi.fn() },
+  BrowserWindow: { getAllWindows: () => [] },
+  app: { getPath: () => 'mock-user-data' }
+}))
+
 import { stripUnknownColumns } from '../../electron/ipc/syncIPC.js'
 
 const paymentsColumns = new Set(['id', 'child_id', 'month', 'year', 'total', 'updated_at', 'synced'])
