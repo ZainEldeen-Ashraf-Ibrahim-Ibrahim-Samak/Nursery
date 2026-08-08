@@ -2069,6 +2069,99 @@ ipcMain.handle("teachers:list", async (_event, args) => {
 	}
 });
 //#endregion
+//#region electron/services/monthlyTotals.ts
+/**
+* Shared "what should this month actually bring in" maths.
+*
+* `payments.total` is the amount BILLED SO FAR: for attendance-driven units ('يوم' / 'ساعة' /
+* 'جلسة') `payments:generate` sets `quantity` from attendance already recorded, so half-way
+* through a month it is roughly half the month's real figure. The Payments screen has always
+* shown the full scheduled figure ("expected") alongside it, but the Dashboard summed `total`
+* — which is why an enrollment book worth ~70k EGP could read ~27k on the Dashboard.
+*
+* Both screens now derive their totals from here, so the two can never drift apart again.
+*/
+var ARABIC_MONTH_NAMES = [
+	"يناير",
+	"فبراير",
+	"مارس",
+	"أبريل",
+	"مايو",
+	"يونيو",
+	"يوليو",
+	"أغسطس",
+	"سبتمبر",
+	"أكتوبر",
+	"نوفمبر",
+	"ديسمبر"
+];
+/**
+* Builds the expected-quantity / expected-total calculators for one month.
+*
+* For the month currently in progress, scheduled days are counted from today (inclusive) to
+* month end and added to what has already been billed — days that have already elapsed without
+* attendance were genuinely not owed, so counting the whole month would overstate the bill.
+* Any other month is counted in full, since there is no "today" boundary inside it.
+*/
+function createExpectedTotalCalculator(month, year) {
+	const monthIndex = ARABIC_MONTH_NAMES.indexOf(month);
+	const payYear = Number(year);
+	const daysInMonth = monthIndex !== -1 ? new Date(payYear, monthIndex + 1, 0).getDate() : 30;
+	const today = /* @__PURE__ */ new Date();
+	const isCurrentMonth = monthIndex === today.getMonth() && payYear === today.getFullYear();
+	const startDay = isCurrentMonth ? today.getDate() : 1;
+	const countLessonDayOccurrences = (lessonDays) => {
+		let count = 0;
+		for (let d = startDay; d <= daysInMonth; d++) if (lessonDays.includes(new Date(payYear, monthIndex, d).getDay())) count++;
+		return count;
+	};
+	const expectedQuantity = (p) => {
+		if (p.unit === "شهر") return p.quantity || 1;
+		if (p.service === "حصص إضافية") return p.quantity;
+		let lessonDays = [];
+		try {
+			lessonDays = JSON.parse(p.service_lesson_days || "[]");
+		} catch {}
+		if (lessonDays.length === 0 || monthIndex === -1) return p.quantity;
+		return isCurrentMonth ? p.quantity + countLessonDayOccurrences(lessonDays) : countLessonDayOccurrences(lessonDays);
+	};
+	const expectedTotal = (p, qty) => {
+		if (p.unit === "شهر" && p.prorated_calculated != null) return Number((Number(p.prorated_calculated) * qty).toFixed(2));
+		return Number((qty * p.price).toFixed(2));
+	};
+	return {
+		expectedQuantity,
+		expectedTotal,
+		monthIndex,
+		daysInMonth,
+		isCurrentMonth
+	};
+}
+/** Annotates rows in place with `expected_quantity` / `expected_total`. */
+function attachExpectedTotals(rows, month, year) {
+	const { expectedQuantity, expectedTotal } = createExpectedTotalCalculator(month, year);
+	for (const row of rows) {
+		row.expected_quantity = expectedQuantity(row);
+		row.expected_total = expectedTotal(row, row.expected_quantity);
+	}
+	return rows;
+}
+/**
+* Loads the month's payment rows with the columns the expected-total maths needs, already
+* annotated. Used by the Dashboard; the Payments screen selects more columns and calls
+* `attachExpectedTotals` on its own result set.
+*/
+function getMonthBillableRows(db, month, year) {
+	return attachExpectedTotals(db.prepare(`
+    SELECT p.service, p.unit, p.quantity, p.price, p.total, p.paid, p.balance, p.prorated_calculated,
+      COALESCE(NULLIF(cs.lesson_days, '[]'), c.lesson_days) as service_lesson_days
+    FROM payments p
+    JOIN children c ON p.child_id = c.id
+    LEFT JOIN child_services cs ON cs.id = p.service_id
+    WHERE p.month = ? AND p.year = ?
+  `).all(month, year), month, year);
+}
+//#endregion
 //#region electron/ipc/paymentsIPC.ts
 function calculatePayment(quantity, price, paid) {
 	const total = Number((quantity * price).toFixed(2));
@@ -2135,50 +2228,18 @@ ipcMain.handle("payments:get", async (_event, { month, year }) => {
       WHERE p.month = ? AND p.year = ?
       ORDER BY c.name ASC
     `).all(month, year);
-		const monthIndex = [
-			"يناير",
-			"فبراير",
-			"مارس",
-			"أبريل",
-			"مايو",
-			"يونيو",
-			"يوليو",
-			"أغسطس",
-			"سبتمبر",
-			"أكتوبر",
-			"نوفمبر",
-			"ديسمبر"
-		].indexOf(month);
-		const payYear = Number(year);
-		const daysInMonth = monthIndex !== -1 ? new Date(payYear, monthIndex + 1, 0).getDate() : 30;
-		const today = /* @__PURE__ */ new Date();
-		const startDay = monthIndex === today.getMonth() && payYear === today.getFullYear() ? today.getDate() : 1;
-		const countLessonDayOccurrences = (lessonDays) => {
-			let count = 0;
-			for (let d = startDay; d <= daysInMonth; d++) if (lessonDays.includes(new Date(payYear, monthIndex, d).getDay())) count++;
-			return count;
-		};
-		const computeExpectedQuantity = (p) => {
-			if (p.unit === "شهر") return 1;
-			let lessonDays = [];
-			try {
-				lessonDays = JSON.parse(p.service_lesson_days || "[]");
-			} catch {}
-			if (lessonDays.length === 0 || monthIndex === -1) return p.quantity;
-			return countLessonDayOccurrences(lessonDays);
-		};
-		for (const p of payments) {
-			p.expected_quantity = computeExpectedQuantity(p);
-			p.expected_total = Number((p.expected_quantity * p.price).toFixed(2));
-		}
+		attachExpectedTotals(payments, month, year);
 		let totalInvoiced = 0;
+		let totalBilled = 0;
 		let totalCollected = 0;
 		let arrears = 0;
 		const childMap = /* @__PURE__ */ new Map();
 		for (const p of payments) {
-			totalInvoiced += p.total;
+			totalInvoiced += p.expected_total;
+			totalBilled += p.total;
 			totalCollected += p.paid;
-			if (p.balance > 0) arrears += p.balance;
+			const outstanding = p.expected_total - p.paid;
+			if (outstanding > 0) arrears += outstanding;
 			if (!childMap.has(p.child_id)) childMap.set(p.child_id, {
 				child_id: p.child_id,
 				child_name: p.child_name,
@@ -2230,6 +2291,7 @@ ipcMain.handle("payments:get", async (_event, { month, year }) => {
 			byChild: Array.from(childMap.values()).sort((a, b) => a.child_name.localeCompare(b.child_name)),
 			summary: {
 				totalInvoiced: Number(totalInvoiced.toFixed(2)),
+				totalBilled: Number(totalBilled.toFixed(2)),
 				totalCollected: Number(totalCollected.toFixed(2)),
 				arrears: Number(arrears.toFixed(2))
 			}
@@ -9391,48 +9453,82 @@ ipcMain.handle("sync:auto-sync", async (_event, { enabled, intervalMinutes = 1 }
 });
 //#endregion
 //#region electron/ipc/dashboardIPC.ts
-var arabicMonths = [
-	"يناير",
-	"فبراير",
-	"مارس",
-	"أبريل",
-	"مايو",
-	"يونيو",
-	"يوليو",
-	"أغسطس",
-	"سبتمبر",
-	"أكتوبر",
-	"نوفمبر",
-	"ديسمبر"
-];
+var arabicMonths = ARABIC_MONTH_NAMES;
 function calculateDashboard(payments, expenses, salaries, targetProfitPct) {
 	let invoiced = 0;
+	let billed = 0;
 	let collected = 0;
-	let arrears = 0;
+	let childrenArrears = 0;
 	for (const p of payments) {
-		invoiced += p.total;
+		invoiced += p.expected_total;
+		billed += p.total;
 		collected += p.paid;
-		if (p.balance > 0) arrears += p.balance;
+		const outstanding = p.expected_total - p.paid;
+		if (outstanding > 0) childrenArrears += outstanding;
 	}
 	const collectionRate = invoiced > 0 ? Number((collected / invoiced).toFixed(2)) : 0;
 	let expensesTotal = 0;
 	for (const e of expenses) expensesTotal += e.amount;
-	let salariesTotal = 0;
-	for (const s of salaries) salariesTotal += s.actual_paid;
+	const salariesTotal = salaries.paid;
+	const arrearsChildren = Number(childrenArrears.toFixed(2));
+	const arrearsSalaries = Number(salaries.remaining.toFixed(2));
+	const arrearsExpenses = Number(expensesTotal.toFixed(2));
+	const arrears = Number((arrearsChildren + arrearsSalaries + arrearsExpenses).toFixed(2));
 	const netProfit = Number((collected - (expensesTotal + salariesTotal)).toFixed(2));
 	const totalExpenses = expensesTotal + salariesTotal;
 	const targetRequired = targetProfitPct < 1 ? Number((totalExpenses / (1 - targetProfitPct)).toFixed(2)) : 0;
 	const gap = Number(Math.max(0, targetRequired - collected).toFixed(2));
 	return {
 		invoiced: Number(invoiced.toFixed(2)),
+		billed: Number(billed.toFixed(2)),
 		collected: Number(collected.toFixed(2)),
-		arrears: Number(arrears.toFixed(2)),
+		arrears,
+		arrearsBreakdown: {
+			children: arrearsChildren,
+			salaries: arrearsSalaries,
+			expenses: arrearsExpenses
+		},
 		collectionRate,
 		expensesTotal: Number(expensesTotal.toFixed(2)),
 		salariesTotal: Number(salariesTotal.toFixed(2)),
+		salariesDue: Number(salaries.due.toFixed(2)),
 		netProfit,
 		targetRequired,
 		gap
+	};
+}
+/**
+* Payroll cost and outstanding payroll for a month.
+*
+* A `salary_payments` row only exists once payroll has been recorded, so "unpaid salaries"
+* cannot be read from a column — it is derived the same way the Salaries screen derives it
+* (`computeBaseSalary` + bonus − itemised deductions), less whatever was actually paid.
+* Active employees with no payroll row yet therefore count as fully outstanding.
+*/
+function getSalaryTotals(db, month, year) {
+	const rows = db.prepare(`
+    SELECT e.id as employee_id, COALESCE(s.bonus, 0) as bonus, s.actual_paid as stored_actual_paid
+    FROM employees e
+    LEFT JOIN salary_payments s ON e.id = s.employee_id AND s.month = ? AND s.year = ?
+    WHERE e.is_active = 1 OR s.id IS NOT NULL
+  `).all(month, year);
+	const deductionStmt = db.prepare("SELECT COALESCE(SUM(amount), 0) as total FROM employee_deductions WHERE employee_id = ? AND month = ? AND year = ?");
+	let due = 0;
+	let paid = 0;
+	let remaining = 0;
+	for (const row of rows) {
+		const { base } = computeBaseSalary(db, row.employee_id, month, year);
+		const deductions = deductionStmt.get(row.employee_id, month, Number(year))?.total ?? 0;
+		const employeeDue = base + (row.bonus ?? 0) - deductions;
+		const employeePaid = row.stored_actual_paid ?? 0;
+		due += employeeDue;
+		paid += employeePaid;
+		remaining += Math.max(0, employeeDue - employeePaid);
+	}
+	return {
+		due: Number(due.toFixed(2)),
+		paid: Number(paid.toFixed(2)),
+		remaining: Number(remaining.toFixed(2))
 	};
 }
 function checkAuth$5() {
@@ -9445,8 +9541,8 @@ ipcMain.handle("dashboard:get", async (_event, { month, year }) => {
 		if (!month || !year) throw new Error("Month and year are required");
 		const targetProfitRow = db.prepare("SELECT value FROM settings WHERE key = 'target_profit_pct'").get();
 		const targetProfitPct = targetProfitRow ? Number(targetProfitRow.value) : .2;
-		const payments = db.prepare("SELECT total, paid, balance, service FROM payments WHERE month = ? AND year = ?").all(month, year);
-		const kpi = calculateDashboard(payments, db.prepare("SELECT amount FROM expenses WHERE month = ? AND year = ?").all(month, year), db.prepare("SELECT actual_paid FROM salary_payments WHERE month = ? AND year = ?").all(month, year), targetProfitPct);
+		const payments = getMonthBillableRows(db, month, year);
+		const kpi = calculateDashboard(payments, db.prepare("SELECT amount FROM expenses WHERE month = ? AND year = ?").all(month, year), getSalaryTotals(db, month, year), targetProfitPct);
 		const revenueByServiceMap = /* @__PURE__ */ new Map();
 		for (const p of payments) {
 			const service = p.service || "غير محدد";
@@ -9476,7 +9572,14 @@ ipcMain.handle("dashboard:get", async (_event, { month, year }) => {
 		}));
 		const summary12Month = [];
 		for (const m of arabicMonths) {
-			const mKpi = calculateDashboard(db.prepare("SELECT total, paid, balance FROM payments WHERE month = ? AND year = ?").all(m, year), db.prepare("SELECT amount FROM expenses WHERE month = ? AND year = ?").all(m, year), db.prepare("SELECT actual_paid FROM salary_payments WHERE month = ? AND year = ?").all(m, year), targetProfitPct);
+			const mPayments = getMonthBillableRows(db, m, year);
+			const mExpenses = db.prepare("SELECT amount FROM expenses WHERE month = ? AND year = ?").all(m, year);
+			const mPaidOut = db.prepare("SELECT COALESCE(SUM(actual_paid), 0) as total FROM salary_payments WHERE month = ? AND year = ?").get(m, year)?.total ?? 0;
+			const mKpi = calculateDashboard(mPayments, mExpenses, {
+				due: mPaidOut,
+				paid: mPaidOut,
+				remaining: 0
+			}, targetProfitPct);
 			const totalExp = mKpi.expensesTotal + mKpi.salariesTotal;
 			summary12Month.push({
 				month: m,
@@ -9492,11 +9595,14 @@ ipcMain.handle("dashboard:get", async (_event, { month, year }) => {
 			messageAr: `عجز في تحقيق الأهداف الماليّة بمقدار ${kpi.gap} ج.م لهذا الشهر`,
 			messageEn: `Financial target shortfall of ${kpi.gap} EGP this month`
 		});
-		if (kpi.arrears > 0) alerts.push({
-			type: "danger",
-			messageAr: `هناك متأخرات مستحقة بقيمة ${kpi.arrears} ج.م على الأطفال هذا الشهر`,
-			messageEn: `There are outstanding arrears of ${kpi.arrears} EGP this month`
-		});
+		if (kpi.arrears > 0) {
+			const b = kpi.arrearsBreakdown;
+			alerts.push({
+				type: "danger",
+				messageAr: `التزامات مستحقة بقيمة ${kpi.arrears} ج.م هذا الشهر (متأخرات الأطفال ${b.children} + رواتب غير مدفوعة ${b.salaries} + مصروفات ${b.expenses})`,
+				messageEn: `Outstanding obligations of ${kpi.arrears} EGP this month (children ${b.children} + unpaid salaries ${b.salaries} + expenses ${b.expenses})`
+			});
+		}
 		if (kpi.collectionRate < .8 && kpi.invoiced > 0) {
 			const pct = Math.round(kpi.collectionRate * 100);
 			alerts.push({
@@ -9508,11 +9614,14 @@ ipcMain.handle("dashboard:get", async (_event, { month, year }) => {
 		return {
 			kpis: {
 				invoiced: kpi.invoiced,
+				billed: kpi.billed,
 				collected: kpi.collected,
 				arrears: kpi.arrears,
+				arrearsBreakdown: kpi.arrearsBreakdown,
 				collectionRate: kpi.collectionRate,
 				expensesTotal: kpi.expensesTotal,
 				salariesTotal: kpi.salariesTotal,
+				salariesDue: kpi.salariesDue,
 				netProfit: kpi.netProfit
 			},
 			target: {
