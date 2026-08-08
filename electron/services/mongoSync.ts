@@ -15,6 +15,11 @@ import type { SrvRecord } from 'node:dns'
 
 let isConnected = false
 let connectionError: string | null = null
+let connectPromise: Promise<void> | null = null
+
+mongoose.connection.on('disconnected', () => {
+  isConnected = false
+})
 
 async function convertSrvToStandardUri(uri: string): Promise<string> {
   if (!uri.startsWith('mongodb+srv://')) return uri;
@@ -103,25 +108,32 @@ function describeConnectFailure(err: any): string {
 
 export async function connectMongo(uri: string): Promise<void> {
   if (isConnected) return
+  // Startup fires connectMongo() without awaiting while auto-sync starts its first cycle, so
+  // two callers can pass the isConnected check before either finishes. Share one in-flight
+  // attempt — a second mongoose.connect() would throw because convertSrvToStandardUri()
+  // resolves the SRV record to a different literal URI each time.
+  if (connectPromise) return connectPromise
 
-  try {
-    const finalUri = await convertSrvToStandardUri(uri);
-    await mongoose.connect(finalUri, {
-      serverSelectionTimeoutMS: 10000,
-      connectTimeoutMS: 10000
-    })
-    isConnected = true
-    connectionError = null
-
-    mongoose.connection.on('disconnected', () => {
+  connectPromise = (async () => {
+    try {
+      const finalUri = await convertSrvToStandardUri(uri);
+      await mongoose.connect(finalUri, {
+        serverSelectionTimeoutMS: 10000,
+        connectTimeoutMS: 10000
+      })
+      isConnected = true
+      connectionError = null
+    } catch (err: any) {
       isConnected = false
-    })
-  } catch (err: any) {
-    isConnected = false
-    connectionError = describeConnectFailure(err)
-    console.error('[mongoSync] connect failed — raw error:', err)
-    throw new Error(connectionError || 'Failed to connect to MongoDB')
-  }
+      connectionError = describeConnectFailure(err)
+      console.error('[mongoSync] connect failed — raw error:', err)
+      throw new Error(connectionError || 'Failed to connect to MongoDB')
+    } finally {
+      connectPromise = null
+    }
+  })()
+
+  return connectPromise
 }
 
 export async function disconnectMongo(): Promise<void> {

@@ -8182,6 +8182,10 @@ ipcMain.handle("storage:audit", async () => {
 */
 var isConnected = false;
 var connectionError = null;
+var connectPromise = null;
+mongoose.connection.on("disconnected", () => {
+	isConnected = false;
+});
 async function convertSrvToStandardUri(uri) {
 	if (!uri.startsWith("mongodb+srv://")) return uri;
 	try {
@@ -8233,23 +8237,26 @@ function describeConnectFailure(err) {
 }
 async function connectMongo(uri) {
 	if (isConnected) return;
-	try {
-		const finalUri = await convertSrvToStandardUri(uri);
-		await mongoose.connect(finalUri, {
-			serverSelectionTimeoutMS: 1e4,
-			connectTimeoutMS: 1e4
-		});
-		isConnected = true;
-		connectionError = null;
-		mongoose.connection.on("disconnected", () => {
+	if (connectPromise) return connectPromise;
+	connectPromise = (async () => {
+		try {
+			const finalUri = await convertSrvToStandardUri(uri);
+			await mongoose.connect(finalUri, {
+				serverSelectionTimeoutMS: 1e4,
+				connectTimeoutMS: 1e4
+			});
+			isConnected = true;
+			connectionError = null;
+		} catch (err) {
 			isConnected = false;
-		});
-	} catch (err) {
-		isConnected = false;
-		connectionError = describeConnectFailure(err);
-		console.error("[mongoSync] connect failed — raw error:", err);
-		throw new Error(connectionError || "Failed to connect to MongoDB");
-	}
+			connectionError = describeConnectFailure(err);
+			console.error("[mongoSync] connect failed — raw error:", err);
+			throw new Error(connectionError || "Failed to connect to MongoDB");
+		} finally {
+			connectPromise = null;
+		}
+	})();
+	return connectPromise;
 }
 async function disconnectMongo() {
 	if (!isConnected) return;
