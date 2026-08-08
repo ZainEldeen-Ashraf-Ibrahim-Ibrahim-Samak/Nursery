@@ -13,6 +13,7 @@ import { Card } from '../../components/ui/Card.js'
 import { Alert } from '../../components/ui/Alert.js'
 import { Pagination } from '../../components/ui/Pagination.js'
 import { Modal } from '../../components/ui/Modal.js'
+import { getEnrollmentDays } from '../../utils/enrollmentDays.js'
 import type { Child } from '../../types/index.js'
 
 type SortKey = 'id' | 'name' | 'guardian' | 'price' | 'reg_date' | 'is_active'
@@ -275,6 +276,29 @@ export default function ChildrenList() {
       render: (child: Child) => (
         <span className="font-mono text-slate-500">{child.reg_date}</span>
       ),
+    },
+    {
+      // Enrolled days counted from reg_date, so a child who joined mid-month shows the
+      // partial count for this month rather than the whole month.
+      key: 'enrolled_days',
+      header: t('days_this_month'),
+      render: (child: Child) => {
+        const days = getEnrollmentDays(child.reg_date)
+        if (!days.isValid) return <span className="text-slate-400">—</span>
+        return (
+          <div className="flex flex-col leading-tight">
+            <span className="font-mono text-slate-800">
+              {days.monthDays} / {days.daysInMonth}
+            </span>
+            {days.joinedMidMonth && (
+              <span className="text-xs text-amber-600">{t('joined_day', { day: days.joinDayOfMonth })}</span>
+            )}
+            <span className="text-xs text-slate-400">
+              {t('enrolled_days')}: {days.totalDays}
+            </span>
+          </div>
+        )
+      },
     },
     {
       key: 'status',

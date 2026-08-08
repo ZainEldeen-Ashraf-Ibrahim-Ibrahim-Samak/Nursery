@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { Card } from '../../components/ui/Card.js'
@@ -7,6 +7,7 @@ import { Button } from '../../components/ui/Button.js'
 import { Alert } from '../../components/ui/Alert.js'
 import { LoadingSpinner } from '../../components/ui/LoadingSpinner.js'
 import { useChildActivitiesStore } from '../../store/useChildActivitiesStore.js'
+import { getEnrollmentDays } from '../../utils/enrollmentDays.js'
 import type { TimetableSlot } from '../../types/index.js'
 
 const dayNamesAr = ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت']
@@ -22,6 +23,7 @@ export default function ChildDetails() {
   const [timetable, setTimetable] = useState<TimetableSlot[]>([])
   const [balance, setBalance] = useState<{ totalCollected: number; remainingDue: number } | null>(null)
   const [childName, setChildName] = useState('')
+  const [regDate, setRegDate] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
 
@@ -48,6 +50,7 @@ export default function ChildDetails() {
     ]).then(([slots, statement]) => {
       setTimetable(slots)
       setChildName(statement?.child?.name || '')
+      setRegDate(statement?.child?.reg_date ?? null)
       setBalance({
         totalCollected: statement?.summary?.totalCollected ?? 0,
         remainingDue: statement?.summary?.remainingDue ?? statement?.summary?.totalBalance ?? 0,
@@ -92,6 +95,8 @@ export default function ChildDetails() {
     }
   }
 
+  const enrollment = useMemo(() => getEnrollmentDays(regDate), [regDate])
+
   if (isLoading) return <div className="p-6"><LoadingSpinner /></div>
 
   return (
@@ -104,13 +109,35 @@ export default function ChildDetails() {
       {loadError && <Alert variant="danger">{loadError}</Alert>}
       {activityError && <Alert variant="danger" onClose={clearError}>{activityError}</Alert>}
 
-      {/* Paid vs. remaining balance (FR-010) */}
-      {balance && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <Stat title={isAr ? 'إجمالي المدفوع' : 'Total Paid'} value={balance.totalCollected.toFixed(2)} unit={isAr ? 'ج.م' : 'EGP'} />
-          <Stat title={isAr ? 'المتبقي المستحق' : 'Remaining Due'} value={balance.remainingDue.toFixed(2)} unit={isAr ? 'ج.م' : 'EGP'} />
-        </div>
-      )}
+      {/* Paid vs. remaining balance (FR-010), plus enrolled-day counts */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {balance && (
+          <>
+            <Stat title={isAr ? 'إجمالي المدفوع' : 'Total Paid'} value={balance.totalCollected.toFixed(2)} unit={isAr ? 'ج.م' : 'EGP'} />
+            <Stat title={isAr ? 'المتبقي المستحق' : 'Remaining Due'} value={balance.remainingDue.toFixed(2)} unit={isAr ? 'ج.م' : 'EGP'} />
+          </>
+        )}
+        <Stat
+          title={isAr ? 'أيام هذا الشهر' : 'Days This Month'}
+          value={enrollment.isValid ? `${enrollment.monthDays} / ${enrollment.daysInMonth}` : '—'}
+          unit={isAr ? 'يوم' : 'days'}
+          description={
+            !enrollment.isValid
+              ? (isAr ? 'تاريخ التسجيل غير محدد' : 'No registration date')
+              : enrollment.joinedMidMonth
+                ? (isAr
+                    ? `التحق يوم ${enrollment.joinDayOfMonth} — محسوبة من تاريخ التسجيل`
+                    : `Joined on day ${enrollment.joinDayOfMonth} — counted from registration`)
+                : (isAr ? 'شهر كامل' : 'Full month')
+          }
+        />
+        <Stat
+          title={isAr ? 'إجمالي أيام التسجيل' : 'Total Enrolled Days'}
+          value={enrollment.isValid ? enrollment.totalDays : '—'}
+          unit={isAr ? 'يوم' : 'days'}
+          description={regDate ? (isAr ? `منذ ${regDate}` : `since ${regDate}`) : undefined}
+        />
+      </div>
 
       {/* Timetable (FR-005/FR-006) */}
       <Card title={isAr ? 'الجدول الزمني' : 'Timetable'}>
