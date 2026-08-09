@@ -98,7 +98,11 @@ electron.contextBridge.exposeInMainWorld("api", {
 		addItem: (args) => electron.ipcRenderer.invoke("expenses:addItem", args),
 		removeItem: (args) => electron.ipcRenderer.invoke("expenses:removeItem", args)
 	},
-	dashboard: { get: (args) => electron.ipcRenderer.invoke("dashboard:get", args) },
+	dashboard: {
+		get: (args) => electron.ipcRenderer.invoke("dashboard:get", args),
+		/** Every contributing line behind the KPI cards, for the per-card drill-down pages. */
+		breakdown: (args) => electron.ipcRenderer.invoke("dashboard:breakdown", args)
+	},
 	target: {
 		get: (args) => electron.ipcRenderer.invoke("target:get", args),
 		calc: (args) => electron.ipcRenderer.invoke("target:calc", args),

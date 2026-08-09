@@ -121,6 +121,8 @@ const api = {
   // Dashboard / Target
   dashboard: {
     get: (args: any) => ipcRenderer.invoke('dashboard:get', args),
+    /** Every contributing line behind the KPI cards, for the per-card drill-down pages. */
+    breakdown: (args: any) => ipcRenderer.invoke('dashboard:breakdown', args),
   },
   target: {
     get: (args: any) => ipcRenderer.invoke('target:get', args),

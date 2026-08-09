@@ -1,11 +1,10 @@
 import { useState, useMemo, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useNavigate } from 'react-router-dom'
 import { useDashboard } from '../hooks/useDashboard.js'
 import { useAuthStore } from '../store/useAuthStore.js'
 import { Card } from '../components/ui/Card.js'
-import { Stat } from '../components/ui/Stat.js'
 import { Select } from '../components/ui/Select.js'
-import { Modal } from '../components/ui/Modal.js'
 import { Alert } from '../components/ui/Alert.js'
 import { LoadingSpinner } from '../components/ui/LoadingSpinner.js'
 import RevenueChart from '../components/charts/RevenueChart.js'
@@ -44,8 +43,52 @@ const englishMonths = [
 
 const yearsList = [2024, 2025, 2026, 2027, 2028, 2029, 2030]
 
+/**
+ * A KPI tile that opens its own breakdown page.
+ *
+ * Every figure on this Dashboard is a sum of sums, so each tile is a link into
+ * `/breakdown/:metric`, which lists the contributing rows and the maths behind them. The tile
+ * itself is the click target (not a small "details" affordance) — the whole card is the thing
+ * the user is questioning when they want to know where a number came from.
+ */
+const KpiCard: React.FC<{
+  title: string
+  value: string
+  valueClass?: string
+  icon: string
+  iconClass?: string
+  cardClass?: string
+  hint: string
+  onOpen: () => void
+  children?: React.ReactNode
+}> = ({ title, value, valueClass, icon, iconClass, cardClass, hint, onOpen, children }) => (
+  <div
+    role="button"
+    tabIndex={0}
+    onClick={onOpen}
+    onKeyDown={(e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault()
+        onOpen()
+      }
+    }}
+    className={`bg-white rounded-xl shadow-sm p-5 flex items-start sm:items-center justify-between gap-4 border border-slate-200 cursor-pointer hover:shadow-md hover:border-teal-300 transition-all ${cardClass ?? ''}`}
+  >
+    <div className="flex flex-col gap-1 text-start min-w-0">
+      <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider truncate">{title}</span>
+      <span className={`text-xl sm:text-2xl font-extrabold font-mono tracking-tight mt-1 truncate ${valueClass ?? 'text-slate-800'}`}>
+        {value}
+      </span>
+      {children}
+      <span className="text-[10px] text-teal-600/80 mt-1">{hint}</span>
+    </div>
+    <span className={`text-2xl p-2.5 rounded-lg flex-shrink-0 ${iconClass ?? 'bg-slate-50 text-slate-500'}`}>{icon}</span>
+  </div>
+)
+
 export default function Dashboard() {
   const { t, i18n } = useTranslation()
+  const navigate = useNavigate()
   const isAdmin = useAuthStore((s) => s.user?.role === 'admin')
 
   // Get current month index and year
@@ -55,7 +98,6 @@ export default function Dashboard() {
 
   const [selectedMonth, setSelectedMonth] = useState<string>(defaultMonth)
   const [selectedYear, setSelectedYear] = useState<number>(defaultYear)
-  const [showMethods, setShowMethods] = useState(false)
 
   const { data, isLoading, error, refresh, clearError } = useDashboard(
     selectedMonth,
@@ -101,6 +143,14 @@ export default function Dashboard() {
   const handleYearChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     setSelectedYear(Number(e.target.value))
   }
+
+  /** Opens a card's drill-down for the period currently selected on this Dashboard. */
+  const openBreakdown = (metric: string, extra?: Record<string, string>) => {
+    const params = new URLSearchParams({ month: selectedMonth, year: String(selectedYear), ...extra })
+    navigate(`/breakdown/${metric}?${params.toString()}`)
+  }
+
+  const openHint = i18n.language === 'ar' ? 'اضغط لعرض تفاصيل الحساب' : 'Click to see how this is calculated'
 
   // Format currency helper
   const formatCurrency = (val: number) => {
@@ -221,113 +271,95 @@ export default function Dashboard() {
 
               {/* KPI Cards Grid */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
-                <Stat
+                <KpiCard
                   title={t('invoiced')}
                   value={formatCurrency(data.kpis.invoiced)}
-                  description={
-                    i18n.language === 'ar'
-                      ? `المستحق حتى الآن: ${formatCurrency(data.kpis.billed)}`
-                      : `Accrued to date: ${formatCurrency(data.kpis.billed)}`
-                  }
                   icon="💰"
-                />
-                <div
-                  role={isAdmin ? 'button' : undefined}
-                  tabIndex={isAdmin ? 0 : undefined}
-                  onClick={isAdmin ? () => setShowMethods(true) : undefined}
-                  onKeyDown={isAdmin ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setShowMethods(true) } } : undefined}
-                  className={`bg-white rounded-xl shadow-sm p-5 flex items-start sm:items-center justify-between gap-4 border border-slate-200 bg-gradient-to-br from-white to-teal-50/20 ${
-                    isAdmin ? 'cursor-pointer hover:shadow-md hover:border-teal-300 transition-all' : ''
-                  }`}
+                  iconClass="bg-amber-50 text-amber-600"
+                  hint={openHint}
+                  onOpen={() => openBreakdown('invoiced')}
                 >
-                  <div className="flex flex-col gap-1 text-start min-w-0">
-                    <span className="text-xs font-semibold text-teal-600 uppercase tracking-wider truncate">
-                      {t('collected')}
-                    </span>
-                    <span className="text-xl sm:text-2xl font-extrabold text-teal-700 font-mono tracking-tight mt-1 truncate">
-                      {formatCurrency(data.kpis.collected)}
-                    </span>
-                    {isAdmin && (
-                      <span className="text-[10px] text-teal-500/80 mt-0.5">
-                        {i18n.language === 'ar' ? 'اضغط لعرض طرق الدفع' : 'Click for payment methods'}
-                      </span>
-                    )}
-                  </div>
-                  <span className="text-2xl bg-teal-50 text-teal-600 p-2.5 rounded-lg flex-shrink-0">✅</span>
-                </div>
-                <div className={`bg-white rounded-xl shadow-sm p-5 flex items-start sm:items-center justify-between gap-4 border border-slate-200 ${
-                  data.kpis.arrears > 0 ? 'bg-gradient-to-br from-white to-rose-50/20 border-rose-200' : ''
-                }`}>
-                  <div className="flex flex-col gap-1 text-start min-w-0">
-                    <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider truncate">
-                      {t('arrears')}
-                    </span>
-                    <span className={`text-xl sm:text-2xl font-extrabold font-mono tracking-tight mt-1 truncate ${
-                      data.kpis.arrears > 0 ? 'text-rose-600' : 'text-slate-750'
-                    }`}>
-                      {formatCurrency(data.kpis.arrears)}
-                    </span>
-                    {/* The three parts spelled out — the total mixes money owed BY families with
-                        money the nursery still owes OUT, so an unexplained figure is unreadable. */}
-                    <div className="mt-1.5 space-y-0.5 text-[10px] text-slate-500">
-                      <div className="flex justify-between gap-2">
-                        <span>{i18n.language === 'ar' ? 'متأخرات الأطفال' : 'Children'}</span>
-                        <span className="font-mono font-semibold text-slate-600">{formatCurrency(data.kpis.arrearsBreakdown.children)}</span>
-                      </div>
-                      <div className="flex justify-between gap-2">
-                        <span>{i18n.language === 'ar' ? 'رواتب غير مدفوعة' : 'Unpaid salaries'}</span>
-                        <span className="font-mono font-semibold text-slate-600">{formatCurrency(data.kpis.arrearsBreakdown.salaries)}</span>
-                      </div>
-                      <div className="flex justify-between gap-2">
-                        <span>{i18n.language === 'ar' ? 'مصروفات الشهر' : 'Month expenses'}</span>
-                        <span className="font-mono font-semibold text-slate-600">{formatCurrency(data.kpis.arrearsBreakdown.expenses)}</span>
-                      </div>
+                  <span className="text-[11px] text-slate-400 font-medium truncate">
+                    {i18n.language === 'ar'
+                      ? `المستحق حتى الآن: ${formatCurrency(data.kpis.billed)}`
+                      : `Accrued to date: ${formatCurrency(data.kpis.billed)}`}
+                  </span>
+                </KpiCard>
+
+                <KpiCard
+                  title={t('collected')}
+                  value={formatCurrency(data.kpis.collected)}
+                  valueClass="text-teal-700"
+                  icon="✅"
+                  iconClass="bg-teal-50 text-teal-600"
+                  cardClass="bg-gradient-to-br from-white to-teal-50/20"
+                  hint={openHint}
+                  onOpen={() => openBreakdown('collected')}
+                />
+
+                <KpiCard
+                  title={t('arrears')}
+                  value={formatCurrency(data.kpis.arrears)}
+                  valueClass={data.kpis.arrears > 0 ? 'text-rose-600' : 'text-slate-800'}
+                  icon="⚠️"
+                  iconClass={data.kpis.arrears > 0 ? 'bg-rose-50 text-rose-500' : 'bg-slate-50 text-slate-500'}
+                  cardClass={data.kpis.arrears > 0 ? 'bg-gradient-to-br from-white to-rose-50/20 border-rose-200' : ''}
+                  hint={openHint}
+                  onOpen={() => openBreakdown('arrears')}
+                >
+                  {/* The three parts spelled out — the total mixes money owed BY families with
+                      money the nursery still owes OUT, so an unexplained figure is unreadable. */}
+                  <div className="mt-1.5 space-y-0.5 text-[10px] text-slate-500">
+                    <div className="flex justify-between gap-2">
+                      <span>{i18n.language === 'ar' ? 'متأخرات الأطفال' : 'Children'}</span>
+                      <span className="font-mono font-semibold text-slate-600">{formatCurrency(data.kpis.arrearsBreakdown.children)}</span>
+                    </div>
+                    <div className="flex justify-between gap-2">
+                      <span>{i18n.language === 'ar' ? 'رواتب غير مدفوعة' : 'Unpaid salaries'}</span>
+                      <span className="font-mono font-semibold text-slate-600">{formatCurrency(data.kpis.arrearsBreakdown.salaries)}</span>
+                    </div>
+                    <div className="flex justify-between gap-2">
+                      <span>{i18n.language === 'ar' ? 'مصروفات الشهر' : 'Month expenses'}</span>
+                      <span className="font-mono font-semibold text-slate-600">{formatCurrency(data.kpis.arrearsBreakdown.expenses)}</span>
                     </div>
                   </div>
-                  <span className={`text-2xl p-2.5 rounded-lg flex-shrink-0 ${
-                    data.kpis.arrears > 0 ? 'bg-rose-50 text-rose-500' : 'bg-slate-50 text-slate-500'
-                  }`}>⚠️</span>
-                </div>
-                <Stat
+                </KpiCard>
+
+                <KpiCard
                   title={i18n.language === 'ar' ? 'المصاريف التشغيلية' : 'Operational Cost'}
                   value={formatCurrency(data.kpis.expensesTotal + data.kpis.salariesTotal)}
-                  description={
-                    i18n.language === 'ar'
-                      ? `رواتب: ${formatCurrency(data.kpis.salariesTotal)} | نفقات: ${formatCurrency(data.kpis.expensesTotal)}`
-                      : `Salaries: ${formatCurrency(data.kpis.salariesTotal)} | Expenses: ${formatCurrency(data.kpis.expensesTotal)}`
-                  }
                   icon="💸"
-                />
+                  iconClass="bg-slate-100 text-slate-600"
+                  hint={openHint}
+                  onOpen={() => openBreakdown('operational')}
+                >
+                  <span className="text-[11px] text-slate-400 font-medium truncate">
+                    {i18n.language === 'ar'
+                      ? `رواتب: ${formatCurrency(data.kpis.salariesTotal)} | نفقات: ${formatCurrency(data.kpis.expensesTotal)}`
+                      : `Salaries: ${formatCurrency(data.kpis.salariesTotal)} | Expenses: ${formatCurrency(data.kpis.expensesTotal)}`}
+                  </span>
+                </KpiCard>
+
                 {isAdmin && (
-                <div className={`bg-white rounded-xl shadow-sm p-5 flex items-start sm:items-center justify-between gap-4 border border-slate-200 ${
-                  data.kpis.netProfit >= 0 ? 'bg-gradient-to-br from-white to-emerald-50/20' : 'bg-gradient-to-br from-white to-red-50/20 border-red-200'
-                }`}>
-                  <div className="flex flex-col gap-1 text-start min-w-0">
-                    <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider truncate">
-                      {i18n.language === 'ar' ? 'صافي الربح' : 'Net Profit'}
-                    </span>
-                    <span className={`text-xl sm:text-2xl font-extrabold font-mono tracking-tight mt-1 truncate ${
-                      data.kpis.netProfit >= 0 ? 'text-emerald-600' : 'text-red-600'
-                    }`}>
-                      {formatCurrency(data.kpis.netProfit)}
-                    </span>
-                  </div>
-                  <span className={`text-2xl p-2.5 rounded-lg flex-shrink-0 ${
-                    data.kpis.netProfit >= 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-500'
-                  }`}>📈</span>
-                </div>
+                  <KpiCard
+                    title={i18n.language === 'ar' ? 'صافي الربح' : 'Net Profit'}
+                    value={formatCurrency(data.kpis.netProfit)}
+                    valueClass={data.kpis.netProfit >= 0 ? 'text-emerald-600' : 'text-red-600'}
+                    icon="📈"
+                    iconClass={data.kpis.netProfit >= 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-500'}
+                    cardClass={data.kpis.netProfit >= 0 ? 'bg-gradient-to-br from-white to-emerald-50/20' : 'bg-gradient-to-br from-white to-red-50/20 border-red-200'}
+                    hint={openHint}
+                    onOpen={() => openBreakdown('netProfit')}
+                  />
                 )}
-                <div className="bg-white rounded-xl shadow-sm p-5 flex items-start sm:items-center justify-between gap-4 border border-slate-200">
-                  <div className="flex flex-col gap-1 text-start min-w-0">
-                    <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider truncate">
-                      {i18n.language === 'ar' ? 'نسبة تحصيل الاشتراكات' : 'Collection Rate'}
-                    </span>
-                    <span className="text-xl sm:text-2xl font-extrabold font-mono text-slate-800 tracking-tight mt-1 truncate">
-                      {Math.round(data.kpis.collectionRate * 100)}%
-                    </span>
-                  </div>
-                  <span className="text-2xl bg-slate-50 text-slate-500 p-2.5 rounded-lg flex-shrink-0">📊</span>
-                </div>
+
+                <KpiCard
+                  title={i18n.language === 'ar' ? 'نسبة تحصيل الاشتراكات' : 'Collection Rate'}
+                  value={`${Math.round(data.kpis.collectionRate * 100)}%`}
+                  icon="📊"
+                  hint={openHint}
+                  onOpen={() => openBreakdown('collectionRate')}
+                />
               </div>
 
               {/* Charts Grid */}
@@ -349,7 +381,9 @@ export default function Dashboard() {
                       {i18n.language === 'ar' ? 'الملخص المالي لـ 12 شهراً' : '12-Month Financial Summary'}
                     </h3>
                     <p className="text-xs text-slate-400 mt-0.5">
-                      {i18n.language === 'ar' ? 'تقرير تراكمي يوضح المحصل والمصاريف وصافي الأرباح شهرياً' : 'Cumulative view of monthly collections, costs, profits, and targets'}
+                      {i18n.language === 'ar'
+                        ? 'تقرير تراكمي يوضح المحصل والمصاريف وصافي الأرباح شهرياً — اضغط على أي شهر لعرض تفاصيل حسابه'
+                        : 'Cumulative view of monthly collections, costs, profits, and targets — click any month to see how it was computed'}
                     </p>
                   </div>
 
@@ -366,7 +400,25 @@ export default function Dashboard() {
                       </thead>
                       <tbody className="bg-white divide-y divide-slate-100 text-sm">
                         {data.summary12Month.map((row) => (
-                          <tr key={row.month} className="hover:bg-slate-50/50 transition-colors">
+                          <tr
+                            key={row.month}
+                            role="button"
+                            tabIndex={0}
+                            title={openHint}
+                            onClick={() =>
+                              navigate(
+                                `/breakdown/${isAdmin ? 'netProfit' : 'operational'}?month=${encodeURIComponent(row.month)}&year=${selectedYear}`
+                              )
+                            }
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                navigate(
+                                  `/breakdown/${isAdmin ? 'netProfit' : 'operational'}?month=${encodeURIComponent(row.month)}&year=${selectedYear}`
+                                )
+                              }
+                            }}
+                            className="hover:bg-teal-50/40 cursor-pointer transition-colors"
+                          >
                             <td className="px-4 py-2 font-medium text-slate-700 text-start">{translateMonth(row.month)}</td>
                             <td className="px-4 py-2 text-end font-mono font-medium text-slate-800">{formatCurrency(row.collected)}</td>
                             <td className="px-4 py-2 text-end font-mono text-slate-650">{formatCurrency(row.expenses)}</td>
@@ -427,24 +479,32 @@ export default function Dashboard() {
 
                       {/* Display calculations */}
                       <div className="space-y-2.5 border-t border-slate-100 pt-3.5 text-xs">
-                        <div className="flex justify-between">
-                          <span className="text-slate-450 font-medium">{i18n.language === 'ar' ? 'المصاريف الفعلية:' : 'Actual Costs:'}</span>
-                          <span className="font-mono font-bold text-slate-700">
+                        <button
+                          onClick={() => openBreakdown('operational')}
+                          className="flex justify-between w-full hover:text-teal-700 group"
+                          title={openHint}
+                        >
+                          <span className="text-slate-450 font-medium group-hover:underline">{i18n.language === 'ar' ? 'المصاريف الفعلية:' : 'Actual Costs:'}</span>
+                          <span className="font-mono font-bold text-slate-700 group-hover:text-teal-700">
                             {formatCurrency(data.kpis.expensesTotal + data.kpis.salariesTotal)}
                           </span>
-                        </div>
+                        </button>
                         <div className="flex justify-between">
                           <span className="text-slate-450 font-medium">{i18n.language === 'ar' ? 'الإيراد المستهدف المطلوب:' : 'Required Target Revenue:'}</span>
                           <span className="font-mono font-extrabold text-slate-800 text-sm">
                             {formatCurrency(simulatedValues.required)}
                           </span>
                         </div>
-                        <div className="flex justify-between">
-                          <span className="text-slate-450 font-medium">{i18n.language === 'ar' ? 'المبلغ المحصل حالياً:' : 'Actual Collected:'}</span>
+                        <button
+                          onClick={() => openBreakdown('collected')}
+                          className="flex justify-between w-full group"
+                          title={openHint}
+                        >
+                          <span className="text-slate-450 font-medium group-hover:underline group-hover:text-teal-700">{i18n.language === 'ar' ? 'المبلغ المحصل حالياً:' : 'Actual Collected:'}</span>
                           <span className="font-mono font-bold text-teal-600">
                             {formatCurrency(data.kpis.collected)}
                           </span>
-                        </div>
+                        </button>
                         <div className="flex justify-between border-t border-slate-50 pt-2 font-semibold">
                           <span className="text-slate-600">{i18n.language === 'ar' ? 'الفجوة للمستهدف المختار:' : 'Gap to Desired Target:'}</span>
                           <span className={`font-mono font-bold ${simulatedValues.gap > 0 ? 'text-amber-600' : 'text-teal-600'}`}>
@@ -477,7 +537,9 @@ export default function Dashboard() {
                         {i18n.language === 'ar' ? 'الإيرادات حسب نوع الخدمة' : 'Revenue by Service Type'}
                       </h3>
                       <p className="text-xs text-slate-400 mt-0.5">
-                        {i18n.language === 'ar' ? 'تفاصيل المبالغ المحصلة لكل خدمة ونسبتها من الإجمالي' : 'Breakdown of collections per service and their share of total revenue'}
+                        {i18n.language === 'ar'
+                          ? 'تفاصيل المبالغ المحصلة لكل خدمة ونسبتها من الإجمالي — اضغط على خدمة لعرض سطورها'
+                          : 'Breakdown of collections per service and their share of total revenue — click a service to see its lines'}
                       </p>
                     </div>
 
@@ -501,7 +563,20 @@ export default function Dashboard() {
                           srv.service === 'جلسة' ? t('services.session') : srv.service
 
                         return (
-                          <div key={srv.service} className="border border-slate-100 rounded-lg p-3 space-y-2 hover:bg-slate-50/50 transition-all">
+                          <div
+                            key={srv.service}
+                            role="button"
+                            tabIndex={0}
+                            title={openHint}
+                            onClick={() => openBreakdown('service', { service: srv.service })}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault()
+                                openBreakdown('service', { service: srv.service })
+                              }
+                            }}
+                            className="border border-slate-100 rounded-lg p-3 space-y-2 cursor-pointer hover:bg-teal-50/40 hover:border-teal-200 transition-all"
+                          >
                             <div className="flex justify-between items-center text-xs">
                               <div className="flex items-center gap-1.5 font-bold text-slate-700">
                                 <span className={`w-2.5 h-2.5 rounded-full ${colorClass}`}></span>
@@ -526,31 +601,6 @@ export default function Dashboard() {
 
               </div>
 
-            {/* Collected-by-method breakdown (admin drill-down on the Collected card) */}
-            <Modal
-              isOpen={showMethods}
-              onClose={() => setShowMethods(false)}
-              title={i18n.language === 'ar' ? 'التحصيل حسب طريقة الدفع' : 'Collected by Payment Method'}
-            >
-              {data.collectedByMethod.length === 0 ? (
-                <p className="text-sm text-slate-400">
-                  {i18n.language === 'ar' ? 'لا توجد مدفوعات محصّلة لهذا الشهر.' : 'No collected payments this month.'}
-                </p>
-              ) : (
-                <div className="divide-y divide-slate-100">
-                  {data.collectedByMethod.map((m) => (
-                    <div key={m.method} className="flex justify-between items-center py-2.5">
-                      <span className="text-sm text-slate-700">{m.method}</span>
-                      <span className="font-mono font-bold text-teal-700">{formatCurrency(m.total)}</span>
-                    </div>
-                  ))}
-                  <div className="flex justify-between items-center py-2.5 border-t-2 border-slate-200">
-                    <span className="text-sm font-semibold text-slate-800">{i18n.language === 'ar' ? 'الإجمالي' : 'Total'}</span>
-                    <span className="font-mono font-extrabold text-teal-800">{formatCurrency(data.kpis.collected)}</span>
-                  </div>
-                </div>
-              )}
-            </Modal>
             </div>
           )}
         </div>

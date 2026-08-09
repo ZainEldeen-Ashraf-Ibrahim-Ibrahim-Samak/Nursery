@@ -9584,6 +9584,201 @@ function getSalaryTotals(db, month, year) {
 function checkAuth$5() {
 	if (!getCurrentUser()) throw new Error("UNAUTHORIZED: يجب تسجيل الدخول أولاً / Unauthorized");
 }
+/**
+* Every line that feeds a Dashboard KPI, with the inputs each amount was derived FROM.
+*
+* The KPI cards are sums of sums — `dashboard:get` returns only the totals, so a figure that
+* looks wrong is unarguable from the Dashboard alone. This returns the raw contributing rows
+* plus the derivation inputs (quantity source, unit rate, pro-rating, lesson-day schedule,
+* salary mode and session counts) so every card can open a page that shows where its number
+* came from. Formatting/labelling is left to the renderer, which owns the AR/EN wording.
+*/
+ipcMain.handle("dashboard:breakdown", async (_event, { month, year }) => {
+	try {
+		checkAuth$5();
+		const db = getDb();
+		if (!month || !year) throw new Error("Month and year are required");
+		const monthIndex = arabicMonths.indexOf(month);
+		const today = /* @__PURE__ */ new Date();
+		const isCurrentMonth = monthIndex === today.getMonth() && Number(year) === today.getFullYear();
+		const daysInMonth = monthIndex !== -1 ? new Date(Number(year), monthIndex + 1, 0).getDate() : 30;
+		const children = attachExpectedTotals(db.prepare(`
+        SELECT p.id, p.child_id, p.service, p.unit, p.quantity, p.price, p.total, p.paid,
+               p.balance, p.status, p.prorated_calculated, p.notes,
+               c.name as child_name, c.guardian,
+               COALESCE(NULLIF(cs.lesson_days, '[]'), c.lesson_days) as service_lesson_days
+        FROM payments p
+        JOIN children c ON p.child_id = c.id
+        LEFT JOIN child_services cs ON cs.id = p.service_id
+        WHERE p.month = ? AND p.year = ?
+        ORDER BY c.name ASC, p.service ASC
+      `).all(month, year), month, year).map((p) => {
+			let lessonDays = [];
+			try {
+				lessonDays = JSON.parse(p.service_lesson_days || "[]");
+			} catch {}
+			return {
+				paymentId: p.id,
+				childId: p.child_id,
+				childName: p.child_name,
+				guardian: p.guardian,
+				service: p.service,
+				unit: p.unit,
+				/** Quantity already billed from recorded attendance. */
+				billedQuantity: Number(p.quantity ?? 0),
+				/** Full scheduled quantity for the month (billed + still-scheduled days). */
+				expectedQuantity: Number(p.expected_quantity ?? 0),
+				price: Number(p.price ?? 0),
+				/** Set only for mid-month enrollments: the pro-rated month rate that replaces `price`. */
+				proratedRate: p.prorated_calculated == null ? null : Number(p.prorated_calculated),
+				/** quantity × price so far. */
+				billedTotal: Number(p.total ?? 0),
+				/** expectedQuantity × (proratedRate ?? price) — the month-end figure. */
+				expectedTotal: Number(p.expected_total ?? 0),
+				paid: Number(p.paid ?? 0),
+				outstanding: Number(Math.max(0, Number(p.expected_total ?? 0) - Number(p.paid ?? 0)).toFixed(2)),
+				status: p.status,
+				lessonDays,
+				notes: p.notes
+			};
+		});
+		const collections = db.prepare(`
+      SELECT * FROM (
+        SELECT pt.id as id, c.name as child_name, p.service as service, pt.amount as amount,
+               COALESCE(NULLIF(pt.payment_method_name, ''), 'غير محدد') as method,
+               pt.paid_date as date, pt.notes as notes, 0 as is_legacy
+        FROM payment_transactions pt
+        JOIN payments p ON pt.payment_id = p.id
+        JOIN children c ON p.child_id = c.id
+        WHERE p.month = ? AND p.year = ?
+        UNION ALL
+        SELECT p.id as id, c.name as child_name, p.service as service, p.paid as amount,
+               COALESCE(NULLIF(p.payment_method_name, ''), 'غير محدد') as method,
+               p.updated_at as date, p.notes as notes, 1 as is_legacy
+        FROM payments p
+        JOIN children c ON p.child_id = c.id
+        WHERE p.month = ? AND p.year = ? AND p.paid > 0
+          AND NOT EXISTS (SELECT 1 FROM payment_transactions pt WHERE pt.payment_id = p.id)
+      )
+      ORDER BY date DESC
+    `).all(month, year, month, year).map((r) => ({
+			id: r.id,
+			childName: r.child_name,
+			service: r.service,
+			amount: Number((r.amount ?? 0).toFixed(2)),
+			method: r.method,
+			date: r.date,
+			notes: r.notes,
+			isLegacy: r.is_legacy === 1
+		}));
+		const employeeRows = db.prepare(`
+      SELECT e.id as employee_id, e.name, e.net_salary,
+             COALESCE(s.bonus, 0) as bonus, s.actual_paid as stored_actual_paid, s.paid_date
+      FROM employees e
+      LEFT JOIN salary_payments s ON e.id = s.employee_id AND s.month = ? AND s.year = ?
+      WHERE e.is_active = 1 OR s.id IS NOT NULL
+      ORDER BY e.name ASC
+    `).all(month, year);
+		const deductionRowsStmt = db.prepare("SELECT reason, amount FROM employee_deductions WHERE employee_id = ? AND month = ? AND year = ?");
+		const salaries = employeeRows.map((row) => {
+			const { base, payableSessions, totalSessions, salaryTypeName, salaryTypeMode } = computeBaseSalary(db, row.employee_id, month, year);
+			const deductionItems = deductionRowsStmt.all(row.employee_id, month, Number(year)).map((d) => ({
+				reason: d.reason,
+				amount: Number(d.amount ?? 0)
+			}));
+			const deductions = deductionItems.reduce((sum, d) => sum + d.amount, 0);
+			const bonus = Number(row.bonus ?? 0);
+			const due = Number((base + bonus - deductions).toFixed(2));
+			const paid = Number((row.stored_actual_paid ?? 0).toFixed(2));
+			return {
+				employeeId: row.employee_id,
+				name: row.name,
+				salaryTypeName,
+				salaryTypeMode,
+				netSalary: Number(row.net_salary ?? 0),
+				base: Number(base.toFixed(2)),
+				payableSessions,
+				totalSessions,
+				bonus,
+				deductions: Number(deductions.toFixed(2)),
+				deductionItems,
+				due,
+				paid,
+				/** Floored per employee, exactly as the arrears KPI does. */
+				remaining: Number(Math.max(0, due - paid).toFixed(2)),
+				paidDate: row.paid_date,
+				/** No salary_payments row yet — the whole amount is still outstanding. */
+				hasPayrollRow: row.stored_actual_paid != null
+			};
+		});
+		const expenses = db.prepare("SELECT id, item, category, amount, notes, created_at FROM expenses WHERE month = ? AND year = ? ORDER BY amount DESC").all(month, year).map((e) => ({
+			id: e.id,
+			item: e.item,
+			category: e.category,
+			amount: Number((e.amount ?? 0).toFixed(2)),
+			notes: e.notes,
+			createdAt: e.created_at
+		}));
+		const serviceMap = /* @__PURE__ */ new Map();
+		for (const c of children) {
+			const key = c.service || "غير محدد";
+			const entry = serviceMap.get(key) ?? {
+				collected: 0,
+				expected: 0,
+				children: 0
+			};
+			entry.collected += c.paid;
+			entry.expected += c.expectedTotal;
+			entry.children += 1;
+			serviceMap.set(key, entry);
+		}
+		const revenueByService = [...serviceMap.entries()].map(([service, v]) => ({
+			service,
+			collected: Number(v.collected.toFixed(2)),
+			expected: Number(v.expected.toFixed(2)),
+			childCount: v.children
+		})).sort((a, b) => b.collected - a.collected);
+		const targetProfitRow = db.prepare("SELECT value FROM settings WHERE key = 'target_profit_pct'").get();
+		const targetProfitPct = targetProfitRow ? Number(targetProfitRow.value) : .2;
+		const salariesTotals = getSalaryTotals(db, month, year);
+		const kpi = calculateDashboard(getMonthBillableRows(db, month, year), expenses, salariesTotals, targetProfitPct);
+		return {
+			month,
+			year: Number(year),
+			/** Calendar facts the expected-quantity maths depends on, so the page can spell it out. */
+			period: {
+				monthIndex,
+				daysInMonth,
+				isCurrentMonth,
+				/** Scheduled days are counted from here to month end (today for the current month). */
+				countFromDay: isCurrentMonth ? today.getDate() : 1
+			},
+			targetProfitPct,
+			kpis: {
+				invoiced: kpi.invoiced,
+				billed: kpi.billed,
+				collected: kpi.collected,
+				arrears: kpi.arrears,
+				arrearsBreakdown: kpi.arrearsBreakdown,
+				collectionRate: kpi.collectionRate,
+				expensesTotal: kpi.expensesTotal,
+				salariesTotal: kpi.salariesTotal,
+				salariesDue: kpi.salariesDue,
+				netProfit: kpi.netProfit,
+				targetRequired: kpi.targetRequired,
+				gap: kpi.gap
+			},
+			children,
+			collections,
+			salaries,
+			expenses,
+			revenueByService
+		};
+	} catch (error) {
+		console.error("Failed to get dashboard breakdown:", error);
+		throw new Error(error.message || "Failed to retrieve dashboard breakdown");
+	}
+});
 ipcMain.handle("dashboard:get", async (_event, { month, year }) => {
 	try {
 		checkAuth$5();

@@ -32,6 +32,7 @@ import Settings from './pages/Settings/Settings.js'
 import UsersList from './pages/Users/UsersList.js'
 import SessionsList from './pages/Sessions/SessionsList.js'
 import EditRequestsInbox from './pages/Attendance/EditRequestsInbox.js'
+import MetricBreakdown from './pages/Breakdown/MetricBreakdown.js'
 
 // Layout component wrapping protected routes
 const AppLayout: React.FC = () => {
@@ -86,6 +87,10 @@ export default function App() {
         <Route path="/" element={<AppLayout />}>
           {/* Dashboard - Both admin and employee */}
           <Route index element={<Dashboard />} />
+
+          {/* Per-KPI drill-down: every Dashboard card opens the lines behind its number.
+              Role is enforced inside the page (net profit stays admin-only). */}
+          <Route path="breakdown/:metric" element={<MetricBreakdown />} />
 
           {/* Children Roster - all read & add (feature 004 FR-012); edit is admin-only */}
           <Route path="children" element={<ChildrenList />} />
