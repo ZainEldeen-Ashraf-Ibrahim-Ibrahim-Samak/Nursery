@@ -1123,6 +1123,24 @@ const migrations: Migration[] = [
         CREATE UNIQUE INDEX IF NOT EXISTS idx_edit_requests_one_pending ON attendance_edit_requests(attendance_record_id) WHERE status = 'pending';
       `)
     }
+  },
+  {
+    // The Mongoose schemas for child_services and salary_payments were missing columns that
+    // exist locally (per-enrollment teacher/lesson_days/extra_lessons/session_price, and the
+    // payroll note). Mongoose is strict, so those values were dropped on every push and the
+    // cloud copies are incomplete. Adding the fields to the schema is not enough on its own:
+    // push only sends rows with synced = 0, so rows already marked synced would never carry
+    // the newly-covered columns up. Re-flag them so the next push repairs the cloud.
+    name: '043_resync_child_services_and_salary_notes',
+    up: (db) => {
+      // Guarded per statement: partial/legacy databases may not have both tables yet, and a
+      // re-sync flag is not worth aborting the whole migration chain over.
+      for (const table of ['child_services', 'salary_payments']) {
+        try {
+          db.exec(`UPDATE ${table} SET synced = 0;`)
+        } catch { /* table not present in this database — nothing to re-flag */ }
+      }
+    }
   }
 ]
 

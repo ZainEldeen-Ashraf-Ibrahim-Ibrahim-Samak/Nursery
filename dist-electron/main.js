@@ -1173,6 +1173,14 @@ var migrations = [
         CREATE UNIQUE INDEX IF NOT EXISTS idx_edit_requests_one_pending ON attendance_edit_requests(attendance_record_id) WHERE status = 'pending';
       `);
 		}
+	},
+	{
+		name: "043_resync_child_services_and_salary_notes",
+		up: (db) => {
+			for (const table of ["child_services", "salary_payments"]) try {
+				db.exec(`UPDATE ${table} SET synced = 0;`);
+			} catch {}
+		}
 	}
 ];
 function runMigrations(db) {
@@ -8341,6 +8349,10 @@ var childServiceSchema = new Schema({
 	unit: String,
 	price: Number,
 	teacher_session_rate: Number,
+	teacher_id: Number,
+	lesson_days: String,
+	extra_lessons: Number,
+	session_price: Number,
 	created_at: String,
 	updated_at: String,
 	synced: Number
@@ -8420,7 +8432,7 @@ var salaryPaymentSchema = new Schema({
 	deductions: Number,
 	actual_paid: Number,
 	paid_date: String,
-	created_at: String,
+	notes: String,
 	updated_at: String,
 	synced: Number
 }, sharedOptions);
@@ -8559,7 +8571,8 @@ var attendanceConflictSchema = new Schema({
 	winning_by: String,
 	winning_at: String,
 	reviewed: Number,
-	created_at: String
+	created_at: String,
+	synced: Number
 }, sharedOptions);
 var AttendanceConflictModel = mongoose.models["sync_attendance_conflicts"] || mongoose.model("sync_attendance_conflicts", attendanceConflictSchema);
 var paymentMethodSchema = new Schema({

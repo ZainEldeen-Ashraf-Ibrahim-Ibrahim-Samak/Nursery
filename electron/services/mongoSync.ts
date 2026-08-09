@@ -219,6 +219,14 @@ const childServiceSchema = new Schema({
   unit: String,
   price: Number,
   teacher_session_rate: Number,
+  // Feature 005 per-enrollment fields (migration 024). Mongoose schemas are strict, so a column
+  // absent here is silently dropped on push — without these a second device pulled enrollments
+  // with no assigned teacher, no weekday schedule (which the expected-total maths depends on)
+  // and no per-enrollment session price.
+  teacher_id: Number,
+  lesson_days: String,
+  extra_lessons: Number,
+  session_price: Number,
   created_at: String,
   updated_at: String,
   synced: Number
@@ -306,7 +314,7 @@ const salaryPaymentSchema = new Schema({
   deductions: Number,
   actual_paid: Number,
   paid_date: String,
-  created_at: String,
+  notes: String,
   updated_at: String,
   synced: Number
 }, sharedOptions)
@@ -454,7 +462,8 @@ const attendanceConflictSchema = new Schema({
   winning_by: String,
   winning_at: String,
   reviewed: Number,
-  created_at: String
+  created_at: String,
+  synced: Number
 }, sharedOptions)
 
 export const AttendanceConflictModel: Model<any> = mongoose.models['sync_attendance_conflicts'] ||
