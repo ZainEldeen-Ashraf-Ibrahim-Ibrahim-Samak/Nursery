@@ -1643,6 +1643,31 @@ function getChildStatement(child, existingPayments, currentDate) {
 	};
 }
 //#endregion
+//#region electron/services/tombstones.ts
+function recordLocalTombstone(db, entity, recordId) {
+	db.prepare(`
+    INSERT OR IGNORE INTO tombstones (entity, record_id, created_at, synced)
+    VALUES (?, ?, ?, 0)
+  `).run(entity, recordId, (/* @__PURE__ */ new Date()).toISOString());
+}
+function applyCloudTombstones(db, cloudTombstones) {
+	const insertTombstone = db.prepare(`
+    INSERT OR IGNORE INTO tombstones (entity, record_id, created_at, synced)
+    VALUES (?, ?, ?, 1)
+  `);
+	for (const tombstone of cloudTombstones) {
+		if ([
+			"children",
+			"child_services",
+			"payments",
+			"expenses",
+			"employees",
+			"salary_payments"
+		].includes(tombstone.entity)) db.prepare(`DELETE FROM ${tombstone.entity} WHERE id = ?`).run(tombstone.record_id);
+		insertTombstone.run(tombstone.entity, tombstone.record_id, (/* @__PURE__ */ new Date()).toISOString());
+	}
+}
+//#endregion
 //#region electron/ipc/childrenIPC.ts
 function checkAuth$9() {
 	if (!getCurrentUser()) throw new Error("UNAUTHORIZED: يجب تسجيل الدخول أولاً / Unauthorized");
@@ -1870,7 +1895,14 @@ ipcMain.handle("children:delete", async (_event, { id }) => {
 		const child = db.prepare("SELECT id, is_active FROM children WHERE id = ?").get(id);
 		if (!child) throw new Error("الطفل غير موجود / Child not found");
 		if (child.is_active !== 0) throw new Error("لا يمكن حذف طفل نشط — يجب إلغاء تفعيله أولاً / Cannot delete an active child — deactivate first");
-		db.prepare("DELETE FROM children WHERE id = ?").run(id);
+		const paymentIds = db.prepare("SELECT id FROM payments WHERE child_id = ?").all(id).map((p) => p.id);
+		const serviceIds = db.prepare("SELECT id FROM child_services WHERE child_id = ?").all(id).map((s) => s.id);
+		db.transaction(() => {
+			db.prepare("DELETE FROM children WHERE id = ?").run(id);
+			recordLocalTombstone(db, "children", id);
+			for (const paymentId of paymentIds) recordLocalTombstone(db, "payments", paymentId);
+			for (const serviceId of serviceIds) recordLocalTombstone(db, "child_services", serviceId);
+		})();
 		return { ok: true };
 	} catch (error) {
 		console.error("Failed to delete child:", error);
@@ -1891,31 +1923,6 @@ ipcMain.handle("children:statement", async (_event, { childId }) => {
 		throw new Error(error.message || "Failed to get child statement");
 	}
 });
-//#endregion
-//#region electron/services/tombstones.ts
-function recordLocalTombstone(db, entity, recordId) {
-	db.prepare(`
-    INSERT OR IGNORE INTO tombstones (entity, record_id, created_at, synced)
-    VALUES (?, ?, ?, 0)
-  `).run(entity, recordId, (/* @__PURE__ */ new Date()).toISOString());
-}
-function applyCloudTombstones(db, cloudTombstones) {
-	const insertTombstone = db.prepare(`
-    INSERT OR IGNORE INTO tombstones (entity, record_id, created_at, synced)
-    VALUES (?, ?, ?, 1)
-  `);
-	for (const tombstone of cloudTombstones) {
-		if ([
-			"children",
-			"child_services",
-			"payments",
-			"expenses",
-			"employees",
-			"salary_payments"
-		].includes(tombstone.entity)) db.prepare(`DELETE FROM ${tombstone.entity} WHERE id = ?`).run(tombstone.record_id);
-		insertTombstone.run(tombstone.entity, tombstone.record_id, (/* @__PURE__ */ new Date()).toISOString());
-	}
-}
 //#endregion
 //#region electron/ipc/childServicesIPC.ts
 function checkAuth$8() {
@@ -2296,7 +2303,7 @@ ipcMain.handle("payments:get", async (_event, { month, year }) => {
 		}
 		return {
 			payments,
-			byChild: Array.from(childMap.values()).sort((a, b) => a.child_name.localeCompare(b.child_name)),
+			byChild: Array.from(childMap.values()).sort((a, b) => String(a.child_name ?? "").localeCompare(String(b.child_name ?? ""))),
 			summary: {
 				totalInvoiced: Number(totalInvoiced.toFixed(2)),
 				totalBilled: Number(totalBilled.toFixed(2)),
@@ -2627,6 +2634,7 @@ ipcMain.handle("payments:deleteBulk", async (_event, { ids }) => {
 			db.prepare(`DELETE FROM payment_transactions WHERE payment_id IN (${placeholders})`).run(...list);
 			const res = db.prepare(`DELETE FROM payments WHERE id IN (${placeholders})`).run(...list);
 			deleted = Number(res.changes);
+			for (const id of list) recordLocalTombstone(db, "payments", id);
 		})();
 		return {
 			ok: true,
@@ -2652,6 +2660,7 @@ ipcMain.handle("payments:deleteAll", async (_event, { month, year }) => {
 			}
 			const res = db.prepare(`DELETE FROM payments WHERE month = ? AND year = ?`).run(month, year);
 			deleted = Number(res.changes);
+			for (const row of rows) recordLocalTombstone(db, "payments", row.id);
 		})();
 		return {
 			ok: true,
@@ -2674,6 +2683,7 @@ ipcMain.handle("payments:deleteForChild", async (_event, { child_id, month, year
 				const placeholders = ids.map(() => "?").join(",");
 				db.prepare(`DELETE FROM payment_transactions WHERE payment_id IN (${placeholders})`).run(...ids);
 				db.prepare(`DELETE FROM payments WHERE child_id = ? AND month = ? AND year = ?`).run(child_id, month, year);
+				for (const id of ids) recordLocalTombstone(db, "payments", id);
 			}
 		})();
 		return { ok: true };

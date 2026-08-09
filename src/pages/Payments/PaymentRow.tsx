@@ -30,17 +30,22 @@ export default function PaymentRow({
   // When partial-payment installments exist, paid/method are derived from them — edit via the modal.
   const hasInstallments = (payment.transaction_count ?? 0) > 0
 
+  // `quantity` and `paid` are nullable in SQLite (both are DEFAULT-ed, not NOT NULL) and a row
+  // pulled from the cloud can arrive without them, so calling .toString() directly throws
+  // during render — which, before the error boundary, blanked the entire app.
+  const numText = (val: number | null | undefined, fallback: number) => String(val ?? fallback)
+
   // Local state for editing fields to prevent slow keystrokes
-  const [localQty, setLocalQty] = useState(payment.quantity.toString())
-  const [localPaid, setLocalPaid] = useState(payment.paid.toString())
+  const [localQty, setLocalQty] = useState(numText(payment.quantity, 0))
+  const [localPaid, setLocalPaid] = useState(numText(payment.paid, 0))
   const [localNotes, setLocalNotes] = useState(payment.notes || '')
   const [localMethodId, setLocalMethodId] = useState<number | null>(payment.payment_method_id ?? null)
   const [isSaving, setIsSaving] = useState(false)
 
   // Keep local state in sync when payment changes from database (e.g. bulk pay)
   useEffect(() => {
-    setLocalQty(payment.quantity.toString())
-    setLocalPaid(payment.paid.toString())
+    setLocalQty(numText(payment.quantity, 0))
+    setLocalPaid(numText(payment.paid, 0))
     setLocalNotes(payment.notes || '')
     setLocalMethodId(payment.payment_method_id ?? null)
   }, [payment])
@@ -51,8 +56,8 @@ export default function PaymentRow({
 
     if (isNaN(qtyNum) || qtyNum < 0 || isNaN(paidNum) || paidNum < 0) {
       // Revert to database values on invalid input
-      setLocalQty(payment.quantity.toString())
-      setLocalPaid(payment.paid.toString())
+      setLocalQty(numText(payment.quantity, 0))
+      setLocalPaid(numText(payment.paid, 0))
       return
     }
 

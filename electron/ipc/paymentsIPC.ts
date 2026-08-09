@@ -3,6 +3,7 @@ import { getDb } from '../db/connection.js'
 import { getCurrentUser } from './authIPC.js'
 import { requireAdmin } from './_guard.js'
 import { attachExpectedTotals } from '../services/monthlyTotals.js'
+import { recordLocalTombstone } from '../services/tombstones.js'
 import type { Payment, PaymentStatus } from '../../src/types/index.js'
 
 // Pure function for payment calculations (exported for unit testing)
@@ -188,7 +189,11 @@ ipcMain.handle('payments:get', async (_event, { month, year }) => {
 
     return {
       payments,
-      byChild: Array.from(childMap.values()).sort((a, b) => a.child_name.localeCompare(b.child_name)),
+      // Sort defensively: a null name would throw here and fail the whole payments:get call,
+      // taking the screen down rather than just mis-ordering one row.
+      byChild: Array.from(childMap.values()).sort((a, b) =>
+        String(a.child_name ?? '').localeCompare(String(b.child_name ?? ''))
+      ),
       summary: {
         totalInvoiced: Number(totalInvoiced.toFixed(2)),
         // What has actually accrued so far (SUM of payments.total) — kept alongside the
@@ -677,6 +682,8 @@ ipcMain.handle('payments:deleteBulk', async (_event, { ids }) => {
       db.prepare(`DELETE FROM payment_transactions WHERE payment_id IN (${placeholders})`).run(...list)
       const res = db.prepare(`DELETE FROM payments WHERE id IN (${placeholders})`).run(...list)
       deleted = Number(res.changes)
+      // Without a tombstone the cloud copy survives and the next pull re-inserts these rows.
+      for (const id of list) recordLocalTombstone(db, 'payments', id)
     })()
 
     return { ok: true, deleted }
@@ -706,6 +713,7 @@ ipcMain.handle('payments:deleteAll', async (_event, { month, year }) => {
       }
       const res = db.prepare(`DELETE FROM payments WHERE month = ? AND year = ?`).run(month, year)
       deleted = Number(res.changes)
+      for (const row of rows) recordLocalTombstone(db, 'payments', row.id)
     })()
 
     return { ok: true, deleted }
@@ -736,6 +744,10 @@ ipcMain.handle('payments:deleteForChild', async (_event, { child_id, month, year
         
         // Delete the payments
         db.prepare(`DELETE FROM payments WHERE child_id = ? AND month = ? AND year = ?`).run(child_id, month, year)
+
+        // Tombstone each one, otherwise the next pull restores them from the cloud and the
+        // rows the user just deleted reappear in the list.
+        for (const id of ids) recordLocalTombstone(db, 'payments', id)
       }
     })()
 

@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { useEffect } from 'react'
-import { HashRouter as Router, Routes, Route, Navigate, Outlet } from 'react-router-dom'
+import { HashRouter as Router, Routes, Route, Navigate, Outlet, useLocation } from 'react-router-dom'
 import './i18n/index.js'
 import { useAuthStore } from './store/useAuthStore.js'
 import { LoadingSpinner } from './components/ui/LoadingSpinner.js'
@@ -10,6 +10,7 @@ import { RoleGuard } from './components/layout/RoleGuard.js'
 import { UpdateBanner } from './components/layout/UpdateBanner.js'
 import { SyncBanner } from './components/layout/SyncBanner.js'
 import { useBranding } from './hooks/useBranding.js'
+import { ErrorBoundary } from './components/layout/ErrorBoundary.js'
 
 // Import Pages
 import Dashboard from './pages/Dashboard.js'
@@ -37,6 +38,7 @@ import MetricBreakdown from './pages/Breakdown/MetricBreakdown.js'
 // Layout component wrapping protected routes
 const AppLayout: React.FC = () => {
   const { isAuthenticated, isLoading } = useAuthStore()
+  const location = useLocation()
 
   if (isLoading && !isAuthenticated) {
     return <LoadingSpinner fullPage size="lg" />
@@ -54,7 +56,12 @@ const AppLayout: React.FC = () => {
         <SyncBanner />
         <Header />
         <main className="flex-1 overflow-y-auto">
-          <Outlet />
+          {/* Per-page boundary, keyed on the route: a crash inside one screen leaves the
+              sidebar and header usable so the user can navigate away, and moving to another
+              route clears the error automatically. */}
+          <ErrorBoundary key={location.pathname}>
+            <Outlet />
+          </ErrorBoundary>
         </main>
       </div>
     </div>

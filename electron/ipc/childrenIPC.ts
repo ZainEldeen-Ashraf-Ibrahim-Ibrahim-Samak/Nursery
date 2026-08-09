@@ -3,6 +3,7 @@ import { getDb } from '../db/connection.js'
 import { requireAdmin } from './_guard.js'
 import { getCurrentUser } from './authIPC.js'
 import { getChildStatement } from '../services/statementService.js'
+import { recordLocalTombstone } from '../services/tombstones.js'
 import type { Child } from '../../src/types/index.js'
 
 function checkAuth() {
@@ -366,7 +367,24 @@ ipcMain.handle('children:delete', async (_event, { id }) => {
       throw new Error('لا يمكن حذف طفل نشط — يجب إلغاء تفعيله أولاً / Cannot delete an active child — deactivate first')
     }
 
-    db.prepare('DELETE FROM children WHERE id = ?').run(id)
+    // The child's own payment rows must be tombstoned too. They disappear locally via
+    // ON DELETE CASCADE, which leaves no trace for sync to propagate — without their own
+    // tombstones the cloud copies survive and the next pull re-inserts them as orphans
+    // pointing at a child that no longer exists.
+    const paymentIds = (db.prepare('SELECT id FROM payments WHERE child_id = ?').all(id) as { id: number }[])
+      .map((p) => p.id)
+    const serviceIds = (db.prepare('SELECT id FROM child_services WHERE child_id = ?').all(id) as { id: number }[])
+      .map((s) => s.id)
+
+    db.transaction(() => {
+      db.prepare('DELETE FROM children WHERE id = ?').run(id)
+      // Deleting locally is only half of a delete: push/pull has no way to tell "this row was
+      // removed here" from "this row hasn't reached this device yet", so an untombstoned delete
+      // is undone by the next pull and the child reappears.
+      recordLocalTombstone(db, 'children', id)
+      for (const paymentId of paymentIds) recordLocalTombstone(db, 'payments', paymentId)
+      for (const serviceId of serviceIds) recordLocalTombstone(db, 'child_services', serviceId)
+    })()
 
     return { ok: true }
   } catch (error: any) {
