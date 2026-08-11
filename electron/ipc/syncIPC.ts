@@ -614,13 +614,16 @@ export async function runPull(report: Reporter = noopReport) {
 }
 
 /**
- * sync:push — Push all rows to MongoDB (always force: local overwrites cloud).
+ * sync:push — Full ordered sync: pull from MongoDB first (so we have the latest
+ * cloud state), then push local rows up.  The pull phase uses the event reporter
+ * so the UI progress bar reflects both legs of the cycle.
  * Any logged-in user — sync must work for every role, same as the automatic cycle.
- * Graceful: reports pushed/failed counts per entity.
  */
 ipcMain.handle('sync:push', async (event) => {
   checkAuth()
-  return runPush(progressReporter(event, 'push'))
+  const pullResult = await runPull(progressReporter(event, 'pull'))
+  const pushResult = await runPush(progressReporter(event, 'push'))
+  return { pull: pullResult, push: pushResult }
 })
 
 /**
@@ -638,18 +641,13 @@ let autoSyncTimer: ReturnType<typeof setInterval> | null = null
 let autoSyncRunning = false
 
 /**
- * One auto-sync cycle: push, then pull — both in NON-forced mode, so every write on both legs
- * goes through resolveConflict() and the most recently edited copy of a row wins.
+ * One auto-sync cycle: pull first (get the latest cloud state), then push
+ * local changes up.  Fetching before pushing ensures we never blindly
+ * overwrite a cloud record that was updated on another device between cycles.
  *
- * This must never use force. A forced cycle means "push every local row over the cloud, then
- * let every cloud row overwrite local", with no timestamp check on either leg — so a device
- * holding a stale copy of a payment would force-push its old paid = 0 over the cloud's real
- * amount, and the force-pull on the other device would then wipe the real amount there too,
- * zeroing the record on BOTH machines. The `force` flags stay available for the manual
- * push/pull buttons, where an admin has deliberately chosen a source of truth.
- *
- * Calls runPush/runPull directly — ipcMain.handle() handlers are NOT reachable through
- * ipcMain.listeners(), which is why the previous listener-based approach never ran.
+ * Calls runPull/runPush directly — ipcMain.handle() handlers are NOT reachable
+ * through ipcMain.listeners(), which is why the previous listener-based approach
+ * never ran.
  */
 /** Broadcast the auto-sync cycle state so the renderer can show a loading banner. */
 type AutoSyncState = 'connecting' | 'pushing' | 'pulling' | 'done' | 'error'
@@ -671,10 +669,10 @@ async function runAutoSyncCycle(): Promise<void> {
   try {
     broadcastAutoSyncStatus('connecting')
     await ensureConnected()
-    broadcastAutoSyncStatus('pushing')
-    await runPush()  // force: always push every local row over the cloud
     broadcastAutoSyncStatus('pulling')
-    await runPull()  // force: cloud always wins over local
+    await runPull()  // pull first: fetch latest cloud state before writing anything up
+    broadcastAutoSyncStatus('pushing')
+    await runPush()  // then push: send local rows up on top of the freshly-merged base
     broadcastAutoSyncStatus('done')
   } catch (err) {
     console.error('Auto-sync error:', err)
