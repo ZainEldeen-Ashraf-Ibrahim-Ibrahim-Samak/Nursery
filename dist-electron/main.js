@@ -9361,13 +9361,17 @@ async function runPull(report = noopReport) {
 	}
 }
 /**
-* sync:push — Push all rows to MongoDB (always force: local overwrites cloud).
+* sync:push — Full ordered sync: pull from MongoDB first (so we have the latest
+* cloud state), then push local rows up.  The pull phase uses the event reporter
+* so the UI progress bar reflects both legs of the cycle.
 * Any logged-in user — sync must work for every role, same as the automatic cycle.
-* Graceful: reports pushed/failed counts per entity.
 */
 ipcMain.handle("sync:push", async (event) => {
 	checkAuth$10();
-	return runPush(progressReporter(event, "push"));
+	return {
+		pull: await runPull(progressReporter(event, "pull")),
+		push: await runPush(progressReporter(event, "push"))
+	};
 });
 /**
 * sync:pull — Pull records from MongoDB (always force: cloud always wins).
@@ -9394,10 +9398,10 @@ async function runAutoSyncCycle() {
 	try {
 		broadcastAutoSyncStatus("connecting");
 		await ensureConnected();
-		broadcastAutoSyncStatus("pushing");
-		await runPush();
 		broadcastAutoSyncStatus("pulling");
 		await runPull();
+		broadcastAutoSyncStatus("pushing");
+		await runPush();
 		broadcastAutoSyncStatus("done");
 	} catch (err) {
 		console.error("Auto-sync error:", err);
