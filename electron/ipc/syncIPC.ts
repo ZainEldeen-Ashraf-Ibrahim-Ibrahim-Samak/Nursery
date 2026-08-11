@@ -326,9 +326,9 @@ async function ensureConnected(): Promise<void> {
 
 /**
  * Push records to MongoDB for every entity in SYNC_ENTITIES.
- * Default mode pushes rows with synced = 0; force pushes every row (overwriting cloud).
+ * Always runs in force mode — pushes every row, overwriting the cloud copy unconditionally.
  */
-export async function runPush(force: boolean, report: Reporter = noopReport) {
+export async function runPush(report: Reporter = noopReport) {
   try {
     const db = getDb()
     await ensureConnected()
@@ -337,61 +337,30 @@ export async function runPush(force: boolean, report: Reporter = noopReport) {
     let totalCollisions = 0
     const now = new Date().toISOString()
 
-    // Total work = all unsynced rows across every entity, so the bar is determinate.
+    // Total work = all rows across every entity (always force — push everything).
     let totalWork = 0
     for (const entity of SYNC_ENTITIES) {
-      let cq = force ? `SELECT COUNT(*) AS c FROM ${entity.table}` : `SELECT COUNT(*) AS c FROM ${entity.table} WHERE synced = 0`
-      if (entity.name === 'settings') {
-        cq += force ? " WHERE key != 'sync_mongo_uri'" : " AND key != 'sync_mongo_uri'"
-      }
+      let cq = `SELECT COUNT(*) AS c FROM ${entity.table}`
+      if (entity.name === 'settings') cq += " WHERE key != 'sync_mongo_uri'"
       totalWork += (db.prepare(cq).get() as any)?.c ?? 0
     }
     let done = 0
     report(0, totalWork, 'starting')
 
     for (const entity of SYNC_ENTITIES) {
-      let query = force ? `SELECT * FROM ${entity.table}` : `SELECT * FROM ${entity.table} WHERE synced = 0`
-      if (entity.name === 'settings') {
-        query += force ? ` WHERE key != 'sync_mongo_uri'` : ` AND key != 'sync_mongo_uri'`
-      }
+      let query = `SELECT * FROM ${entity.table}`
+      if (entity.name === 'settings') query += " WHERE key != 'sync_mongo_uri'"
       
       const unsynced = db.prepare(query).all() as SyncRecord[]
       let pushed = 0
       let failed = 0
-      let skipped = 0
-      let collisions = 0
+      const skipped = 0
+      const collisions = 0
 
       for (const record of unsynced) {
         const recordKey = entity.name === 'settings' ? record.key : record.id
         try {
-          // Non-force push must never blindly clobber the cloud: another device may have
-          // written a NEWER version of this same row. Compare timestamps with the exact same
-          // resolveConflict() the pull uses, and when the cloud wins leave both the cloud doc
-          // and the local `synced = 0` flag alone — the pull that follows brings the cloud
-          // version down and marks it synced, which closes the loop.
-          // (Forced push is the explicit "my machine is the source of truth" escape hatch.)
-          if (!force) {
-            const cloudDoc = (await entity.model.findOne({ id: recordKey }).lean()) as SyncRecord | null
-
-            // Two devices independently numbering different records the same is not a conflict
-            // to resolve — pushing would destroy the other device's record in the cloud.
-            const collision = cloudDoc ? detectIdCollision(record, cloudDoc) : null
-            if (collision) {
-              logSync('push-collision', entity.name, recordKey, 'skipped-collision', collision)
-              console.error(`[sync:push] ${entity.name}: ${collision}`)
-              collisions++
-              skipped++
-              report(++done, totalWork, entity.name)
-              continue
-            }
-
-            if (cloudDoc && resolveConflict({ ...record, id: recordKey as any }, cloudDoc) === 'cloud') {
-              logSync('push-skip', entity.name, recordKey, 'skipped', 'cloud copy is newer — pull will reconcile')
-              skipped++
-              report(++done, totalWork, entity.name)
-              continue
-            }
-          }
+          // Force push: always overwrite the cloud copy unconditionally.
 
           if (entity.name === 'settings') {
             await entity.model.findOneAndUpdate(
@@ -437,12 +406,9 @@ export async function runPush(force: boolean, report: Reporter = noopReport) {
 
 /**
  * Pull records from MongoDB for every entity in SYNC_ENTITIES.
- * Default mode applies conflict resolution (most-recent updated_at wins, id tie-break);
- * `force` makes every cloud record overwrite local unconditionally — for restoring/importing
- * known-good cloud data onto a machine whose local rows have stale-but-technically-"newer"
- * timestamps that would otherwise make the pull report everything as "skipped".
+ * Always runs in force mode — cloud always wins, overwriting local unconditionally.
  */
-export async function runPull(force: boolean, report: Reporter = noopReport) {
+export async function runPull(report: Reporter = noopReport) {
   try {
     const db = getDb()
     await ensureConnected()
@@ -467,7 +433,7 @@ export async function runPull(force: boolean, report: Reporter = noopReport) {
 
     for (const entity of SYNC_ENTITIES) {
       let pulled = 0
-      let merged = 0
+      const merged = 0
       let skipped = 0
       let failed = 0
       let collisions = 0
@@ -562,50 +528,19 @@ export async function runPull(force: boolean, report: Reporter = noopReport) {
                  local.id = local.key as any
               }
 
-              const winner = force ? 'cloud' : resolveConflict(local, cloudRecord)
-              if (winner === 'cloud') {
-                // Update local with cloud data
-                const columns = Object.keys(cloudRecord).filter((k) => k !== '_id' && k !== 'id' && k !== '__v')
-                const setClause = columns.map((c) => `${c} = ?`).join(', ')
-                const values = columns.map((c) => cloudRecord[c])
-                values.push(cloudRecord.id)
+              // Force: cloud always wins — overwrite local with cloud data
+              const columns = Object.keys(cloudRecord).filter((k) => k !== '_id' && k !== 'id' && k !== '__v')
+              const setClause = columns.map((c) => `${c} = ?`).join(', ')
+              const values = columns.map((c) => cloudRecord[c])
+              values.push(cloudRecord.id)
 
-                if (entity.name === 'settings') {
-                   db.prepare(`UPDATE ${entity.table} SET ${setClause}, synced = 1 WHERE key = ?`).run(...values)
-                } else {
-                   db.prepare(`UPDATE ${entity.table} SET ${setClause}, synced = 1 WHERE id = ?`).run(...values)
-                }
-                logSync('pull-update', entity.name, cloudRecord.id, 'success')
-                pulled++
+              if (entity.name === 'settings') {
+                 db.prepare(`UPDATE ${entity.table} SET ${setClause}, synced = 1 WHERE key = ?`).run(...values)
               } else {
-                // Local "wins" the conflict, but that must not mean the cloud row is thrown
-                // away silently — merge it into local instead: any column that's NULL/empty
-                // locally gets filled in from the cloud value (local's own non-empty values
-                // always take precedence), then write the merged result back and mark it
-                // synced. This reconciles every tie/local-wins case with the current local DB
-                // rather than leaving it unresolved as a bare "skipped" count.
-                const { columns: changedColumns, values: mergedValues } = computeMergeColumns(local, cloudRecord)
-
-                if (changedColumns.length > 0) {
-                  const setClause = changedColumns.map((c) => `${c} = ?`).join(', ')
-                  const idField = entity.name === 'settings' ? 'key' : 'id'
-                  db.prepare(`UPDATE ${entity.table} SET ${setClause}, synced = 1 WHERE ${idField} = ?`)
-                    .run(...mergedValues, cloudRecord.id)
-                  const reason = `merged — filled in ${changedColumns.join(', ')} from cloud (local values for everything else kept)`
-                  logSync('pull-merge', entity.name, cloudRecord.id, 'merged', reason)
-                  noteSkip(cloudRecord.id, reason)
-                  merged++
-                } else {
-                  // Nothing to merge — local and cloud already fully agree; still mark
-                  // synced so it doesn't keep getting re-evaluated as a "conflict" every pull.
-                  const idField = entity.name === 'settings' ? 'key' : 'id'
-                  db.prepare(`UPDATE ${entity.table} SET synced = 1 WHERE ${idField} = ?`).run(cloudRecord.id)
-                  const reason = 'already identical to cloud — marked synced, nothing to merge'
-                  logSync('pull-merge', entity.name, cloudRecord.id, 'merged', reason)
-                  noteSkip(cloudRecord.id, reason)
-                  merged++
-                }
+                 db.prepare(`UPDATE ${entity.table} SET ${setClause}, synced = 1 WHERE id = ?`).run(...values)
               }
+              logSync('pull-update', entity.name, cloudRecord.id, 'success')
+              pulled++
             }
           } catch (err: any) {
             const message = err instanceof Error ? err.message : String(err)
@@ -679,22 +614,22 @@ export async function runPull(force: boolean, report: Reporter = noopReport) {
 }
 
 /**
- * sync:push — Push all unsynced records to MongoDB (all rows when force: true).
+ * sync:push — Push all rows to MongoDB (always force: local overwrites cloud).
  * Any logged-in user — sync must work for every role, same as the automatic cycle.
  * Graceful: reports pushed/failed counts per entity.
  */
-ipcMain.handle('sync:push', async (event, args) => {
+ipcMain.handle('sync:push', async (event) => {
   checkAuth()
-  return runPush(args?.force === true, progressReporter(event, 'push'))
+  return runPush(progressReporter(event, 'push'))
 })
 
 /**
- * sync:pull — Pull records from MongoDB (cloud always wins when force: true).
+ * sync:pull — Pull records from MongoDB (always force: cloud always wins).
  * Any logged-in user — sync must work for every role, same as the automatic cycle.
  */
-ipcMain.handle('sync:pull', async (event, args) => {
+ipcMain.handle('sync:pull', async (event) => {
   checkAuth()
-  return runPull(args?.force === true, progressReporter(event, 'pull'))
+  return runPull(progressReporter(event, 'pull'))
 })
 
 // ── Auto-sync interval (T090) ─────────────────────────────────────────────────
@@ -737,9 +672,9 @@ async function runAutoSyncCycle(): Promise<void> {
     broadcastAutoSyncStatus('connecting')
     await ensureConnected()
     broadcastAutoSyncStatus('pushing')
-    await runPush(true)  // force: always push local rows over the cloud regardless of timestamps
+    await runPush()  // force: always push every local row over the cloud
     broadcastAutoSyncStatus('pulling')
-    await runPull(true)  // force: always pull cloud rows over local regardless of timestamps
+    await runPull()  // force: cloud always wins over local
     broadcastAutoSyncStatus('done')
   } catch (err) {
     console.error('Auto-sync error:', err)

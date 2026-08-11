@@ -68,29 +68,53 @@ ipcMain.handle('transactions:list', async (_event, args: {
     }
 
     const db = getDb()
-    const conditions = ['pt.paid_date BETWEEN ? AND ?']
-    const params: any[] = [from, to]
+    const directConditions = ["substr(p.updated_at, 1, 10) BETWEEN ? AND ?", 'p.paid > 0']
+    const installmentConditions = ['pt.paid_date BETWEEN ? AND ?']
+    const directParams: any[] = [from, to]
+    const installmentParams: any[] = [from, to]
 
     if (childId) {
-      conditions.push('p.child_id = ?')
-      params.push(childId)
+      directConditions.push('p.child_id = ?')
+      directParams.push(childId)
+      installmentConditions.push('p.child_id = ?')
+      installmentParams.push(childId)
     }
 
+    // Leg 1: explicit installment records (payment_transactions rows)
+    // Leg 2: direct payments — paid > 0 but NO installment rows recorded yet
     const rows = db.prepare(`
       SELECT
         pt.id,
         p.child_id,
-        c.name as child_name,
-        p.service as service_name,
+        c.name  AS child_name,
+        p.service AS service_name,
         pt.amount,
-        'payment' as type,
-        pt.paid_date as date
+        'payment' AS type,
+        pt.paid_date AS date
       FROM payment_transactions pt
       JOIN payments p ON p.id = pt.payment_id
       JOIN children c ON c.id = p.child_id
-      WHERE ${conditions.join(' AND ')}
-      ORDER BY date DESC, pt.id DESC
-    `).all(...params)
+      WHERE ${installmentConditions.join(' AND ')}
+
+      UNION ALL
+
+      SELECT
+        p.id,
+        p.child_id,
+        c.name  AS child_name,
+        p.service AS service_name,
+        p.paid  AS amount,
+        'payment' AS type,
+        substr(p.updated_at, 1, 10) AS date
+      FROM payments p
+      JOIN children c ON c.id = p.child_id
+      WHERE ${directConditions.join(' AND ')}
+        AND NOT EXISTS (
+          SELECT 1 FROM payment_transactions pt2 WHERE pt2.payment_id = p.id
+        )
+
+      ORDER BY date DESC, id DESC
+    `).all(...installmentParams, ...directParams)
 
     return rows
   } catch (error: any) {

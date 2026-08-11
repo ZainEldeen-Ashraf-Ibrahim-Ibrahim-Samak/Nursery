@@ -51,8 +51,8 @@ interface SyncState {
   connect: (uri: string) => Promise<boolean>
   reconnect: () => Promise<boolean>
   disconnect: () => Promise<void>
-  push: (force?: boolean) => Promise<void>
-  pull: (force?: boolean) => Promise<void>
+  push: () => Promise<void>
+  pull: () => Promise<void>
   setAutoSync: (enabled: boolean, intervalMinutes?: number) => Promise<void>
   clearError: () => void
 }
@@ -131,10 +131,10 @@ export const useSyncStore = create<SyncState>((set, get) => ({
     }
   },
 
-  push: async (force = false) => {
+  push: async () => {
     set({ isPushing: true, error: null, lastPushResults: null })
     try {
-      const result = await window.api.sync.push(force)
+      const result = await window.api.sync.push(true)
       set({ lastPushResults: result.results, isPushing: false })
       await get().fetchStatus()
     } catch (err: any) {
@@ -142,10 +142,10 @@ export const useSyncStore = create<SyncState>((set, get) => ({
     }
   },
 
-  pull: async (force = false) => {
+  pull: async () => {
     set({ isPulling: true, error: null, lastPullResults: null })
     try {
-      const result = await window.api.sync.pull(force)
+      const result = await window.api.sync.pull(true)
       set({ lastPullResults: result.results, isPulling: false })
       await get().fetchStatus()
     } catch (err: any) {

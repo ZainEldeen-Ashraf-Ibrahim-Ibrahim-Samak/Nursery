@@ -63,6 +63,14 @@ export default function SyncManager() {
   const handlePush = () => { resetProgress('push'); push() }
   const handlePull = () => { resetProgress('pull'); pull() }
 
+  const handleForceRefresh = async () => {
+    resetProgress('push')
+    await push()
+    resetProgress('pull')
+    await pull()
+    await fetchStatus()
+  }
+
   useEffect(() => {
     fetchStatus()
   }, [])
@@ -280,7 +288,7 @@ export default function SyncManager() {
             </p>
             <Button
               variant="danger"
-              onClick={() => { resetProgress('push'); push(true) }}
+              onClick={() => { resetProgress('push'); push() }}
               isLoading={isPushing}
               disabled={!isConnected}
               className="w-full"
@@ -342,7 +350,7 @@ export default function SyncManager() {
             </p>
             <Button
               variant="danger"
-              onClick={() => { resetProgress('pull'); pull(true) }}
+              onClick={() => { resetProgress('pull'); pull() }}
               isLoading={isPulling}
               disabled={!isConnected}
               className="w-full"
@@ -445,10 +453,10 @@ export default function SyncManager() {
         </div>
       </Card>
 
-      {/* Refresh Status */}
+      {/* Force Refresh: full push+pull then status */}
       <div className="flex justify-end">
-        <Button variant="outline" onClick={fetchStatus} isLoading={isLoading}>
-          🔄 {isAr ? 'تحديث الحالة' : 'Refresh Status'}
+        <Button variant="outline" onClick={handleForceRefresh} isLoading={isPushing || isPulling || isLoading}>
+          🔄 {isAr ? 'مزامنة إجبارية وتحديث' : 'Force Sync & Refresh'}
         </Button>
       </div>
     </div>

@@ -55,14 +55,14 @@ export const Header: React.FC = () => {
         textEn: 'Uploading data (force)...',
         type: 'info',
       })
-      await push(true)
+      await push()
 
       setSyncStatusMsg({
         textAr: 'جاري تنزيل البيانات (إجباري)...',
         textEn: 'Downloading data (force)...',
         type: 'info',
       })
-      await pull(true)
+      await pull()
 
       const latestError = useSyncStore.getState().error
       if (latestError) {
@@ -98,8 +98,8 @@ export const Header: React.FC = () => {
   return (
     <header className="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between shadow-sm">
       {/* Welcome Message */}
-      <div className="flex flex-col gap-0.5 text-start">
-        <h1 className="text-lg font-bold text-slate-800 m-0 p-0 leading-none">
+      <div className="flex flex-col gap-0.5 text-start min-w-0">
+        <h1 className="text-lg font-bold text-slate-800 m-0 p-0 leading-none whitespace-nowrap">
           {t('welcome')}, {user?.name || user?.username}
         </h1>
         <span className="text-xs text-slate-400 font-semibold uppercase tracking-wider">
@@ -108,7 +108,7 @@ export const Header: React.FC = () => {
       </div>
 
       {/* Actions */}
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-4 flex-shrink-0">
         {/* Sync Status Message */}
         {syncStatusMsg && (
           <span
