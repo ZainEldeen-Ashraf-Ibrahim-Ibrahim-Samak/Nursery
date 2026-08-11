@@ -64,10 +64,10 @@ export default function SyncManager() {
   const handlePull = () => { resetProgress('pull'); pull() }
 
   const handleForceRefresh = async () => {
-    resetProgress('push')
-    await push()
     resetProgress('pull')
     await pull()
+    resetProgress('push')
+    await push()
     await fetchStatus()
   }
 

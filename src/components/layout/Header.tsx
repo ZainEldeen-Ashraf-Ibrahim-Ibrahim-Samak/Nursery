@@ -51,18 +51,18 @@ export const Header: React.FC = () => {
       }
 
       setSyncStatusMsg({
-        textAr: 'جاري رفع البيانات (إجباري)...',
-        textEn: 'Uploading data (force)...',
-        type: 'info',
-      })
-      await push()
-
-      setSyncStatusMsg({
         textAr: 'جاري تنزيل البيانات (إجباري)...',
         textEn: 'Downloading data (force)...',
         type: 'info',
       })
       await pull()
+
+      setSyncStatusMsg({
+        textAr: 'جاري رفع البيانات (إجباري)...',
+        textEn: 'Uploading data (force)...',
+        type: 'info',
+      })
+      await push()
 
       const latestError = useSyncStore.getState().error
       if (latestError) {

@@ -9361,17 +9361,12 @@ async function runPull(report = noopReport) {
 	}
 }
 /**
-* sync:push — Full ordered sync: pull from MongoDB first (so we have the latest
-* cloud state), then push local rows up.  The pull phase uses the event reporter
-* so the UI progress bar reflects both legs of the cycle.
+* sync:push — Pure push: upload local changes to MongoDB.
 * Any logged-in user — sync must work for every role, same as the automatic cycle.
 */
 ipcMain.handle("sync:push", async (event) => {
 	checkAuth$10();
-	return {
-		pull: await runPull(progressReporter(event, "pull")),
-		push: await runPush(progressReporter(event, "push"))
-	};
+	return runPush(progressReporter(event, "push"));
 });
 /**
 * sync:pull — Pull records from MongoDB (always force: cloud always wins).
@@ -9392,7 +9387,30 @@ ipcMain.handle("sync:auto-status:get", () => ({
 	state: lastAutoSyncState,
 	running: autoSyncRunning
 }));
+/**
+* One auto-sync cycle: upload (push) local changes to the cloud only,
+* without downloading (pulling) from online.
+*/
 async function runAutoSyncCycle() {
+	if (autoSyncRunning) return;
+	autoSyncRunning = true;
+	try {
+		broadcastAutoSyncStatus("connecting");
+		await ensureConnected();
+		broadcastAutoSyncStatus("pushing");
+		await runPush();
+		broadcastAutoSyncStatus("done");
+	} catch (err) {
+		console.error("Auto-sync error:", err);
+		broadcastAutoSyncStatus("error");
+	} finally {
+		autoSyncRunning = false;
+	}
+}
+/**
+* Startup sync cycle: download (pull) from online on startup.
+*/
+async function runStartupSyncCycle() {
 	if (autoSyncRunning) return;
 	autoSyncRunning = true;
 	try {
@@ -9400,11 +9418,9 @@ async function runAutoSyncCycle() {
 		await ensureConnected();
 		broadcastAutoSyncStatus("pulling");
 		await runPull();
-		broadcastAutoSyncStatus("pushing");
-		await runPush();
 		broadcastAutoSyncStatus("done");
 	} catch (err) {
-		console.error("Auto-sync error:", err);
+		console.error("Startup sync error:", err);
 		broadcastAutoSyncStatus("error");
 	} finally {
 		autoSyncRunning = false;
@@ -9416,7 +9432,7 @@ function startAutoSync(intervalMs) {
 		runAutoSyncCycle();
 	}, intervalMs);
 	setTimeout(() => {
-		runAutoSyncCycle();
+		runStartupSyncCycle();
 	}, 5e3);
 }
 function stopAutoSync() {

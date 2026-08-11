@@ -614,16 +614,12 @@ export async function runPull(report: Reporter = noopReport) {
 }
 
 /**
- * sync:push — Full ordered sync: pull from MongoDB first (so we have the latest
- * cloud state), then push local rows up.  The pull phase uses the event reporter
- * so the UI progress bar reflects both legs of the cycle.
+ * sync:push — Pure push: upload local changes to MongoDB.
  * Any logged-in user — sync must work for every role, same as the automatic cycle.
  */
 ipcMain.handle('sync:push', async (event) => {
   checkAuth()
-  const pullResult = await runPull(progressReporter(event, 'pull'))
-  const pushResult = await runPush(progressReporter(event, 'push'))
-  return { pull: pullResult, push: pushResult }
+  return runPush(progressReporter(event, 'push'))
 })
 
 /**
@@ -640,15 +636,6 @@ ipcMain.handle('sync:pull', async (event) => {
 let autoSyncTimer: ReturnType<typeof setInterval> | null = null
 let autoSyncRunning = false
 
-/**
- * One auto-sync cycle: pull first (get the latest cloud state), then push
- * local changes up.  Fetching before pushing ensures we never blindly
- * overwrite a cloud record that was updated on another device between cycles.
- *
- * Calls runPull/runPush directly — ipcMain.handle() handlers are NOT reachable
- * through ipcMain.listeners(), which is why the previous listener-based approach
- * never ran.
- */
 /** Broadcast the auto-sync cycle state so the renderer can show a loading banner. */
 type AutoSyncState = 'connecting' | 'pushing' | 'pulling' | 'done' | 'error'
 let lastAutoSyncState: AutoSyncState | 'idle' = 'idle'
@@ -663,19 +650,41 @@ function broadcastAutoSyncStatus(state: AutoSyncState): void {
 // asks for the current state on mount instead of relying only on the push events.
 ipcMain.handle('sync:auto-status:get', () => ({ state: lastAutoSyncState, running: autoSyncRunning }))
 
+/**
+ * One auto-sync cycle: upload (push) local changes to the cloud only,
+ * without downloading (pulling) from online.
+ */
 async function runAutoSyncCycle(): Promise<void> {
   if (autoSyncRunning) return // previous cycle still in flight — skip this tick
   autoSyncRunning = true
   try {
     broadcastAutoSyncStatus('connecting')
     await ensureConnected()
-    broadcastAutoSyncStatus('pulling')
-    await runPull()  // pull first: fetch latest cloud state before writing anything up
     broadcastAutoSyncStatus('pushing')
-    await runPush()  // then push: send local rows up on top of the freshly-merged base
+    await runPush()  // push only: send local changes up
     broadcastAutoSyncStatus('done')
   } catch (err) {
     console.error('Auto-sync error:', err)
+    broadcastAutoSyncStatus('error')
+  } finally {
+    autoSyncRunning = false
+  }
+}
+
+/**
+ * Startup sync cycle: download (pull) from online on startup.
+ */
+async function runStartupSyncCycle(): Promise<void> {
+  if (autoSyncRunning) return // previous cycle still in flight — skip this tick
+  autoSyncRunning = true
+  try {
+    broadcastAutoSyncStatus('connecting')
+    await ensureConnected()
+    broadcastAutoSyncStatus('pulling')
+    await runPull()  // pull only: download latest cloud state
+    broadcastAutoSyncStatus('done')
+  } catch (err) {
+    console.error('Startup sync error:', err)
     broadcastAutoSyncStatus('error')
   } finally {
     autoSyncRunning = false
@@ -688,7 +697,7 @@ export function startAutoSync(intervalMs: number): void {
   // Delay the first cycle by 5 s to let MongoDB finish connecting and SQLite fully open
   // before the first push/pull touches the database. Firing immediately races with the
   // fire-and-forget connectMongo() call in main.ts and produces "database is not open" errors.
-  setTimeout(() => { void runAutoSyncCycle() }, 5000)
+  setTimeout(() => { void runStartupSyncCycle() }, 5000)
 }
 
 export function stopAutoSync(): void {
