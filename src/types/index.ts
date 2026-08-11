@@ -263,6 +263,7 @@ export interface AttendanceEditRequest {
   attendance_record_id: number
   child_id: number
   child_name?: string
+  child_guardian?: string | null
   teacher_id: number | null
   teacher_name?: string | null
   attendance_date: string

@@ -712,8 +712,13 @@ ipcMain.handle('attendance:listEditRequests', async (_event, args) => {
       params.push(args.teacher_id)
     }
 
-    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
-    return db.prepare(`SELECT * FROM attendance_edit_requests ${where} ORDER BY requested_at DESC`).all(...params)
+    const where = conditions.length > 0 ? `WHERE ${conditions.map(c => `r.${c}`).join(' AND ')}` : ''
+    return db.prepare(`
+      SELECT r.*, c.guardian as child_guardian 
+      FROM attendance_edit_requests r
+      LEFT JOIN children c ON c.id = r.child_id
+      ${where} ORDER BY r.requested_at DESC
+    `).all(...params)
   } catch (error: any) {
     throw new Error(error.message || 'Failed to list edit requests')
   }

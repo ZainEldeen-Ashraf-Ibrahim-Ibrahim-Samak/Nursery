@@ -4,6 +4,7 @@ import { requireAdmin } from './_guard.js'
 import { getCurrentUser } from './authIPC.js'
 import type { ServiceEnrollment } from '../../src/types/index.js'
 import { recordLocalTombstone } from '../services/tombstones.js'
+import { calculatePaymentPreservingProrate } from './paymentsIPC.js'
 
 function checkAuth() {
   const user = getCurrentUser()
@@ -74,7 +75,22 @@ ipcMain.handle('childServices:update', async (_event, { id, patch }) => {
     params.push(new Date().toISOString(), id)
 
     db.prepare(query).run(...params)
-    return db.prepare('SELECT * FROM child_services WHERE id = ?').get(id) as ServiceEnrollment
+    const updatedService = db.prepare('SELECT * FROM child_services WHERE id = ?').get(id) as ServiceEnrollment
+    
+    // Sync service changes to the child's corresponding payment records
+    const payments = db.prepare('SELECT * FROM payments WHERE child_id = ? AND service_id = ?').all(updatedService.child_id, id) as any[]
+    for (const p of payments) {
+      if (p.status !== 'paid') {
+        const { total, balance, status } = calculatePaymentPreservingProrate(p, p.quantity, updatedService.price, p.paid)
+        db.prepare(`
+          UPDATE payments
+          SET service = ?, unit = ?, price = ?, total = ?, balance = ?, status = ?, updated_at = ?, synced = 0
+          WHERE id = ?
+        `).run(updatedService.service, updatedService.unit, updatedService.price, total, balance, status, new Date().toISOString(), p.id)
+      }
+    }
+    
+    return updatedService
   } catch (error: any) {
     console.error('Failed to update child service:', error)
     throw new Error(error.message || 'Failed to update child service')

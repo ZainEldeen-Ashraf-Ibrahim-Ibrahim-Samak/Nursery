@@ -2446,6 +2446,7 @@ ipcMain.handle("children:update", async (_event, { id, patch }) => {
 				const removedIds = [...existingIds].filter((eid) => !incomingIds.has(eid));
 				if (removedIds.length > 0) {
 					const placeholders = removedIds.map(() => "?").join(",");
+					db.prepare(`DELETE FROM payments WHERE child_id = ? AND service_id IN (${placeholders}) AND status = 'unpaid'`).run(id, ...removedIds);
 					db.prepare(`UPDATE payments SET service_id = NULL WHERE child_id = ? AND service_id IN (${placeholders})`).run(id, ...removedIds);
 					db.prepare(`DELETE FROM child_services WHERE id IN (${placeholders})`).run(...removedIds);
 				}
@@ -2471,12 +2472,12 @@ ipcMain.handle("children:update", async (_event, { id, patch }) => {
                   UPDATE payments
                   SET service = ?, unit = ?, price = ?, total = ?, balance = ?, status = ?, updated_at = ?, synced = 0
                   WHERE id = ?
-                `).run(s.service, s.unit, s.price, total, balance, status, p.id);
+                `).run(s.service, s.unit, s.price, total, balance, status, now, p.id);
 						} else db.prepare(`
                   UPDATE payments
                   SET service = ?, updated_at = ?, synced = 0
                   WHERE id = ?
-                `).run(s.service, p.id);
+                `).run(s.service, now, p.id);
 					} else insertSvc.run(id, s.service, s.unit, s.price, sTeacherId, sLessonDays, sExtraLessons, sSessionPrice, sTeacherSessionRate, now, now);
 				}
 				db.prepare(`
@@ -2598,7 +2599,17 @@ ipcMain.handle("childServices:update", async (_event, { id, patch }) => {
 		query += "updated_at = ?, synced = 0 WHERE id = ?";
 		params.push((/* @__PURE__ */ new Date()).toISOString(), id);
 		db.prepare(query).run(...params);
-		return db.prepare("SELECT * FROM child_services WHERE id = ?").get(id);
+		const updatedService = db.prepare("SELECT * FROM child_services WHERE id = ?").get(id);
+		const payments = db.prepare("SELECT * FROM payments WHERE child_id = ? AND service_id = ?").all(updatedService.child_id, id);
+		for (const p of payments) if (p.status !== "paid") {
+			const { total, balance, status } = calculatePaymentPreservingProrate(p, p.quantity, updatedService.price, p.paid);
+			db.prepare(`
+          UPDATE payments
+          SET service = ?, unit = ?, price = ?, total = ?, balance = ?, status = ?, updated_at = ?, synced = 0
+          WHERE id = ?
+        `).run(updatedService.service, updatedService.unit, updatedService.price, total, balance, status, (/* @__PURE__ */ new Date()).toISOString(), p.id);
+		}
+		return updatedService;
 	} catch (error) {
 		console.error("Failed to update child service:", error);
 		throw new Error(error.message || "Failed to update child service");
@@ -3299,8 +3310,13 @@ ipcMain.handle("attendance:listEditRequests", async (_event, args) => {
 			conditions.push("teacher_id = ?");
 			params.push(args.teacher_id);
 		}
-		const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-		return db.prepare(`SELECT * FROM attendance_edit_requests ${where} ORDER BY requested_at DESC`).all(...params);
+		const where = conditions.length > 0 ? `WHERE ${conditions.map((c) => `r.${c}`).join(" AND ")}` : "";
+		return db.prepare(`
+      SELECT r.*, c.guardian as child_guardian 
+      FROM attendance_edit_requests r
+      LEFT JOIN children c ON c.id = r.child_id
+      ${where} ORDER BY r.requested_at DESC
+    `).all(...params);
 	} catch (error) {
 		throw new Error(error.message || "Failed to list edit requests");
 	}
@@ -9391,10 +9407,14 @@ ipcMain.handle("sync:push", async (event) => {
 */
 ipcMain.handle("sync:pull", async (event) => {
 	checkAuth$10();
-	return runPull(progressReporter(event, "pull"));
+	const res = await runPull(progressReporter(event, "pull"));
+	startupSyncCompleted = true;
+	return res;
 });
 var autoSyncTimer = null;
 var autoSyncRunning = false;
+var startupSyncCompleted = false;
+var startupSyncRetries = 0;
 var lastAutoSyncState = "idle";
 function broadcastAutoSyncStatus(state) {
 	lastAutoSyncState = state;
@@ -9424,11 +9444,18 @@ async function runAutoSyncCycle() {
 		autoSyncRunning = false;
 	}
 }
+var MAX_STARTUP_RETRIES = 12;
 /**
 * Startup sync cycle: download (pull) from online on startup.
 */
 async function runStartupSyncCycle() {
-	if (autoSyncRunning) return;
+	if (startupSyncCompleted) return;
+	if (autoSyncRunning) {
+		setTimeout(() => {
+			runStartupSyncCycle();
+		}, 5e3);
+		return;
+	}
 	autoSyncRunning = true;
 	try {
 		broadcastAutoSyncStatus("connecting");
@@ -9436,9 +9463,19 @@ async function runStartupSyncCycle() {
 		broadcastAutoSyncStatus("pulling");
 		await runPull();
 		broadcastAutoSyncStatus("done");
+		startupSyncCompleted = true;
+		console.log("[sync] Startup pull sync succeeded.");
 	} catch (err) {
-		console.error("Startup sync error:", err);
+		console.error("[sync] Startup pull sync failed:", err?.message || err);
 		broadcastAutoSyncStatus("error");
+		startupSyncRetries++;
+		if (startupSyncRetries < MAX_STARTUP_RETRIES) {
+			const delay = 1e4;
+			console.log(`[sync] Rescheduling startup pull in ${delay / 1e3}s (attempt ${startupSyncRetries}/${MAX_STARTUP_RETRIES})...`);
+			setTimeout(() => {
+				runStartupSyncCycle();
+			}, delay);
+		} else console.error("[sync] Max startup pull retries reached. Will not retry automatically.");
 	} finally {
 		autoSyncRunning = false;
 	}
@@ -9448,6 +9485,8 @@ function startAutoSync(intervalMs) {
 	autoSyncTimer = setInterval(() => {
 		runAutoSyncCycle();
 	}, intervalMs);
+	startupSyncCompleted = false;
+	startupSyncRetries = 0;
 	setTimeout(() => {
 		runStartupSyncCycle();
 	}, 5e3);

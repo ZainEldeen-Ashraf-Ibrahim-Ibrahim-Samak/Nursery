@@ -566,12 +566,10 @@ export default function SessionsList() {
                         }
                       </div>
                       <span className="flex flex-col">
-                        <span className="font-medium text-sm text-slate-800">{rec.child_name}</span>
-                        {rec.child_guardian && (
-                          <span className="text-xs text-slate-500">
-                            👤 {rec.child_guardian}
-                          </span>
-                        )}
+                        <span className="font-medium text-sm text-slate-800">
+                          {rec.child_name}
+                          {rec.child_guardian ? ` / ${rec.child_guardian}` : ''}
+                        </span>
                         <span className="text-xs text-slate-400">
                           {rec.teacher_name
                             ? (rec.teacher_session_rate == null

@@ -628,13 +628,17 @@ ipcMain.handle('sync:push', async (event) => {
  */
 ipcMain.handle('sync:pull', async (event) => {
   checkAuth()
-  return runPull(progressReporter(event, 'pull'))
+  const res = await runPull(progressReporter(event, 'pull'))
+  startupSyncCompleted = true
+  return res
 })
 
 // ── Auto-sync interval (T090) ─────────────────────────────────────────────────
 
 let autoSyncTimer: ReturnType<typeof setInterval> | null = null
 let autoSyncRunning = false
+let startupSyncCompleted = false
+let startupSyncRetries = 0
 
 /** Broadcast the auto-sync cycle state so the renderer can show a loading banner. */
 type AutoSyncState = 'connecting' | 'pushing' | 'pulling' | 'done' | 'error'
@@ -671,11 +675,18 @@ async function runAutoSyncCycle(): Promise<void> {
   }
 }
 
+const MAX_STARTUP_RETRIES = 12 // Retry every 10s for up to 2 minutes on startup
+
 /**
  * Startup sync cycle: download (pull) from online on startup.
  */
 async function runStartupSyncCycle(): Promise<void> {
-  if (autoSyncRunning) return // previous cycle still in flight — skip this tick
+  if (startupSyncCompleted) return
+  if (autoSyncRunning) {
+    // Reschedule if another sync is currently running
+    setTimeout(() => { void runStartupSyncCycle() }, 5000)
+    return
+  }
   autoSyncRunning = true
   try {
     broadcastAutoSyncStatus('connecting')
@@ -683,9 +694,19 @@ async function runStartupSyncCycle(): Promise<void> {
     broadcastAutoSyncStatus('pulling')
     await runPull()  // pull only: download latest cloud state
     broadcastAutoSyncStatus('done')
-  } catch (err) {
-    console.error('Startup sync error:', err)
+    startupSyncCompleted = true
+    console.log('[sync] Startup pull sync succeeded.')
+  } catch (err: any) {
+    console.error('[sync] Startup pull sync failed:', err?.message || err)
     broadcastAutoSyncStatus('error')
+    startupSyncRetries++
+    if (startupSyncRetries < MAX_STARTUP_RETRIES) {
+      const delay = 10000 // retry in 10 seconds
+      console.log(`[sync] Rescheduling startup pull in ${delay / 1000}s (attempt ${startupSyncRetries}/${MAX_STARTUP_RETRIES})...`)
+      setTimeout(() => { void runStartupSyncCycle() }, delay)
+    } else {
+      console.error('[sync] Max startup pull retries reached. Will not retry automatically.')
+    }
   } finally {
     autoSyncRunning = false
   }
@@ -694,6 +715,11 @@ async function runStartupSyncCycle(): Promise<void> {
 export function startAutoSync(intervalMs: number): void {
   if (autoSyncTimer) clearInterval(autoSyncTimer)
   autoSyncTimer = setInterval(() => { void runAutoSyncCycle() }, intervalMs)
+  
+  // Reset startup sync state for fresh launch
+  startupSyncCompleted = false
+  startupSyncRetries = 0
+  
   // Delay the first cycle by 5 s to let MongoDB finish connecting and SQLite fully open
   // before the first push/pull touches the database. Firing immediately races with the
   // fire-and-forget connectMongo() call in main.ts and produces "database is not open" errors.

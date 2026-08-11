@@ -278,6 +278,10 @@ ipcMain.handle('children:update', async (_event, { id, patch }) => {
         const removedIds = [...existingIds].filter((eid) => !incomingIds.has(eid))
         if (removedIds.length > 0) {
           const placeholders = removedIds.map(() => '?').join(',')
+          
+          // Delete unpaid payments for the removed services so they don't linger on the invoice
+          db.prepare(`DELETE FROM payments WHERE child_id = ? AND service_id IN (${placeholders}) AND status = 'unpaid'`).run(id, ...removedIds)
+          
           db.prepare(`UPDATE payments SET service_id = NULL WHERE child_id = ? AND service_id IN (${placeholders})`).run(id, ...removedIds)
           db.prepare(`DELETE FROM child_services WHERE id IN (${placeholders})`).run(...removedIds)
         }
@@ -307,13 +311,13 @@ ipcMain.handle('children:update', async (_event, { id, patch }) => {
                   UPDATE payments
                   SET service = ?, unit = ?, price = ?, total = ?, balance = ?, status = ?, updated_at = ?, synced = 0
                   WHERE id = ?
-                `).run(s.service, s.unit, s.price, total, balance, status, p.id)
+                `).run(s.service, s.unit, s.price, total, balance, status, now, p.id)
               } else {
                 db.prepare(`
                   UPDATE payments
                   SET service = ?, updated_at = ?, synced = 0
                   WHERE id = ?
-                `).run(s.service, p.id)
+                `).run(s.service, now, p.id)
               }
             }
           } else {
