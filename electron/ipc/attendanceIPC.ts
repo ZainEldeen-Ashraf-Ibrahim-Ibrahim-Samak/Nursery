@@ -179,7 +179,7 @@ ipcMain.handle('attendance:getSheet', async (_event, { session_id }) => {
     // row per distinct (child, teacher) pair so each teacher gets their own attendance/payment
     // for that child, instead of collapsing onto a single flattened teacher.
     const activeChildren = db.prepare(`
-      SELECT id as child_id, name as child_name, photo_url as child_photo_url, lesson_days
+      SELECT id as child_id, name as child_name, guardian as child_guardian, photo_url as child_photo_url, lesson_days
       FROM children WHERE is_active = 1
     `).all() as any[]
 
@@ -194,12 +194,12 @@ ipcMain.handle('attendance:getSheet', async (_event, { session_id }) => {
       enrollmentsByChild.get(en.child_id)!.push(en)
     }
 
-    type Candidate = { child_id: number; child_name: string; child_photo_url: string | null; teacher_id: number | null; lesson_days: string | null }
+    type Candidate = { child_id: number; child_name: string; child_guardian: string | null; child_photo_url: string | null; teacher_id: number | null; lesson_days: string | null }
     const candidates: Candidate[] = []
     for (const c of activeChildren) {
       const childEnrollments = enrollmentsByChild.get(c.child_id) ?? []
       if (childEnrollments.length === 0) {
-        candidates.push({ child_id: c.child_id, child_name: c.child_name, child_photo_url: c.child_photo_url, teacher_id: null, lesson_days: c.lesson_days })
+        candidates.push({ child_id: c.child_id, child_name: c.child_name, child_guardian: c.child_guardian, child_photo_url: c.child_photo_url, teacher_id: null, lesson_days: c.lesson_days })
       } else {
         // Distinct teachers only — the same teacher across two services for one child still
         // produces a single row, per the spec's "one row per teacher" (not per enrollment).
@@ -208,8 +208,12 @@ ipcMain.handle('attendance:getSheet', async (_event, { session_id }) => {
           if (seenTeachers.has(en.teacher_id)) continue
           seenTeachers.add(en.teacher_id)
           candidates.push({
-            child_id: c.child_id, child_name: c.child_name, child_photo_url: c.child_photo_url,
-            teacher_id: en.teacher_id, lesson_days: en.enrollment_lesson_days || c.lesson_days
+            child_id: c.child_id,
+            child_name: c.child_name,
+            child_guardian: c.child_guardian,
+            child_photo_url: c.child_photo_url,
+            teacher_id: en.teacher_id,
+            lesson_days: en.enrollment_lesson_days || c.lesson_days
           })
         }
       }
@@ -234,6 +238,7 @@ ipcMain.handle('attendance:getSheet', async (_event, { session_id }) => {
       return {
         child_id: cand.child_id,
         child_name: cand.child_name,
+        child_guardian: cand.child_guardian,
         child_photo_url: cand.child_photo_url,
         lesson_days: cand.lesson_days,
         teacher_id: cand.teacher_id,

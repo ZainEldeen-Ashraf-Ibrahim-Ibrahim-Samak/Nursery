@@ -238,6 +238,7 @@ export interface AttendanceRecord {
   session_id: number
   child_id: number
   child_name?: string
+  child_guardian?: string | null
   child_photo_url?: string | null
   teacher_id?: number | null
   teacher_name?: string | null
