@@ -5,6 +5,7 @@ import { getCurrentUser } from './authIPC.js'
 import { getChildStatement } from '../services/statementService.js'
 import { recordLocalTombstone } from '../services/tombstones.js'
 import type { Child } from '../../src/types/index.js'
+import { calculatePaymentPreservingProrate } from './paymentsIPC.js'
 
 function checkAuth() {
   const user = getCurrentUser()
@@ -296,6 +297,25 @@ ipcMain.handle('children:update', async (_event, { id, patch }) => {
           const existingId = s.id != null ? Number(s.id) : null
           if (existingId != null && existingIds.has(existingId)) {
             updateSvc.run(s.service, s.unit, s.price, sTeacherId, sLessonDays, sExtraLessons, sSessionPrice, sTeacherSessionRate, now, existingId, id)
+            
+            // Sync service changes to the child's corresponding payment records
+            const payments = db.prepare('SELECT * FROM payments WHERE child_id = ? AND service_id = ?').all(id, existingId) as any[]
+            for (const p of payments) {
+              if (p.status !== 'paid') {
+                const { total, balance, status } = calculatePaymentPreservingProrate(p, p.quantity, s.price, p.paid)
+                db.prepare(`
+                  UPDATE payments
+                  SET service = ?, unit = ?, price = ?, total = ?, balance = ?, status = ?, updated_at = ?, synced = 0
+                  WHERE id = ?
+                `).run(s.service, s.unit, s.price, total, balance, status, p.id)
+              } else {
+                db.prepare(`
+                  UPDATE payments
+                  SET service = ?, updated_at = ?, synced = 0
+                  WHERE id = ?
+                `).run(s.service, p.id)
+              }
+            }
           } else {
             insertSvc.run(id, s.service, s.unit, s.price, sTeacherId, sLessonDays, sExtraLessons, sSessionPrice, sTeacherSessionRate, now, now)
           }
