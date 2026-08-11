@@ -1668,422 +1668,6 @@ function applyCloudTombstones(db, cloudTombstones) {
 	}
 }
 //#endregion
-//#region electron/ipc/childrenIPC.ts
-function checkAuth$9() {
-	if (!getCurrentUser()) throw new Error("UNAUTHORIZED: يجب تسجيل الدخول أولاً / Unauthorized");
-}
-var GUARDIAN_PHONE_RE = /^(?:\+?2)?01[0-9]{9}$/;
-function validateGuardianPhone(phone) {
-	if (!GUARDIAN_PHONE_RE.test((phone ?? "").toString().trim())) throw new Error("رقم هاتف ولي الأمر يجب أن يكون بالتنسيق الصحيح (مثال: 01012345678 أو 201012345678 أو +201012345678) / Guardian phone must be a valid format (e.g., 01012345678, 201012345678, or +201012345678)");
-}
-function validateChildPhone(phone) {
-	if (phone && phone.toString().trim() !== "") {
-		if (!GUARDIAN_PHONE_RE.test(phone.toString().trim())) throw new Error("رقم هاتف الطفل يجب أن يكون بالتنسيق الصحيح (مثال: 01012345678 أو +201012345678) / Child phone must be a valid format (e.g., 01012345678, 201012345678, or +201012345678)");
-	}
-}
-function buildLessonFields(src) {
-	const sessions_baseline = src.sessions_baseline === void 0 || src.sessions_baseline === null ? 8 : Math.max(0, Math.trunc(Number(src.sessions_baseline)));
-	const extra_lessons = src.extra_lessons === void 0 || src.extra_lessons === null ? 0 : Math.max(0, Math.trunc(Number(src.extra_lessons)));
-	const session_price = src.session_price === void 0 || src.session_price === null || src.session_price === "" ? null : Number(src.session_price);
-	if (session_price !== null && session_price < 0) throw new Error("سعر الجلسة لا يمكن أن يكون سالباً / Session price cannot be negative");
-	const lesson_days = src.lesson_days === void 0 || src.lesson_days === null ? null : Array.isArray(src.lesson_days) ? JSON.stringify(src.lesson_days) : String(src.lesson_days);
-	const monthly_fee = session_price === null ? null : Number(((sessions_baseline + extra_lessons) * session_price).toFixed(2));
-	return {
-		teacher_id: src.teacher_id === void 0 || src.teacher_id === null || src.teacher_id === "" ? null : Number(src.teacher_id),
-		lesson_days,
-		sessions_baseline,
-		extra_lessons,
-		session_price,
-		monthly_fee
-	};
-}
-ipcMain.handle("children:get", async (_event, { search, service, activeOnly }) => {
-	try {
-		checkAuth$9();
-		const db = getDb();
-		let query = "SELECT * FROM children WHERE 1=1";
-		const params = [];
-		if (search && search.trim() !== "") {
-			const searchPattern = `%${search.trim()}%`;
-			query += " AND (name LIKE ? OR guardian LIKE ? OR guardian_phone LIKE ? OR child_phone LIKE ? OR national_id LIKE ?)";
-			params.push(searchPattern, searchPattern, searchPattern, searchPattern, searchPattern);
-		}
-		if (service) {
-			query += " AND id IN (SELECT child_id FROM child_services WHERE service = ?)";
-			params.push(service);
-		}
-		if (activeOnly !== false) query += " AND is_active = 1";
-		query += " ORDER BY name ASC";
-		const rows = db.prepare(query).all(...params);
-		for (const row of rows) row.services = db.prepare("SELECT * FROM child_services WHERE child_id = ?").all(row.id);
-		return rows;
-	} catch (error) {
-		console.error("Failed to get children:", error);
-		throw new Error(error.message || "Failed to get children");
-	}
-});
-ipcMain.handle("children:add", async (_event, childInput) => {
-	try {
-		checkAuth$9();
-		const db = getDb();
-		const { name, guardian, guardian_phone, child_phone, national_id, reg_date, notes, services } = childInput;
-		const enrollments = services || (childInput.service ? [{
-			service: childInput.service,
-			unit: childInput.unit,
-			price: childInput.price
-		}] : []);
-		if (!name || !guardian || !guardian_phone || enrollments.length === 0 || !reg_date) throw new Error("جميع الحقول الإلزامية مطلوبة / Missing required fields");
-		validateGuardianPhone(guardian_phone);
-		if (child_phone) validateChildPhone(child_phone);
-		const lesson = buildLessonFields(childInput);
-		const now = (/* @__PURE__ */ new Date()).toISOString();
-		const createdId = db.transaction(() => {
-			const first = enrollments[0];
-			const result = db.prepare(`
-        INSERT INTO children (
-          name, guardian, guardian_phone, child_phone, national_id,
-          service, unit, price, reg_date, notes,
-          photo_url, photo_public_id, teacher_id, lesson_days,
-          sessions_baseline, extra_lessons, session_price, monthly_fee,
-          is_active, created_at, updated_at, synced
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, 0)
-      `).run(name, guardian, guardian_phone, child_phone || null, national_id || null, first.service, first.unit, first.price, reg_date, notes || null, childInput.photo_url || null, childInput.photo_public_id || null, lesson.teacher_id, lesson.lesson_days, lesson.sessions_baseline, lesson.extra_lessons, lesson.session_price, lesson.monthly_fee, now, now);
-			const childId = Number(result.lastInsertRowid);
-			const insertSvc = db.prepare(`INSERT INTO child_services (child_id, service, unit, price, teacher_id, lesson_days, extra_lessons, session_price, teacher_session_rate, created_at, updated_at, synced) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`);
-			for (const s of enrollments) {
-				const sTeacherId = s.teacher_id != null && s.teacher_id !== "" ? Number(s.teacher_id) : null;
-				const sLessonDays = Array.isArray(s.lesson_days) ? JSON.stringify(s.lesson_days) : s.lesson_days || null;
-				const sExtraLessons = s.extra_lessons != null ? Number(s.extra_lessons) : 0;
-				const sSessionPrice = s.session_price != null && s.session_price !== "" ? Number(s.session_price) : null;
-				const sTeacherSessionRate = s.teacher_session_rate != null && s.teacher_session_rate !== "" ? Number(s.teacher_session_rate) : null;
-				insertSvc.run(childId, s.service, s.unit, s.price, sTeacherId, sLessonDays, sExtraLessons, sSessionPrice, sTeacherSessionRate, now, now);
-			}
-			return childId;
-		})();
-		const createdChild = db.prepare("SELECT * FROM children WHERE id = ?").get(createdId);
-		createdChild.services = db.prepare("SELECT * FROM child_services WHERE child_id = ?").all(createdId);
-		return createdChild;
-	} catch (error) {
-		console.error("Failed to add child:", error);
-		throw new Error(error.message || "Failed to add child");
-	}
-});
-ipcMain.handle("children:update", async (_event, { id, patch }) => {
-	try {
-		requireAdmin();
-		const db = getDb();
-		if (!id || !patch) throw new Error("Child ID and patch data are required");
-		const child = db.prepare("SELECT * FROM children WHERE id = ?").get(id);
-		if (!child) throw new Error("الطفل غير موجود / Child not found");
-		if (patch.guardian_phone !== void 0) validateGuardianPhone(patch.guardian_phone);
-		if (patch.child_phone !== void 0) validateChildPhone(patch.child_phone);
-		db.transaction(() => {
-			const enrollments = patch.services;
-			if (enrollments) {
-				if (enrollments.length === 0) throw new Error("يجب اختيار خدمة واحدة على الأقل / At least one service is required");
-				patch.service = enrollments[0].service;
-				patch.unit = enrollments[0].unit;
-				patch.price = enrollments[0].price;
-			}
-			let query = "UPDATE children SET ";
-			const params = [];
-			for (const key of [
-				"name",
-				"guardian",
-				"guardian_phone",
-				"child_phone",
-				"national_id",
-				"service",
-				"unit",
-				"price",
-				"reg_date",
-				"notes",
-				"is_active",
-				"photo_url",
-				"photo_public_id"
-			]) if (patch[key] !== void 0) {
-				query += `${key} = ?, `;
-				params.push(patch[key]);
-			}
-			if ([
-				"teacher_id",
-				"lesson_days",
-				"sessions_baseline",
-				"extra_lessons",
-				"session_price"
-			].some((k) => patch[k] !== void 0)) {
-				const merged = buildLessonFields({
-					teacher_id: patch.teacher_id !== void 0 ? patch.teacher_id : child.teacher_id,
-					lesson_days: patch.lesson_days !== void 0 ? patch.lesson_days : child.lesson_days,
-					sessions_baseline: patch.sessions_baseline !== void 0 ? patch.sessions_baseline : child.sessions_baseline,
-					extra_lessons: patch.extra_lessons !== void 0 ? patch.extra_lessons : child.extra_lessons,
-					session_price: patch.session_price !== void 0 ? patch.session_price : child.session_price
-				});
-				for (const [k, v] of Object.entries(merged)) {
-					query += `${k} = ?, `;
-					params.push(v);
-				}
-			}
-			const now = (/* @__PURE__ */ new Date()).toISOString();
-			if (params.length > 0) {
-				query += "updated_at = ?, synced = 0 WHERE id = ?";
-				params.push(now, id);
-				db.prepare(query).run(...params);
-			}
-			if (enrollments) {
-				const existingServices = db.prepare("SELECT id FROM child_services WHERE child_id = ?").all(id);
-				const existingIds = new Set(existingServices.map((e) => e.id));
-				const incomingIds = new Set(enrollments.filter((s) => s.id != null).map((s) => Number(s.id)));
-				const removedIds = [...existingIds].filter((eid) => !incomingIds.has(eid));
-				if (removedIds.length > 0) {
-					const placeholders = removedIds.map(() => "?").join(",");
-					db.prepare(`UPDATE payments SET service_id = NULL WHERE child_id = ? AND service_id IN (${placeholders})`).run(id, ...removedIds);
-					db.prepare(`DELETE FROM child_services WHERE id IN (${placeholders})`).run(...removedIds);
-				}
-				const updateSvc = db.prepare(`
-          UPDATE child_services
-          SET service = ?, unit = ?, price = ?, teacher_id = ?, lesson_days = ?, extra_lessons = ?, session_price = ?, teacher_session_rate = ?, updated_at = ?, synced = 0
-          WHERE id = ? AND child_id = ?
-        `);
-				const insertSvc = db.prepare(`INSERT INTO child_services (child_id, service, unit, price, teacher_id, lesson_days, extra_lessons, session_price, teacher_session_rate, created_at, updated_at, synced) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`);
-				for (const s of enrollments) {
-					const sTeacherId = s.teacher_id != null && s.teacher_id !== "" ? Number(s.teacher_id) : null;
-					const sLessonDays = Array.isArray(s.lesson_days) ? JSON.stringify(s.lesson_days) : s.lesson_days || null;
-					const sExtraLessons = s.extra_lessons != null ? Number(s.extra_lessons) : 0;
-					const sSessionPrice = s.session_price != null && s.session_price !== "" ? Number(s.session_price) : null;
-					const sTeacherSessionRate = s.teacher_session_rate != null && s.teacher_session_rate !== "" ? Number(s.teacher_session_rate) : null;
-					const existingId = s.id != null ? Number(s.id) : null;
-					if (existingId != null && existingIds.has(existingId)) updateSvc.run(s.service, s.unit, s.price, sTeacherId, sLessonDays, sExtraLessons, sSessionPrice, sTeacherSessionRate, now, existingId, id);
-					else insertSvc.run(id, s.service, s.unit, s.price, sTeacherId, sLessonDays, sExtraLessons, sSessionPrice, sTeacherSessionRate, now, now);
-				}
-				db.prepare(`
-          UPDATE payments
-          SET service_id = (
-            SELECT cs.id FROM child_services cs
-            WHERE cs.child_id = payments.child_id AND cs.service = payments.service
-              AND NOT EXISTS (SELECT 1 FROM payments p2 WHERE p2.service_id = cs.id)
-            LIMIT 1
-          )
-          WHERE child_id = ? AND service_id IS NULL
-        `).run(id);
-			}
-		})();
-		const updatedChild = db.prepare("SELECT * FROM children WHERE id = ?").get(id);
-		updatedChild.services = db.prepare("SELECT * FROM child_services WHERE child_id = ?").all(id);
-		return updatedChild;
-	} catch (error) {
-		console.error("Failed to update child:", error);
-		throw new Error(error.message || "Failed to update child");
-	}
-});
-ipcMain.handle("children:deactivate", async (_event, { id }) => {
-	try {
-		requireAdmin();
-		const db = getDb();
-		if (!db.prepare("SELECT id FROM children WHERE id = ?").get(id)) throw new Error("الطفل غير موجود / Child not found");
-		db.prepare("UPDATE children SET is_active = 0, updated_at = ?, synced = 0 WHERE id = ?").run((/* @__PURE__ */ new Date()).toISOString(), id);
-		return { ok: true };
-	} catch (error) {
-		console.error("Failed to deactivate child:", error);
-		throw new Error(error.message || "Failed to deactivate child");
-	}
-});
-ipcMain.handle("children:delete", async (_event, { id }) => {
-	try {
-		requireAdmin();
-		const db = getDb();
-		const child = db.prepare("SELECT id, is_active FROM children WHERE id = ?").get(id);
-		if (!child) throw new Error("الطفل غير موجود / Child not found");
-		if (child.is_active !== 0) throw new Error("لا يمكن حذف طفل نشط — يجب إلغاء تفعيله أولاً / Cannot delete an active child — deactivate first");
-		const paymentIds = db.prepare("SELECT id FROM payments WHERE child_id = ?").all(id).map((p) => p.id);
-		const serviceIds = db.prepare("SELECT id FROM child_services WHERE child_id = ?").all(id).map((s) => s.id);
-		db.transaction(() => {
-			db.prepare("DELETE FROM children WHERE id = ?").run(id);
-			recordLocalTombstone(db, "children", id);
-			for (const paymentId of paymentIds) recordLocalTombstone(db, "payments", paymentId);
-			for (const serviceId of serviceIds) recordLocalTombstone(db, "child_services", serviceId);
-		})();
-		return { ok: true };
-	} catch (error) {
-		console.error("Failed to delete child:", error);
-		throw new Error(error.message || "Failed to delete child");
-	}
-});
-ipcMain.handle("children:statement", async (_event, { childId }) => {
-	try {
-		checkAuth$9();
-		if (!childId) throw new Error("Child ID is required");
-		const db = getDb();
-		const child = db.prepare("SELECT * FROM children WHERE id = ?").get(childId);
-		if (!child) throw new Error("الطفل غير موجود / Child not found");
-		if (child.teacher_id) child.teacher_name = db.prepare("SELECT name FROM employees WHERE id = ?").get(child.teacher_id)?.name ?? null;
-		return getChildStatement(child, db.prepare("SELECT * FROM payments WHERE child_id = ?").all(childId), /* @__PURE__ */ new Date());
-	} catch (error) {
-		console.error("Failed to get child statement:", error);
-		throw new Error(error.message || "Failed to get child statement");
-	}
-});
-//#endregion
-//#region electron/ipc/childServicesIPC.ts
-function checkAuth$8() {
-	if (!getCurrentUser()) throw new Error("UNAUTHORIZED: يجب تسجيل الدخول أولاً / Unauthorized");
-}
-ipcMain.handle("childServices:list", async (_event, { childId }) => {
-	try {
-		checkAuth$8();
-		const db = getDb();
-		if (!childId) throw new Error("childId is required");
-		return db.prepare("SELECT * FROM child_services WHERE child_id = ?").all(childId);
-	} catch (error) {
-		console.error("Failed to get child services:", error);
-		throw new Error(error.message || "Failed to get child services");
-	}
-});
-ipcMain.handle("childServices:add", async (_event, { childId, service, unit, price, teacher_session_rate = null }) => {
-	try {
-		requireAdmin();
-		const db = getDb();
-		if (!childId || !service || !unit || price === void 0) throw new Error("جميع الحقول الإلزامية مطلوبة / Missing required fields");
-		if (db.prepare("SELECT id FROM child_services WHERE child_id = ? AND service = ?").get(childId, service)) throw new Error("هذه الخدمة مضافة بالفعل للطفل / Service already enrolled");
-		const now = (/* @__PURE__ */ new Date()).toISOString();
-		const result = db.prepare(`
-      INSERT INTO child_services (child_id, service, unit, price, teacher_session_rate, created_at, updated_at, synced)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 0)
-    `).run(childId, service, unit, price, teacher_session_rate !== null ? Number(teacher_session_rate) : null, now, now);
-		return db.prepare("SELECT * FROM child_services WHERE id = ?").get(result.lastInsertRowid);
-	} catch (error) {
-		console.error("Failed to add child service:", error);
-		throw new Error(error.message || "Failed to add child service");
-	}
-});
-ipcMain.handle("childServices:update", async (_event, { id, patch }) => {
-	try {
-		requireAdmin();
-		const db = getDb();
-		if (!id || !patch) throw new Error("ID and patch are required");
-		let query = "UPDATE child_services SET ";
-		const params = [];
-		for (const key of [
-			"unit",
-			"price",
-			"teacher_session_rate"
-		]) if (patch[key] !== void 0) {
-			query += `${key} = ?, `;
-			params.push(patch[key]);
-		}
-		if (params.length === 0) return db.prepare("SELECT * FROM child_services WHERE id = ?").get(id);
-		query += "updated_at = ?, synced = 0 WHERE id = ?";
-		params.push((/* @__PURE__ */ new Date()).toISOString(), id);
-		db.prepare(query).run(...params);
-		return db.prepare("SELECT * FROM child_services WHERE id = ?").get(id);
-	} catch (error) {
-		console.error("Failed to update child service:", error);
-		throw new Error(error.message || "Failed to update child service");
-	}
-});
-ipcMain.handle("childServices:previewTeacherCost", async (_event, { teacher_id, lesson_days, teacher_session_rate = null }) => {
-	try {
-		checkAuth$8();
-		const db = getDb();
-		const teacher = db.prepare("SELECT teacher_session_rate FROM employees WHERE id = ?").get(teacher_id);
-		let rate = teacher_session_rate !== null && teacher_session_rate !== "" ? Number(teacher_session_rate) : teacher?.teacher_session_rate ?? null;
-		if (rate == null) rate = db.prepare(`
-        SELECT st.session_rate as session_rate
-        FROM employees e
-        LEFT JOIN employee_roles er ON e.role_id = er.id
-        LEFT JOIN salary_types st ON st.id = COALESCE(e.salary_type_override_id, er.salary_type_id)
-        WHERE e.id = ?
-      `).get(teacher_id)?.session_rate ?? 0;
-		const days = Array.isArray(lesson_days) ? lesson_days.map(Number) : [];
-		const today = /* @__PURE__ */ new Date();
-		const year = today.getFullYear();
-		const month = today.getMonth();
-		const daysInMonth = new Date(year, month + 1, 0).getDate();
-		let total = 0;
-		if (days.length > 0) for (let d = today.getDate(); d <= daysInMonth; d++) {
-			const date = new Date(year, month, d);
-			if (days.includes(date.getDay())) total++;
-		}
-		return {
-			remaining_sessions: total,
-			expected_cost: Number((total * rate).toFixed(2)),
-			teacher_session_rate: rate
-		};
-	} catch (error) {
-		throw new Error(error.message || "Failed to preview teacher cost");
-	}
-});
-ipcMain.handle("childServices:getTimetable", async (_event, { child_id }) => {
-	try {
-		checkAuth$8();
-		if (!child_id) throw new Error("child_id is required");
-		const enrollments = getDb().prepare(`
-      SELECT cs.id as service_row_id, cs.service, cs.teacher_id, cs.lesson_days, e.name as teacher_name
-      FROM child_services cs
-      LEFT JOIN employees e ON e.id = cs.teacher_id
-      WHERE cs.child_id = ?
-    `).all(child_id);
-		const slots = [];
-		for (const en of enrollments) {
-			let days = [];
-			if (en.lesson_days) try {
-				days = JSON.parse(en.lesson_days);
-			} catch {
-				days = [];
-			}
-			for (const day of days) slots.push({
-				service_row_id: en.service_row_id,
-				service: en.service,
-				day,
-				teacher_id: en.teacher_id ?? null,
-				teacher_name: en.teacher_name ?? null
-			});
-		}
-		return slots;
-	} catch (error) {
-		console.error("Failed to get child timetable:", error);
-		throw new Error(error.message || "Failed to get child timetable");
-	}
-});
-ipcMain.handle("childServices:remove", async (_event, { id }) => {
-	try {
-		requireAdmin();
-		const db = getDb();
-		if (!id) throw new Error("ID is required");
-		db.prepare("DELETE FROM child_services WHERE id = ?").run(id);
-		recordLocalTombstone(db, "child_services", id);
-		return { ok: true };
-	} catch (error) {
-		console.error("Failed to remove child service:", error);
-		throw new Error(error.message || "Failed to remove child service");
-	}
-});
-//#endregion
-//#region electron/ipc/teachersIPC.ts
-/**
-* teachers:list { role? }
-*
-* Auth-level (any signed-in user) read projection over the `employees` table,
-* used by the child form to assign a teacher (feature 004). Returns only
-* id/name/role — salary fields are intentionally excluded so employee users
-* can pick a teacher without gaining payroll visibility (the admin-only
-* `employees:get` is unchanged). When `role` is provided, results are filtered
-* to employees whose role matches (case-insensitive, includes the common
-* Arabic teacher titles).
-*/
-ipcMain.handle("teachers:list", async (_event, args) => {
-	try {
-		if (!getCurrentUser()) throw new Error("UNAUTHORIZED: يجب تسجيل الدخول أولاً / Unauthorized");
-		const rows = getDb().prepare("SELECT id, name, role FROM employees WHERE is_active = 1 ORDER BY name ASC").all();
-		const roleFilter = (args?.role ?? "").toString().trim().toLowerCase();
-		if (!roleFilter) return rows;
-		return rows.filter((r) => (r.role ?? "").toLowerCase().includes(roleFilter));
-	} catch (error) {
-		console.error("Failed to list teachers:", error);
-		throw new Error(error.message || "Failed to list teachers");
-	}
-});
-//#endregion
 //#region electron/services/monthlyTotals.ts
 /**
 * Shared "what should this month actually bring in" maths.
@@ -2225,12 +1809,12 @@ function calculateChildStatusRollup(payments) {
 	if (allUnpaid) return "unpaid";
 	return "partial";
 }
-function checkAuth$7() {
+function checkAuth$9() {
 	if (!getCurrentUser()) throw new Error("UNAUTHORIZED: يجب تسجيل الدخول أولاً / Unauthorized");
 }
 ipcMain.handle("payments:get", async (_event, { month, year }) => {
 	try {
-		checkAuth$7();
+		checkAuth$9();
 		const db = getDb();
 		if (!month || !year) throw new Error("Month and year are required");
 		const payments = db.prepare(`
@@ -2318,7 +1902,7 @@ ipcMain.handle("payments:get", async (_event, { month, year }) => {
 });
 ipcMain.handle("payments:generate", async (_event, { month, year }) => {
 	try {
-		checkAuth$7();
+		checkAuth$9();
 		const db = getDb();
 		if (!month || !year) throw new Error("Month and year are required");
 		const activeEnrollments = db.prepare(`
@@ -2454,7 +2038,7 @@ ipcMain.handle("payments:generate", async (_event, { month, year }) => {
 });
 ipcMain.handle("payments:update", async (_event, { id, quantity, paid, notes, payment_method_id }) => {
 	try {
-		checkAuth$7();
+		checkAuth$9();
 		const db = getDb();
 		if (!id) throw new Error("Payment ID is required");
 		const payment = db.prepare("SELECT * FROM payments WHERE id = ?").get(id);
@@ -2490,7 +2074,7 @@ ipcMain.handle("payments:update", async (_event, { id, quantity, paid, notes, pa
 });
 ipcMain.handle("payments:bulkPay", async (_event, { ids, payment_method_id }) => {
 	try {
-		checkAuth$7();
+		checkAuth$9();
 		const db = getDb();
 		if (!ids || !Array.isArray(ids) || ids.length === 0) throw new Error("Payment IDs array is required");
 		let methodName = null;
@@ -2558,7 +2142,7 @@ function recomputePaymentFromTransactions(db, paymentId) {
 }
 ipcMain.handle("payments:listTransactions", async (_event, { payment_id }) => {
 	try {
-		checkAuth$7();
+		checkAuth$9();
 		const db = getDb();
 		if (!payment_id) throw new Error("Payment ID is required");
 		return db.prepare("SELECT * FROM payment_transactions WHERE payment_id = ? ORDER BY paid_date ASC, id ASC").all(payment_id);
@@ -2569,7 +2153,7 @@ ipcMain.handle("payments:listTransactions", async (_event, { payment_id }) => {
 });
 ipcMain.handle("payments:addTransaction", async (_event, { payment_id, amount, payment_method_id = null, paid_date = null, notes = null }) => {
 	try {
-		checkAuth$7();
+		checkAuth$9();
 		const db = getDb();
 		if (!payment_id) throw new Error("Payment ID is required");
 		const amt = Number(amount);
@@ -2601,7 +2185,7 @@ ipcMain.handle("payments:addTransaction", async (_event, { payment_id, amount, p
 });
 ipcMain.handle("payments:deleteTransaction", async (_event, { id }) => {
 	try {
-		checkAuth$7();
+		checkAuth$9();
 		const db = getDb();
 		if (!id) throw new Error("Transaction ID is required");
 		const tx = db.prepare("SELECT payment_id FROM payment_transactions WHERE id = ?").get(id);
@@ -2690,6 +2274,436 @@ ipcMain.handle("payments:deleteForChild", async (_event, { child_id, month, year
 	} catch (error) {
 		console.error("Failed to delete child payments:", error);
 		throw new Error(error.message || "Failed to delete child payments");
+	}
+});
+//#endregion
+//#region electron/ipc/childrenIPC.ts
+function checkAuth$8() {
+	if (!getCurrentUser()) throw new Error("UNAUTHORIZED: يجب تسجيل الدخول أولاً / Unauthorized");
+}
+var GUARDIAN_PHONE_RE = /^(?:\+?2)?01[0-9]{9}$/;
+function validateGuardianPhone(phone) {
+	if (!GUARDIAN_PHONE_RE.test((phone ?? "").toString().trim())) throw new Error("رقم هاتف ولي الأمر يجب أن يكون بالتنسيق الصحيح (مثال: 01012345678 أو 201012345678 أو +201012345678) / Guardian phone must be a valid format (e.g., 01012345678, 201012345678, or +201012345678)");
+}
+function validateChildPhone(phone) {
+	if (phone && phone.toString().trim() !== "") {
+		if (!GUARDIAN_PHONE_RE.test(phone.toString().trim())) throw new Error("رقم هاتف الطفل يجب أن يكون بالتنسيق الصحيح (مثال: 01012345678 أو +201012345678) / Child phone must be a valid format (e.g., 01012345678, 201012345678, or +201012345678)");
+	}
+}
+function buildLessonFields(src) {
+	const sessions_baseline = src.sessions_baseline === void 0 || src.sessions_baseline === null ? 8 : Math.max(0, Math.trunc(Number(src.sessions_baseline)));
+	const extra_lessons = src.extra_lessons === void 0 || src.extra_lessons === null ? 0 : Math.max(0, Math.trunc(Number(src.extra_lessons)));
+	const session_price = src.session_price === void 0 || src.session_price === null || src.session_price === "" ? null : Number(src.session_price);
+	if (session_price !== null && session_price < 0) throw new Error("سعر الجلسة لا يمكن أن يكون سالباً / Session price cannot be negative");
+	const lesson_days = src.lesson_days === void 0 || src.lesson_days === null ? null : Array.isArray(src.lesson_days) ? JSON.stringify(src.lesson_days) : String(src.lesson_days);
+	const monthly_fee = session_price === null ? null : Number(((sessions_baseline + extra_lessons) * session_price).toFixed(2));
+	return {
+		teacher_id: src.teacher_id === void 0 || src.teacher_id === null || src.teacher_id === "" ? null : Number(src.teacher_id),
+		lesson_days,
+		sessions_baseline,
+		extra_lessons,
+		session_price,
+		monthly_fee
+	};
+}
+ipcMain.handle("children:get", async (_event, { search, service, activeOnly }) => {
+	try {
+		checkAuth$8();
+		const db = getDb();
+		let query = "SELECT * FROM children WHERE 1=1";
+		const params = [];
+		if (search && search.trim() !== "") {
+			const searchPattern = `%${search.trim()}%`;
+			query += " AND (name LIKE ? OR guardian LIKE ? OR guardian_phone LIKE ? OR child_phone LIKE ? OR national_id LIKE ?)";
+			params.push(searchPattern, searchPattern, searchPattern, searchPattern, searchPattern);
+		}
+		if (service) {
+			query += " AND id IN (SELECT child_id FROM child_services WHERE service = ?)";
+			params.push(service);
+		}
+		if (activeOnly !== false) query += " AND is_active = 1";
+		query += " ORDER BY name ASC";
+		const rows = db.prepare(query).all(...params);
+		for (const row of rows) row.services = db.prepare("SELECT * FROM child_services WHERE child_id = ?").all(row.id);
+		return rows;
+	} catch (error) {
+		console.error("Failed to get children:", error);
+		throw new Error(error.message || "Failed to get children");
+	}
+});
+ipcMain.handle("children:add", async (_event, childInput) => {
+	try {
+		checkAuth$8();
+		const db = getDb();
+		const { name, guardian, guardian_phone, child_phone, national_id, reg_date, notes, services } = childInput;
+		const enrollments = services || (childInput.service ? [{
+			service: childInput.service,
+			unit: childInput.unit,
+			price: childInput.price
+		}] : []);
+		if (!name || !guardian || !guardian_phone || enrollments.length === 0 || !reg_date) throw new Error("جميع الحقول الإلزامية مطلوبة / Missing required fields");
+		validateGuardianPhone(guardian_phone);
+		if (child_phone) validateChildPhone(child_phone);
+		const lesson = buildLessonFields(childInput);
+		const now = (/* @__PURE__ */ new Date()).toISOString();
+		const createdId = db.transaction(() => {
+			const first = enrollments[0];
+			const result = db.prepare(`
+        INSERT INTO children (
+          name, guardian, guardian_phone, child_phone, national_id,
+          service, unit, price, reg_date, notes,
+          photo_url, photo_public_id, teacher_id, lesson_days,
+          sessions_baseline, extra_lessons, session_price, monthly_fee,
+          is_active, created_at, updated_at, synced
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, 0)
+      `).run(name, guardian, guardian_phone, child_phone || null, national_id || null, first.service, first.unit, first.price, reg_date, notes || null, childInput.photo_url || null, childInput.photo_public_id || null, lesson.teacher_id, lesson.lesson_days, lesson.sessions_baseline, lesson.extra_lessons, lesson.session_price, lesson.monthly_fee, now, now);
+			const childId = Number(result.lastInsertRowid);
+			const insertSvc = db.prepare(`INSERT INTO child_services (child_id, service, unit, price, teacher_id, lesson_days, extra_lessons, session_price, teacher_session_rate, created_at, updated_at, synced) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`);
+			for (const s of enrollments) {
+				const sTeacherId = s.teacher_id != null && s.teacher_id !== "" ? Number(s.teacher_id) : null;
+				const sLessonDays = Array.isArray(s.lesson_days) ? JSON.stringify(s.lesson_days) : s.lesson_days || null;
+				const sExtraLessons = s.extra_lessons != null ? Number(s.extra_lessons) : 0;
+				const sSessionPrice = s.session_price != null && s.session_price !== "" ? Number(s.session_price) : null;
+				const sTeacherSessionRate = s.teacher_session_rate != null && s.teacher_session_rate !== "" ? Number(s.teacher_session_rate) : null;
+				insertSvc.run(childId, s.service, s.unit, s.price, sTeacherId, sLessonDays, sExtraLessons, sSessionPrice, sTeacherSessionRate, now, now);
+			}
+			return childId;
+		})();
+		const createdChild = db.prepare("SELECT * FROM children WHERE id = ?").get(createdId);
+		createdChild.services = db.prepare("SELECT * FROM child_services WHERE child_id = ?").all(createdId);
+		return createdChild;
+	} catch (error) {
+		console.error("Failed to add child:", error);
+		throw new Error(error.message || "Failed to add child");
+	}
+});
+ipcMain.handle("children:update", async (_event, { id, patch }) => {
+	try {
+		requireAdmin();
+		const db = getDb();
+		if (!id || !patch) throw new Error("Child ID and patch data are required");
+		const child = db.prepare("SELECT * FROM children WHERE id = ?").get(id);
+		if (!child) throw new Error("الطفل غير موجود / Child not found");
+		if (patch.guardian_phone !== void 0) validateGuardianPhone(patch.guardian_phone);
+		if (patch.child_phone !== void 0) validateChildPhone(patch.child_phone);
+		db.transaction(() => {
+			const enrollments = patch.services;
+			if (enrollments) {
+				if (enrollments.length === 0) throw new Error("يجب اختيار خدمة واحدة على الأقل / At least one service is required");
+				patch.service = enrollments[0].service;
+				patch.unit = enrollments[0].unit;
+				patch.price = enrollments[0].price;
+			}
+			let query = "UPDATE children SET ";
+			const params = [];
+			for (const key of [
+				"name",
+				"guardian",
+				"guardian_phone",
+				"child_phone",
+				"national_id",
+				"service",
+				"unit",
+				"price",
+				"reg_date",
+				"notes",
+				"is_active",
+				"photo_url",
+				"photo_public_id"
+			]) if (patch[key] !== void 0) {
+				query += `${key} = ?, `;
+				params.push(patch[key]);
+			}
+			if ([
+				"teacher_id",
+				"lesson_days",
+				"sessions_baseline",
+				"extra_lessons",
+				"session_price"
+			].some((k) => patch[k] !== void 0)) {
+				const merged = buildLessonFields({
+					teacher_id: patch.teacher_id !== void 0 ? patch.teacher_id : child.teacher_id,
+					lesson_days: patch.lesson_days !== void 0 ? patch.lesson_days : child.lesson_days,
+					sessions_baseline: patch.sessions_baseline !== void 0 ? patch.sessions_baseline : child.sessions_baseline,
+					extra_lessons: patch.extra_lessons !== void 0 ? patch.extra_lessons : child.extra_lessons,
+					session_price: patch.session_price !== void 0 ? patch.session_price : child.session_price
+				});
+				for (const [k, v] of Object.entries(merged)) {
+					query += `${k} = ?, `;
+					params.push(v);
+				}
+			}
+			const now = (/* @__PURE__ */ new Date()).toISOString();
+			if (params.length > 0) {
+				query += "updated_at = ?, synced = 0 WHERE id = ?";
+				params.push(now, id);
+				db.prepare(query).run(...params);
+			}
+			if (enrollments) {
+				const existingServices = db.prepare("SELECT id FROM child_services WHERE child_id = ?").all(id);
+				const existingIds = new Set(existingServices.map((e) => e.id));
+				const incomingIds = new Set(enrollments.filter((s) => s.id != null).map((s) => Number(s.id)));
+				const removedIds = [...existingIds].filter((eid) => !incomingIds.has(eid));
+				if (removedIds.length > 0) {
+					const placeholders = removedIds.map(() => "?").join(",");
+					db.prepare(`UPDATE payments SET service_id = NULL WHERE child_id = ? AND service_id IN (${placeholders})`).run(id, ...removedIds);
+					db.prepare(`DELETE FROM child_services WHERE id IN (${placeholders})`).run(...removedIds);
+				}
+				const updateSvc = db.prepare(`
+          UPDATE child_services
+          SET service = ?, unit = ?, price = ?, teacher_id = ?, lesson_days = ?, extra_lessons = ?, session_price = ?, teacher_session_rate = ?, updated_at = ?, synced = 0
+          WHERE id = ? AND child_id = ?
+        `);
+				const insertSvc = db.prepare(`INSERT INTO child_services (child_id, service, unit, price, teacher_id, lesson_days, extra_lessons, session_price, teacher_session_rate, created_at, updated_at, synced) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`);
+				for (const s of enrollments) {
+					const sTeacherId = s.teacher_id != null && s.teacher_id !== "" ? Number(s.teacher_id) : null;
+					const sLessonDays = Array.isArray(s.lesson_days) ? JSON.stringify(s.lesson_days) : s.lesson_days || null;
+					const sExtraLessons = s.extra_lessons != null ? Number(s.extra_lessons) : 0;
+					const sSessionPrice = s.session_price != null && s.session_price !== "" ? Number(s.session_price) : null;
+					const sTeacherSessionRate = s.teacher_session_rate != null && s.teacher_session_rate !== "" ? Number(s.teacher_session_rate) : null;
+					const existingId = s.id != null ? Number(s.id) : null;
+					if (existingId != null && existingIds.has(existingId)) {
+						updateSvc.run(s.service, s.unit, s.price, sTeacherId, sLessonDays, sExtraLessons, sSessionPrice, sTeacherSessionRate, now, existingId, id);
+						const payments = db.prepare("SELECT * FROM payments WHERE child_id = ? AND service_id = ?").all(id, existingId);
+						for (const p of payments) if (p.status !== "paid") {
+							const { total, balance, status } = calculatePaymentPreservingProrate(p, p.quantity, s.price, p.paid);
+							db.prepare(`
+                  UPDATE payments
+                  SET service = ?, unit = ?, price = ?, total = ?, balance = ?, status = ?, updated_at = ?, synced = 0
+                  WHERE id = ?
+                `).run(s.service, s.unit, s.price, total, balance, status, p.id);
+						} else db.prepare(`
+                  UPDATE payments
+                  SET service = ?, updated_at = ?, synced = 0
+                  WHERE id = ?
+                `).run(s.service, p.id);
+					} else insertSvc.run(id, s.service, s.unit, s.price, sTeacherId, sLessonDays, sExtraLessons, sSessionPrice, sTeacherSessionRate, now, now);
+				}
+				db.prepare(`
+          UPDATE payments
+          SET service_id = (
+            SELECT cs.id FROM child_services cs
+            WHERE cs.child_id = payments.child_id AND cs.service = payments.service
+              AND NOT EXISTS (SELECT 1 FROM payments p2 WHERE p2.service_id = cs.id)
+            LIMIT 1
+          )
+          WHERE child_id = ? AND service_id IS NULL
+        `).run(id);
+			}
+		})();
+		const updatedChild = db.prepare("SELECT * FROM children WHERE id = ?").get(id);
+		updatedChild.services = db.prepare("SELECT * FROM child_services WHERE child_id = ?").all(id);
+		return updatedChild;
+	} catch (error) {
+		console.error("Failed to update child:", error);
+		throw new Error(error.message || "Failed to update child");
+	}
+});
+ipcMain.handle("children:deactivate", async (_event, { id }) => {
+	try {
+		requireAdmin();
+		const db = getDb();
+		if (!db.prepare("SELECT id FROM children WHERE id = ?").get(id)) throw new Error("الطفل غير موجود / Child not found");
+		db.prepare("UPDATE children SET is_active = 0, updated_at = ?, synced = 0 WHERE id = ?").run((/* @__PURE__ */ new Date()).toISOString(), id);
+		return { ok: true };
+	} catch (error) {
+		console.error("Failed to deactivate child:", error);
+		throw new Error(error.message || "Failed to deactivate child");
+	}
+});
+ipcMain.handle("children:delete", async (_event, { id }) => {
+	try {
+		requireAdmin();
+		const db = getDb();
+		const child = db.prepare("SELECT id, is_active FROM children WHERE id = ?").get(id);
+		if (!child) throw new Error("الطفل غير موجود / Child not found");
+		if (child.is_active !== 0) throw new Error("لا يمكن حذف طفل نشط — يجب إلغاء تفعيله أولاً / Cannot delete an active child — deactivate first");
+		const paymentIds = db.prepare("SELECT id FROM payments WHERE child_id = ?").all(id).map((p) => p.id);
+		const serviceIds = db.prepare("SELECT id FROM child_services WHERE child_id = ?").all(id).map((s) => s.id);
+		db.transaction(() => {
+			db.prepare("DELETE FROM children WHERE id = ?").run(id);
+			recordLocalTombstone(db, "children", id);
+			for (const paymentId of paymentIds) recordLocalTombstone(db, "payments", paymentId);
+			for (const serviceId of serviceIds) recordLocalTombstone(db, "child_services", serviceId);
+		})();
+		return { ok: true };
+	} catch (error) {
+		console.error("Failed to delete child:", error);
+		throw new Error(error.message || "Failed to delete child");
+	}
+});
+ipcMain.handle("children:statement", async (_event, { childId }) => {
+	try {
+		checkAuth$8();
+		if (!childId) throw new Error("Child ID is required");
+		const db = getDb();
+		const child = db.prepare("SELECT * FROM children WHERE id = ?").get(childId);
+		if (!child) throw new Error("الطفل غير موجود / Child not found");
+		if (child.teacher_id) child.teacher_name = db.prepare("SELECT name FROM employees WHERE id = ?").get(child.teacher_id)?.name ?? null;
+		return getChildStatement(child, db.prepare("SELECT * FROM payments WHERE child_id = ?").all(childId), /* @__PURE__ */ new Date());
+	} catch (error) {
+		console.error("Failed to get child statement:", error);
+		throw new Error(error.message || "Failed to get child statement");
+	}
+});
+//#endregion
+//#region electron/ipc/childServicesIPC.ts
+function checkAuth$7() {
+	if (!getCurrentUser()) throw new Error("UNAUTHORIZED: يجب تسجيل الدخول أولاً / Unauthorized");
+}
+ipcMain.handle("childServices:list", async (_event, { childId }) => {
+	try {
+		checkAuth$7();
+		const db = getDb();
+		if (!childId) throw new Error("childId is required");
+		return db.prepare("SELECT * FROM child_services WHERE child_id = ?").all(childId);
+	} catch (error) {
+		console.error("Failed to get child services:", error);
+		throw new Error(error.message || "Failed to get child services");
+	}
+});
+ipcMain.handle("childServices:add", async (_event, { childId, service, unit, price, teacher_session_rate = null }) => {
+	try {
+		requireAdmin();
+		const db = getDb();
+		if (!childId || !service || !unit || price === void 0) throw new Error("جميع الحقول الإلزامية مطلوبة / Missing required fields");
+		if (db.prepare("SELECT id FROM child_services WHERE child_id = ? AND service = ?").get(childId, service)) throw new Error("هذه الخدمة مضافة بالفعل للطفل / Service already enrolled");
+		const now = (/* @__PURE__ */ new Date()).toISOString();
+		const result = db.prepare(`
+      INSERT INTO child_services (child_id, service, unit, price, teacher_session_rate, created_at, updated_at, synced)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 0)
+    `).run(childId, service, unit, price, teacher_session_rate !== null ? Number(teacher_session_rate) : null, now, now);
+		return db.prepare("SELECT * FROM child_services WHERE id = ?").get(result.lastInsertRowid);
+	} catch (error) {
+		console.error("Failed to add child service:", error);
+		throw new Error(error.message || "Failed to add child service");
+	}
+});
+ipcMain.handle("childServices:update", async (_event, { id, patch }) => {
+	try {
+		requireAdmin();
+		const db = getDb();
+		if (!id || !patch) throw new Error("ID and patch are required");
+		let query = "UPDATE child_services SET ";
+		const params = [];
+		for (const key of [
+			"unit",
+			"price",
+			"teacher_session_rate"
+		]) if (patch[key] !== void 0) {
+			query += `${key} = ?, `;
+			params.push(patch[key]);
+		}
+		if (params.length === 0) return db.prepare("SELECT * FROM child_services WHERE id = ?").get(id);
+		query += "updated_at = ?, synced = 0 WHERE id = ?";
+		params.push((/* @__PURE__ */ new Date()).toISOString(), id);
+		db.prepare(query).run(...params);
+		return db.prepare("SELECT * FROM child_services WHERE id = ?").get(id);
+	} catch (error) {
+		console.error("Failed to update child service:", error);
+		throw new Error(error.message || "Failed to update child service");
+	}
+});
+ipcMain.handle("childServices:previewTeacherCost", async (_event, { teacher_id, lesson_days, teacher_session_rate = null }) => {
+	try {
+		checkAuth$7();
+		const db = getDb();
+		const teacher = db.prepare("SELECT teacher_session_rate FROM employees WHERE id = ?").get(teacher_id);
+		let rate = teacher_session_rate !== null && teacher_session_rate !== "" ? Number(teacher_session_rate) : teacher?.teacher_session_rate ?? null;
+		if (rate == null) rate = db.prepare(`
+        SELECT st.session_rate as session_rate
+        FROM employees e
+        LEFT JOIN employee_roles er ON e.role_id = er.id
+        LEFT JOIN salary_types st ON st.id = COALESCE(e.salary_type_override_id, er.salary_type_id)
+        WHERE e.id = ?
+      `).get(teacher_id)?.session_rate ?? 0;
+		const days = Array.isArray(lesson_days) ? lesson_days.map(Number) : [];
+		const today = /* @__PURE__ */ new Date();
+		const year = today.getFullYear();
+		const month = today.getMonth();
+		const daysInMonth = new Date(year, month + 1, 0).getDate();
+		let total = 0;
+		if (days.length > 0) for (let d = today.getDate(); d <= daysInMonth; d++) {
+			const date = new Date(year, month, d);
+			if (days.includes(date.getDay())) total++;
+		}
+		return {
+			remaining_sessions: total,
+			expected_cost: Number((total * rate).toFixed(2)),
+			teacher_session_rate: rate
+		};
+	} catch (error) {
+		throw new Error(error.message || "Failed to preview teacher cost");
+	}
+});
+ipcMain.handle("childServices:getTimetable", async (_event, { child_id }) => {
+	try {
+		checkAuth$7();
+		if (!child_id) throw new Error("child_id is required");
+		const enrollments = getDb().prepare(`
+      SELECT cs.id as service_row_id, cs.service, cs.teacher_id, cs.lesson_days, e.name as teacher_name
+      FROM child_services cs
+      LEFT JOIN employees e ON e.id = cs.teacher_id
+      WHERE cs.child_id = ?
+    `).all(child_id);
+		const slots = [];
+		for (const en of enrollments) {
+			let days = [];
+			if (en.lesson_days) try {
+				days = JSON.parse(en.lesson_days);
+			} catch {
+				days = [];
+			}
+			for (const day of days) slots.push({
+				service_row_id: en.service_row_id,
+				service: en.service,
+				day,
+				teacher_id: en.teacher_id ?? null,
+				teacher_name: en.teacher_name ?? null
+			});
+		}
+		return slots;
+	} catch (error) {
+		console.error("Failed to get child timetable:", error);
+		throw new Error(error.message || "Failed to get child timetable");
+	}
+});
+ipcMain.handle("childServices:remove", async (_event, { id }) => {
+	try {
+		requireAdmin();
+		const db = getDb();
+		if (!id) throw new Error("ID is required");
+		db.prepare("DELETE FROM child_services WHERE id = ?").run(id);
+		recordLocalTombstone(db, "child_services", id);
+		return { ok: true };
+	} catch (error) {
+		console.error("Failed to remove child service:", error);
+		throw new Error(error.message || "Failed to remove child service");
+	}
+});
+//#endregion
+//#region electron/ipc/teachersIPC.ts
+/**
+* teachers:list { role? }
+*
+* Auth-level (any signed-in user) read projection over the `employees` table,
+* used by the child form to assign a teacher (feature 004). Returns only
+* id/name/role — salary fields are intentionally excluded so employee users
+* can pick a teacher without gaining payroll visibility (the admin-only
+* `employees:get` is unchanged). When `role` is provided, results are filtered
+* to employees whose role matches (case-insensitive, includes the common
+* Arabic teacher titles).
+*/
+ipcMain.handle("teachers:list", async (_event, args) => {
+	try {
+		if (!getCurrentUser()) throw new Error("UNAUTHORIZED: يجب تسجيل الدخول أولاً / Unauthorized");
+		const rows = getDb().prepare("SELECT id, name, role FROM employees WHERE is_active = 1 ORDER BY name ASC").all();
+		const roleFilter = (args?.role ?? "").toString().trim().toLowerCase();
+		if (!roleFilter) return rows;
+		return rows.filter((r) => (r.role ?? "").toLowerCase().includes(roleFilter));
+	} catch (error) {
+		console.error("Failed to list teachers:", error);
+		throw new Error(error.message || "Failed to list teachers");
 	}
 });
 //#endregion
@@ -2874,7 +2888,7 @@ ipcMain.handle("attendance:getSheet", async (_event, { session_id }) => {
 			dayOfWeek = new Date(y, m - 1, d).getDay();
 		}
 		const activeChildren = db.prepare(`
-      SELECT id as child_id, name as child_name, photo_url as child_photo_url, lesson_days
+      SELECT id as child_id, name as child_name, guardian as child_guardian, photo_url as child_photo_url, lesson_days
       FROM children WHERE is_active = 1
     `).all();
 		const enrollments = db.prepare(`
@@ -2893,6 +2907,7 @@ ipcMain.handle("attendance:getSheet", async (_event, { session_id }) => {
 			if (childEnrollments.length === 0) candidates.push({
 				child_id: c.child_id,
 				child_name: c.child_name,
+				child_guardian: c.child_guardian,
 				child_photo_url: c.child_photo_url,
 				teacher_id: null,
 				lesson_days: c.lesson_days
@@ -2905,6 +2920,7 @@ ipcMain.handle("attendance:getSheet", async (_event, { session_id }) => {
 					candidates.push({
 						child_id: c.child_id,
 						child_name: c.child_name,
+						child_guardian: c.child_guardian,
 						child_photo_url: c.child_photo_url,
 						teacher_id: en.teacher_id,
 						lesson_days: en.enrollment_lesson_days || c.lesson_days
@@ -2925,6 +2941,7 @@ ipcMain.handle("attendance:getSheet", async (_event, { session_id }) => {
 			return {
 				child_id: cand.child_id,
 				child_name: cand.child_name,
+				child_guardian: cand.child_guardian,
 				child_photo_url: cand.child_photo_url,
 				lesson_days: cand.lesson_days,
 				teacher_id: cand.teacher_id,
