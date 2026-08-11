@@ -9485,7 +9485,9 @@ function startAutoSync(intervalMs) {
 	autoSyncTimer = setInterval(() => {
 		runAutoSyncCycle();
 	}, intervalMs);
-	runAutoSyncCycle();
+	setTimeout(() => {
+		runAutoSyncCycle();
+	}, 5e3);
 }
 function stopAutoSync() {
 	if (autoSyncTimer) {

@@ -752,8 +752,10 @@ async function runAutoSyncCycle(): Promise<void> {
 export function startAutoSync(intervalMs: number): void {
   if (autoSyncTimer) clearInterval(autoSyncTimer)
   autoSyncTimer = setInterval(() => { void runAutoSyncCycle() }, intervalMs)
-  // Kick off a first cycle immediately instead of waiting a full interval.
-  void runAutoSyncCycle()
+  // Delay the first cycle by 5 s to let MongoDB finish connecting and SQLite fully open
+  // before the first push/pull touches the database. Firing immediately races with the
+  // fire-and-forget connectMongo() call in main.ts and produces "database is not open" errors.
+  setTimeout(() => { void runAutoSyncCycle() }, 5000)
 }
 
 export function stopAutoSync(): void {
