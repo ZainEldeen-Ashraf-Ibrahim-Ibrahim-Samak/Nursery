@@ -8930,36 +8930,6 @@ function stripUnknownColumns(cloud, localColumns) {
 		dropped
 	};
 }
-function resolveConflict(local, cloud) {
-	const localTs = local.updated_at ? new Date(local.updated_at).getTime() : 0;
-	const cloudTs = cloud.updated_at ? new Date(cloud.updated_at).getTime() : 0;
-	if (cloudTs > localTs) return "cloud";
-	if (localTs > cloudTs) return "local";
-	return local.id >= cloud.id ? "local" : "cloud";
-}
-/**
-* When local "wins" a conflict, the cloud row must still be reconciled into local instead of
-* discarded — this computes which columns to fill in: any column that's NULL/undefined/empty
-* string locally gets the cloud value; local's own non-empty values always take precedence.
-* Pure/exported so the merge semantics are unit-testable without a database.
-*/
-function computeMergeColumns(local, cloud) {
-	const columns = [];
-	const values = [];
-	for (const c of Object.keys(cloud)) {
-		if (c === "_id" || c === "id" || c === "__v") continue;
-		const localVal = local[c];
-		const cloudVal = cloud[c];
-		if ((localVal === null || localVal === void 0 || localVal === "") && !(cloudVal === null || cloudVal === void 0 || cloudVal === "")) {
-			columns.push(c);
-			values.push(cloudVal);
-		}
-	}
-	return {
-		columns,
-		values
-	};
-}
 /**
 * Detects two DIFFERENT records that were independently assigned the same id on two devices.
 *
@@ -9145,9 +9115,9 @@ async function ensureConnected() {
 }
 /**
 * Push records to MongoDB for every entity in SYNC_ENTITIES.
-* Default mode pushes rows with synced = 0; force pushes every row (overwriting cloud).
+* Always runs in force mode — pushes every row, overwriting the cloud copy unconditionally.
 */
-async function runPush(force, report = noopReport) {
+async function runPush(report = noopReport) {
 	try {
 		const db = getDb();
 		await ensureConnected();
@@ -9156,44 +9126,23 @@ async function runPush(force, report = noopReport) {
 		const now = (/* @__PURE__ */ new Date()).toISOString();
 		let totalWork = 0;
 		for (const entity of SYNC_ENTITIES) {
-			let cq = force ? `SELECT COUNT(*) AS c FROM ${entity.table}` : `SELECT COUNT(*) AS c FROM ${entity.table} WHERE synced = 0`;
-			if (entity.name === "settings") cq += force ? " WHERE key != 'sync_mongo_uri'" : " AND key != 'sync_mongo_uri'";
+			let cq = `SELECT COUNT(*) AS c FROM ${entity.table}`;
+			if (entity.name === "settings") cq += " WHERE key != 'sync_mongo_uri'";
 			totalWork += db.prepare(cq).get()?.c ?? 0;
 		}
 		let done = 0;
 		report(0, totalWork, "starting");
 		for (const entity of SYNC_ENTITIES) {
-			let query = force ? `SELECT * FROM ${entity.table}` : `SELECT * FROM ${entity.table} WHERE synced = 0`;
-			if (entity.name === "settings") query += force ? ` WHERE key != 'sync_mongo_uri'` : ` AND key != 'sync_mongo_uri'`;
+			let query = `SELECT * FROM ${entity.table}`;
+			if (entity.name === "settings") query += " WHERE key != 'sync_mongo_uri'";
 			const unsynced = db.prepare(query).all();
 			let pushed = 0;
 			let failed = 0;
-			let skipped = 0;
-			let collisions = 0;
+			const skipped = 0;
+			const collisions = 0;
 			for (const record of unsynced) {
 				const recordKey = entity.name === "settings" ? record.key : record.id;
 				try {
-					if (!force) {
-						const cloudDoc = await entity.model.findOne({ id: recordKey }).lean();
-						const collision = cloudDoc ? detectIdCollision(record, cloudDoc) : null;
-						if (collision) {
-							logSync("push-collision", entity.name, recordKey, "skipped-collision", collision);
-							console.error(`[sync:push] ${entity.name}: ${collision}`);
-							collisions++;
-							skipped++;
-							report(++done, totalWork, entity.name);
-							continue;
-						}
-						if (cloudDoc && resolveConflict({
-							...record,
-							id: recordKey
-						}, cloudDoc) === "cloud") {
-							logSync("push-skip", entity.name, recordKey, "skipped", "cloud copy is newer — pull will reconcile");
-							skipped++;
-							report(++done, totalWork, entity.name);
-							continue;
-						}
-					}
 					if (entity.name === "settings") {
 						await entity.model.findOneAndUpdate({ id: record.key }, {
 							...record,
@@ -9245,12 +9194,9 @@ async function runPush(force, report = noopReport) {
 }
 /**
 * Pull records from MongoDB for every entity in SYNC_ENTITIES.
-* Default mode applies conflict resolution (most-recent updated_at wins, id tie-break);
-* `force` makes every cloud record overwrite local unconditionally — for restoring/importing
-* known-good cloud data onto a machine whose local rows have stale-but-technically-"newer"
-* timestamps that would otherwise make the pull report everything as "skipped".
+* Always runs in force mode — cloud always wins, overwriting local unconditionally.
 */
-async function runPull(force, report = noopReport) {
+async function runPull(report = noopReport) {
 	try {
 		const db = getDb();
 		await ensureConnected();
@@ -9264,7 +9210,7 @@ async function runPull(force, report = noopReport) {
 		let totalCollisions = 0;
 		for (const entity of SYNC_ENTITIES) {
 			let pulled = 0;
-			let merged = 0;
+			const merged = 0;
 			let skipped = 0;
 			let failed = 0;
 			let collisions = 0;
@@ -9337,34 +9283,14 @@ async function runPull(force, report = noopReport) {
 								continue;
 							}
 							if (entity.name === "settings") local.id = local.key;
-							if ((force ? "cloud" : resolveConflict(local, cloudRecord)) === "cloud") {
-								const columns = Object.keys(cloudRecord).filter((k) => k !== "_id" && k !== "id" && k !== "__v");
-								const setClause = columns.map((c) => `${c} = ?`).join(", ");
-								const values = columns.map((c) => cloudRecord[c]);
-								values.push(cloudRecord.id);
-								if (entity.name === "settings") db.prepare(`UPDATE ${entity.table} SET ${setClause}, synced = 1 WHERE key = ?`).run(...values);
-								else db.prepare(`UPDATE ${entity.table} SET ${setClause}, synced = 1 WHERE id = ?`).run(...values);
-								logSync("pull-update", entity.name, cloudRecord.id, "success");
-								pulled++;
-							} else {
-								const { columns: changedColumns, values: mergedValues } = computeMergeColumns(local, cloudRecord);
-								if (changedColumns.length > 0) {
-									const setClause = changedColumns.map((c) => `${c} = ?`).join(", ");
-									const idField = entity.name === "settings" ? "key" : "id";
-									db.prepare(`UPDATE ${entity.table} SET ${setClause}, synced = 1 WHERE ${idField} = ?`).run(...mergedValues, cloudRecord.id);
-									const reason = `merged — filled in ${changedColumns.join(", ")} from cloud (local values for everything else kept)`;
-									logSync("pull-merge", entity.name, cloudRecord.id, "merged", reason);
-									noteSkip(cloudRecord.id, reason);
-									merged++;
-								} else {
-									const idField = entity.name === "settings" ? "key" : "id";
-									db.prepare(`UPDATE ${entity.table} SET synced = 1 WHERE ${idField} = ?`).run(cloudRecord.id);
-									const reason = "already identical to cloud — marked synced, nothing to merge";
-									logSync("pull-merge", entity.name, cloudRecord.id, "merged", reason);
-									noteSkip(cloudRecord.id, reason);
-									merged++;
-								}
-							}
+							const columns = Object.keys(cloudRecord).filter((k) => k !== "_id" && k !== "id" && k !== "__v");
+							const setClause = columns.map((c) => `${c} = ?`).join(", ");
+							const values = columns.map((c) => cloudRecord[c]);
+							values.push(cloudRecord.id);
+							if (entity.name === "settings") db.prepare(`UPDATE ${entity.table} SET ${setClause}, synced = 1 WHERE key = ?`).run(...values);
+							else db.prepare(`UPDATE ${entity.table} SET ${setClause}, synced = 1 WHERE id = ?`).run(...values);
+							logSync("pull-update", entity.name, cloudRecord.id, "success");
+							pulled++;
 						}
 					} catch (err) {
 						const message = err instanceof Error ? err.message : String(err);
@@ -9435,21 +9361,21 @@ async function runPull(force, report = noopReport) {
 	}
 }
 /**
-* sync:push — Push all unsynced records to MongoDB (all rows when force: true).
+* sync:push — Push all rows to MongoDB (always force: local overwrites cloud).
 * Any logged-in user — sync must work for every role, same as the automatic cycle.
 * Graceful: reports pushed/failed counts per entity.
 */
-ipcMain.handle("sync:push", async (event, args) => {
+ipcMain.handle("sync:push", async (event) => {
 	checkAuth$10();
-	return runPush(args?.force === true, progressReporter(event, "push"));
+	return runPush(progressReporter(event, "push"));
 });
 /**
-* sync:pull — Pull records from MongoDB (cloud always wins when force: true).
+* sync:pull — Pull records from MongoDB (always force: cloud always wins).
 * Any logged-in user — sync must work for every role, same as the automatic cycle.
 */
-ipcMain.handle("sync:pull", async (event, args) => {
+ipcMain.handle("sync:pull", async (event) => {
 	checkAuth$10();
-	return runPull(args?.force === true, progressReporter(event, "pull"));
+	return runPull(progressReporter(event, "pull"));
 });
 var autoSyncTimer = null;
 var autoSyncRunning = false;
@@ -9469,9 +9395,9 @@ async function runAutoSyncCycle() {
 		broadcastAutoSyncStatus("connecting");
 		await ensureConnected();
 		broadcastAutoSyncStatus("pushing");
-		await runPush(true);
+		await runPush();
 		broadcastAutoSyncStatus("pulling");
-		await runPull(true);
+		await runPull();
 		broadcastAutoSyncStatus("done");
 	} catch (err) {
 		console.error("Auto-sync error:", err);
@@ -10519,27 +10445,49 @@ ipcMain.handle("transactions:list", async (_event, args) => {
 			if (!from || !to) throw new Error("from and to are required for range=custom");
 		} else throw new Error("Invalid range: must be one of day, week, month, custom");
 		const db = getDb();
-		const conditions = ["pt.paid_date BETWEEN ? AND ?"];
-		const params = [from, to];
+		const directConditions = ["substr(p.updated_at, 1, 10) BETWEEN ? AND ?", "p.paid > 0"];
+		const installmentConditions = ["pt.paid_date BETWEEN ? AND ?"];
+		const directParams = [from, to];
+		const installmentParams = [from, to];
 		if (childId) {
-			conditions.push("p.child_id = ?");
-			params.push(childId);
+			directConditions.push("p.child_id = ?");
+			directParams.push(childId);
+			installmentConditions.push("p.child_id = ?");
+			installmentParams.push(childId);
 		}
 		return db.prepare(`
       SELECT
         pt.id,
         p.child_id,
-        c.name as child_name,
-        p.service as service_name,
+        c.name  AS child_name,
+        p.service AS service_name,
         pt.amount,
-        'payment' as type,
-        pt.paid_date as date
+        'payment' AS type,
+        pt.paid_date AS date
       FROM payment_transactions pt
       JOIN payments p ON p.id = pt.payment_id
       JOIN children c ON c.id = p.child_id
-      WHERE ${conditions.join(" AND ")}
-      ORDER BY date DESC, pt.id DESC
-    `).all(...params);
+      WHERE ${installmentConditions.join(" AND ")}
+
+      UNION ALL
+
+      SELECT
+        p.id,
+        p.child_id,
+        c.name  AS child_name,
+        p.service AS service_name,
+        p.paid  AS amount,
+        'payment' AS type,
+        substr(p.updated_at, 1, 10) AS date
+      FROM payments p
+      JOIN children c ON c.id = p.child_id
+      WHERE ${directConditions.join(" AND ")}
+        AND NOT EXISTS (
+          SELECT 1 FROM payment_transactions pt2 WHERE pt2.payment_id = p.id
+        )
+
+      ORDER BY date DESC, id DESC
+    `).all(...installmentParams, ...directParams);
 	} catch (error) {
 		console.error("Failed to list transactions:", error);
 		throw new Error(error.message || "Failed to list transactions");
