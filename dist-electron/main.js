@@ -10460,36 +10460,37 @@ ipcMain.handle("transactions:list", async (_event, args) => {
 			installmentParams.push(childId);
 		}
 		return db.prepare(`
-      SELECT
-        pt.id,
-        p.child_id,
-        c.name  AS child_name,
-        p.service AS service_name,
-        pt.amount,
-        'payment' AS type,
-        pt.paid_date AS date
-      FROM payment_transactions pt
-      JOIN payments p ON p.id = pt.payment_id
-      JOIN children c ON c.id = p.child_id
-      WHERE ${installmentConditions.join(" AND ")}
+      SELECT * FROM (
+        SELECT
+          pt.id       AS id,
+          p.child_id,
+          c.name      AS child_name,
+          p.service   AS service_name,
+          pt.amount,
+          'payment'   AS type,
+          pt.paid_date AS date
+        FROM payment_transactions pt
+        JOIN payments p ON p.id = pt.payment_id
+        JOIN children c ON c.id = p.child_id
+        WHERE ${installmentConditions.join(" AND ")}
 
-      UNION ALL
+        UNION ALL
 
-      SELECT
-        p.id,
-        p.child_id,
-        c.name  AS child_name,
-        p.service AS service_name,
-        p.paid  AS amount,
-        'payment' AS type,
-        substr(p.updated_at, 1, 10) AS date
-      FROM payments p
-      JOIN children c ON c.id = p.child_id
-      WHERE ${directConditions.join(" AND ")}
-        AND NOT EXISTS (
-          SELECT 1 FROM payment_transactions pt2 WHERE pt2.payment_id = p.id
-        )
-
+        SELECT
+          p.id        AS id,
+          p.child_id,
+          c.name      AS child_name,
+          p.service   AS service_name,
+          p.paid      AS amount,
+          'payment'   AS type,
+          substr(p.updated_at, 1, 10) AS date
+        FROM payments p
+        JOIN children c ON c.id = p.child_id
+        WHERE ${directConditions.join(" AND ")}
+          AND NOT EXISTS (
+            SELECT 1 FROM payment_transactions pt2 WHERE pt2.payment_id = p.id
+          )
+      )
       ORDER BY date DESC, id DESC
     `).all(...installmentParams, ...directParams);
 	} catch (error) {
