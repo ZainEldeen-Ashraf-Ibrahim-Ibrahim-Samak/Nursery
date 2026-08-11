@@ -737,9 +737,9 @@ async function runAutoSyncCycle(): Promise<void> {
     broadcastAutoSyncStatus('connecting')
     await ensureConnected()
     broadcastAutoSyncStatus('pushing')
-    await runPush(false)
+    await runPush(true)  // force: always push local rows over the cloud regardless of timestamps
     broadcastAutoSyncStatus('pulling')
-    await runPull(false)
+    await runPull(true)  // force: always pull cloud rows over local regardless of timestamps
     broadcastAutoSyncStatus('done')
   } catch (err) {
     console.error('Auto-sync error:', err)

@@ -9469,9 +9469,9 @@ async function runAutoSyncCycle() {
 		broadcastAutoSyncStatus("connecting");
 		await ensureConnected();
 		broadcastAutoSyncStatus("pushing");
-		await runPush(false);
+		await runPush(true);
 		broadcastAutoSyncStatus("pulling");
-		await runPull(false);
+		await runPull(true);
 		broadcastAutoSyncStatus("done");
 	} catch (err) {
 		console.error("Auto-sync error:", err);
