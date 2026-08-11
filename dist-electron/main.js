@@ -9205,18 +9205,6 @@ async function runPush(force, report = noopReport) {
 						});
 						db.prepare(`UPDATE ${entity.table} SET synced = 1 WHERE key = ?`).run(record.key);
 						logSync("push", entity.name, record.key, "success");
-					} else if (entity.name === "tombstones") {
-						const targetEntity = SYNC_ENTITIES.find((e) => e.name === record.entity);
-						if (targetEntity) await targetEntity.model.findOneAndDelete({ id: record.record_id });
-						await entity.model.findOneAndUpdate({ id: record.id }, {
-							...record,
-							updated_at: record.updated_at || now
-						}, {
-							upsert: true,
-							returnDocument: "after"
-						});
-						db.prepare(`UPDATE ${entity.table} SET synced = 1 WHERE id = ?`).run(record.id);
-						logSync("push", entity.name, record.id, "success");
 					} else {
 						await entity.model.findOneAndUpdate({ id: record.id }, {
 							...record,
