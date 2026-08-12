@@ -114,6 +114,346 @@ function getCloudinaryConfig() {
 	return null;
 }
 //#endregion
+//#region electron/services/monthlyTotals.ts
+/**
+* Shared "what should this month actually bring in" maths.
+*
+* `payments.total` is the amount BILLED SO FAR: for attendance-driven units ('يوم' / 'ساعة' /
+* 'جلسة') `payments:generate` sets `quantity` from attendance already recorded, so half-way
+* through a month it is roughly half the month's real figure. The Payments screen has always
+* shown the full scheduled figure ("expected") alongside it, but the Dashboard summed `total`
+* — which is why an enrollment book worth ~70k EGP could read ~27k on the Dashboard.
+*
+* Both screens now derive their totals from here, so the two can never drift apart again.
+*/
+var ARABIC_MONTH_NAMES = [
+	"يناير",
+	"فبراير",
+	"مارس",
+	"أبريل",
+	"مايو",
+	"يونيو",
+	"يوليو",
+	"أغسطس",
+	"سبتمبر",
+	"أكتوبر",
+	"نوفمبر",
+	"ديسمبر"
+];
+/**
+* Parses a `YYYY-MM-DD` date without going through `new Date(string)`, which parses date-only
+* strings as UTC midnight and then reports local components — shifting the day by one in any
+* timezone behind UTC and silently moving a registration across a month boundary.
+* Returns a 0-based month, matching `Date#getMonth`.
+*/
+function parseIsoDate(value) {
+	if (!value) return null;
+	const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(value).trim());
+	if (!match) return null;
+	return {
+		year: Number(match[1]),
+		month: Number(match[2]) - 1,
+		day: Number(match[3])
+	};
+}
+/**
+* Builds the expected-quantity / expected-total calculators for one month.
+*
+* For the month currently in progress, scheduled days are counted from today (inclusive) to
+* month end and added to what has already been billed — days that have already elapsed without
+* attendance were genuinely not owed, so counting the whole month would overstate the bill.
+* Any other month is counted in full, since there is no "today" boundary inside it.
+*/
+function createExpectedTotalCalculator(month, year) {
+	const monthIndex = ARABIC_MONTH_NAMES.indexOf(month);
+	const payYear = Number(year);
+	const daysInMonth = monthIndex !== -1 ? new Date(payYear, monthIndex + 1, 0).getDate() : 30;
+	const today = /* @__PURE__ */ new Date();
+	const isCurrentMonth = monthIndex === today.getMonth() && payYear === today.getFullYear();
+	const startDay = isCurrentMonth ? today.getDate() : 1;
+	const countLessonDayOccurrences = (lessonDays, from) => {
+		let count = 0;
+		for (let d = from; d <= daysInMonth; d++) if (lessonDays.includes(new Date(payYear, monthIndex, d).getDay())) count++;
+		return count;
+	};
+	/**
+	* The first day of THIS month the child is billable from, or `null` when the enrollment does
+	* not reach the month at all (registered in a later month).
+	*
+	* Without this, every expected figure counted the whole month for a child who joined on the
+	* 19th: a Sunday+Thursday schedule in a past month was billed all 9 occurrences instead of the
+	* 3 that fall after registration, and the Dashboard's "invoiced" KPI inherited the same
+	* overstatement because it shares this calculator.
+	*/
+	const billableFromDay = (p) => {
+		const reg = parseIsoDate(p.reg_date);
+		if (!reg || monthIndex === -1) return 1;
+		if (reg.year > payYear || reg.year === payYear && reg.month > monthIndex) return null;
+		if (reg.year < payYear || reg.month < monthIndex) return 1;
+		return Math.min(Math.max(reg.day, 1), daysInMonth);
+	};
+	const parseLessonDays = (p) => {
+		try {
+			const parsed = JSON.parse(p.service_lesson_days || "[]");
+			return Array.isArray(parsed) ? parsed.map(Number).filter((n) => Number.isInteger(n)) : [];
+		} catch {
+			return [];
+		}
+	};
+	/**
+	* How a mid-month monthly subscription is split, and on what basis.
+	*
+	* A monthly enrollment with a weekday schedule ("fitness, 3 days a week") is not sold by the
+	* calendar day — it is sold as a number of sessions per week. Splitting it on calendar days
+	* charged the wrong fraction whenever the selected days are not spread evenly: joining before
+	* the last week of a Mon/Wed/Sat service can leave most of the month's sessions still to come
+	* even though few calendar days remain. So when the enrollment HAS selected days, the split is
+	* "sessions still to come ÷ sessions in the whole month". Without a schedule there is nothing
+	* to count and it falls back to calendar days.
+	*/
+	const monthlyProrateBasis = (p, fromDay) => {
+		const lessonDays = parseLessonDays(p);
+		if (lessonDays.length > 0 && monthIndex !== -1) {
+			const total = countLessonDayOccurrences(lessonDays, 1);
+			if (total > 0) return {
+				basis: "sessions",
+				remaining: countLessonDayOccurrences(lessonDays, fromDay),
+				total,
+				lessonDays
+			};
+		}
+		return {
+			basis: "days",
+			remaining: Math.max(0, daysInMonth - Math.min(fromDay, daysInMonth) + 1),
+			total: daysInMonth,
+			lessonDays
+		};
+	};
+	const expectedQuantity = (p) => {
+		const from = billableFromDay(p);
+		if (from === null) return 0;
+		if (p.unit === "شهر") return p.quantity || 1;
+		if (p.service === "حصص إضافية") return p.quantity;
+		const lessonDays = parseLessonDays(p);
+		if (lessonDays.length === 0 || monthIndex === -1) return p.quantity;
+		const scheduled = countLessonDayOccurrences(lessonDays, Math.max(from, startDay));
+		return isCurrentMonth ? p.quantity + scheduled : scheduled;
+	};
+	/**
+	* The per-unit rate to bill at. Only monthly enrollments can differ from `price`: a child who
+	* joined mid-month owes a pro-rated month.
+	*
+	* `prorated_calculated` (written by `payments:generate`) wins when present, so an amount an
+	* admin already settled against is never rewritten. When it is absent the rate is derived from
+	* `reg_date` instead of falling back to the full price — rows created before pro-rating
+	* existed, imported from Excel, or regenerated after the fact carry no stored discount, and
+	* defaulting those to a whole month is exactly what billed a 19th-of-the-month enrollment the
+	* full 550 instead of 231.
+	*/
+	const expectedRate = (p) => {
+		if (p.unit !== "شهر") return Number(p.price) || 0;
+		if (p.prorated_calculated != null) return Number(p.prorated_calculated);
+		const from = billableFromDay(p);
+		if (from === null) return 0;
+		return monthlyRate(Number(p.price) || 0, from, p);
+	};
+	/**
+	* The month rate to charge a subscription starting on `fromDay`: the full price from the 1st,
+	* otherwise the price scaled by whichever basis applies (see `monthlyProrateBasis`).
+	*/
+	const monthlyRate = (price, fromDay, p) => {
+		if (!(fromDay > 1)) return price;
+		const { remaining, total } = monthlyProrateBasis(p, fromDay);
+		if (total <= 0) return price;
+		return Math.round(price * remaining / total);
+	};
+	const expectedTotal = (p, qty) => Number((qty * expectedRate(p)).toFixed(2));
+	return {
+		expectedQuantity,
+		expectedRate,
+		expectedTotal,
+		billableFromDay,
+		monthlyRate,
+		monthlyProrateBasis,
+		monthIndex,
+		daysInMonth,
+		isCurrentMonth
+	};
+}
+/** Annotates rows in place with `expected_quantity` / `expected_total`. */
+function attachExpectedTotals(rows, month, year) {
+	const { expectedQuantity, expectedRate, expectedTotal, billableFromDay, monthlyProrateBasis } = createExpectedTotalCalculator(month, year);
+	for (const row of rows) {
+		row.expected_quantity = expectedQuantity(row);
+		row.expected_rate = expectedRate(row);
+		row.expected_total = expectedTotal(row, row.expected_quantity);
+		row.expected_from_day = billableFromDay(row);
+		if (row.unit === "شهر" && row.expected_from_day != null && row.expected_from_day > 1) {
+			const { basis, remaining, total } = monthlyProrateBasis(row, row.expected_from_day);
+			row.expected_prorate_basis = {
+				basis,
+				remaining,
+				total
+			};
+		} else row.expected_prorate_basis = null;
+	}
+	return rows;
+}
+/**
+* Loads the month's payment rows with the columns the expected-total maths needs, already
+* annotated. Used by the Dashboard; the Payments screen selects more columns and calls
+* `attachExpectedTotals` on its own result set.
+*/
+function getMonthBillableRows(db, month, year) {
+	return attachExpectedTotals(db.prepare(`
+    SELECT p.service, p.unit, p.quantity, p.price, p.total, p.paid, p.balance, p.prorated_calculated,
+      c.reg_date,
+      COALESCE(NULLIF(cs.lesson_days, '[]'), c.lesson_days) as service_lesson_days
+    FROM payments p
+    JOIN children c ON p.child_id = c.id
+    LEFT JOIN child_services cs ON cs.id = p.service_id
+    WHERE p.month = ? AND p.year = ?
+  `).all(month, year), month, year);
+}
+//#endregion
+//#region electron/services/prorateReconcile.ts
+/**
+* Finds — and where it is safe to, repairs — monthly ('شهر') payment rows whose stored amount
+* disagrees with what the current pro-rating rules produce.
+*
+* `payments.prorated_calculated` is written once, when `payments:generate` first creates the row,
+* and every read path trusts it over a freshly derived figure so an invoice an admin has already
+* settled against is never silently rewritten. That is the right default, but it means a row
+* generated under older rules keeps an amount the app would no longer produce:
+*
+*  - rows created before pro-rating existed, or imported from Excel, carry no discount at all
+*    and were billed a whole month to a child who joined on the 19th;
+*  - rows created while the split was done on calendar days keep that figure even though the
+*    split is now driven by the enrollment's selected lesson days.
+*
+* Both leave the book internally inconsistent: two children who joined the same day can carry
+* different amounts purely by when their row happened to be generated.
+*
+* The derivation here deliberately ignores `prorated_calculated` — that column is the thing being
+* checked, so trusting it would make every row agree with itself.
+*/
+/**
+* Loads every monthly payment row with the columns the pro-rate maths needs.
+* Returns an empty list rather than throwing when the schema predates `child_services`.
+*/
+function loadMonthlyRows(db, scope) {
+	const where = scope ? "AND p.month = ? AND p.year = ?" : "";
+	const params = scope ? [scope.month, scope.year] : [];
+	try {
+		return db.prepare(`SELECT p.id, p.child_id, p.month, p.year, p.service, p.unit, p.quantity, p.price,
+                p.total, p.paid, p.prorated_calculated, c.reg_date, c.name as child_name,
+                COALESCE(NULLIF(cs.lesson_days, '[]'), c.lesson_days) as service_lesson_days
+         FROM payments p
+         JOIN children c ON c.id = p.child_id
+         LEFT JOIN child_services cs ON cs.id = p.service_id
+         WHERE p.unit = 'شهر' ${where}`).all(...params);
+	} catch {
+		return [];
+	}
+}
+/**
+* The amount a row SHOULD carry under the current rules, derived from the child's registration
+* date and the enrollment's selected days, ignoring whatever discount is stored on the row.
+*/
+function derive(rows) {
+	const out = /* @__PURE__ */ new Map();
+	const byPeriod = /* @__PURE__ */ new Map();
+	for (const row of rows) {
+		const key = `${row.month} ${row.year}`;
+		const bucket = byPeriod.get(key);
+		if (bucket) bucket.push(row);
+		else byPeriod.set(key, [row]);
+	}
+	for (const bucket of byPeriod.values()) {
+		const { billableFromDay, monthlyRate, monthlyProrateBasis } = createExpectedTotalCalculator(bucket[0].month, bucket[0].year);
+		for (const row of bucket) {
+			const from = billableFromDay(row);
+			const quantity = Number(row.quantity) || 1;
+			if (from === null) {
+				out.set(row.id, {
+					total: 0,
+					rate: 0,
+					basis: null
+				});
+				continue;
+			}
+			const rate = monthlyRate(Number(row.price) || 0, from, row);
+			out.set(row.id, {
+				total: Number((rate * quantity).toFixed(2)),
+				rate,
+				basis: from > 1 ? monthlyProrateBasis(row, from).basis : null
+			});
+		}
+	}
+	return out;
+}
+/** Rows whose stored amount differs from the derived one by more than a rounding cent. */
+function findMonthlyProrateMismatches(db, scope) {
+	const rows = loadMonthlyRows(db, scope);
+	const derived = derive(rows);
+	const mismatches = [];
+	for (const row of rows) {
+		const d = derived.get(row.id);
+		if (!d) continue;
+		const storedTotal = Number(row.total) || 0;
+		const difference = Number((d.total - storedTotal).toFixed(2));
+		if (Math.abs(difference) <= .01) continue;
+		mismatches.push({
+			id: row.id,
+			child_id: row.child_id,
+			child_name: row.child_name,
+			month: row.month,
+			year: Number(row.year),
+			service: row.service,
+			reg_date: row.reg_date ?? null,
+			storedTotal,
+			expectedTotal: d.total,
+			difference,
+			paid: Number(row.paid) || 0,
+			basis: d.basis
+		});
+	}
+	return mismatches;
+}
+/**
+* Corrects every mismatched monthly row that has had NOTHING collected against it, and reports
+* the rest rather than touching them.
+*
+* The `paid = 0` guard is the whole safety story: a row with money against it may have been
+* agreed with the family at that amount, and rewriting it would silently move a balance the
+* nursery has already acted on. Those are returned in `skipped` for a human to decide on.
+*
+* Idempotent — a second run finds nothing left to fix.
+*/
+function reconcileMonthlyProrates(db, scope) {
+	const mismatches = findMonthlyProrateMismatches(db, scope);
+	const fixable = mismatches.filter((m) => m.paid <= 0);
+	const skipped = mismatches.filter((m) => m.paid > 0);
+	if (fixable.length === 0) return {
+		fixed: 0,
+		skipped
+	};
+	const now = (/* @__PURE__ */ new Date()).toISOString();
+	const update = db.prepare(`UPDATE payments
+     SET prorated_calculated = ?, total = ?, balance = ?, status = 'unpaid', updated_at = ?, synced = 0
+     WHERE id = ?`);
+	for (const m of fixable) {
+		const quantity = 1;
+		const isDiscounted = m.basis !== null || m.expectedTotal === 0;
+		const rate = Number((m.expectedTotal / quantity).toFixed(2));
+		update.run(isDiscounted ? rate : null, m.expectedTotal, m.expectedTotal, now, m.id);
+	}
+	return {
+		fixed: fixable.length,
+		skipped
+	};
+}
+//#endregion
 //#region electron/db/migrations/index.ts
 var migrations = [
 	{
@@ -1181,6 +1521,17 @@ var migrations = [
 				db.exec(`UPDATE ${table} SET synced = 0;`);
 			} catch {}
 		}
+	},
+	{
+		name: "044_reconcile_monthly_prorate",
+		up: (db) => {
+			try {
+				const { fixed, skipped } = reconcileMonthlyProrates(db);
+				if (fixed > 0 || skipped.length > 0) console.log(`Pro-rate reconciliation: corrected ${fixed} unpaid monthly row(s), left ${skipped.length} paid row(s) for review.`);
+			} catch (error) {
+				console.error("Pro-rate reconciliation skipped:", error);
+			}
+		}
 	}
 ];
 function runMigrations(db) {
@@ -1668,210 +2019,6 @@ function applyCloudTombstones(db, cloudTombstones) {
 	}
 }
 //#endregion
-//#region electron/services/monthlyTotals.ts
-/**
-* Shared "what should this month actually bring in" maths.
-*
-* `payments.total` is the amount BILLED SO FAR: for attendance-driven units ('يوم' / 'ساعة' /
-* 'جلسة') `payments:generate` sets `quantity` from attendance already recorded, so half-way
-* through a month it is roughly half the month's real figure. The Payments screen has always
-* shown the full scheduled figure ("expected") alongside it, but the Dashboard summed `total`
-* — which is why an enrollment book worth ~70k EGP could read ~27k on the Dashboard.
-*
-* Both screens now derive their totals from here, so the two can never drift apart again.
-*/
-var ARABIC_MONTH_NAMES = [
-	"يناير",
-	"فبراير",
-	"مارس",
-	"أبريل",
-	"مايو",
-	"يونيو",
-	"يوليو",
-	"أغسطس",
-	"سبتمبر",
-	"أكتوبر",
-	"نوفمبر",
-	"ديسمبر"
-];
-/**
-* Parses a `YYYY-MM-DD` date without going through `new Date(string)`, which parses date-only
-* strings as UTC midnight and then reports local components — shifting the day by one in any
-* timezone behind UTC and silently moving a registration across a month boundary.
-* Returns a 0-based month, matching `Date#getMonth`.
-*/
-function parseIsoDate(value) {
-	if (!value) return null;
-	const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(value).trim());
-	if (!match) return null;
-	return {
-		year: Number(match[1]),
-		month: Number(match[2]) - 1,
-		day: Number(match[3])
-	};
-}
-/**
-* What a monthly ('شهر') enrollment costs when it starts on `startDay` of a month with
-* `daysInMonth` days: the full price from the 1st, otherwise the price scaled to the days
-* remaining (inclusive of the start day). Shared with `payments:generate` so the amount stored
-* on the row and the amount the Payments/Dashboard screens derive can never disagree.
-*/
-function monthlyProratedAmount(price, startDay, daysInMonth) {
-	if (!(startDay > 1) || !(daysInMonth > 0)) return price;
-	return Math.round(price * (daysInMonth - Math.min(startDay, daysInMonth) + 1) / daysInMonth);
-}
-/**
-* Builds the expected-quantity / expected-total calculators for one month.
-*
-* For the month currently in progress, scheduled days are counted from today (inclusive) to
-* month end and added to what has already been billed — days that have already elapsed without
-* attendance were genuinely not owed, so counting the whole month would overstate the bill.
-* Any other month is counted in full, since there is no "today" boundary inside it.
-*/
-function createExpectedTotalCalculator(month, year) {
-	const monthIndex = ARABIC_MONTH_NAMES.indexOf(month);
-	const payYear = Number(year);
-	const daysInMonth = monthIndex !== -1 ? new Date(payYear, monthIndex + 1, 0).getDate() : 30;
-	const today = /* @__PURE__ */ new Date();
-	const isCurrentMonth = monthIndex === today.getMonth() && payYear === today.getFullYear();
-	const startDay = isCurrentMonth ? today.getDate() : 1;
-	const countLessonDayOccurrences = (lessonDays, from) => {
-		let count = 0;
-		for (let d = from; d <= daysInMonth; d++) if (lessonDays.includes(new Date(payYear, monthIndex, d).getDay())) count++;
-		return count;
-	};
-	/**
-	* The first day of THIS month the child is billable from, or `null` when the enrollment does
-	* not reach the month at all (registered in a later month).
-	*
-	* Without this, every expected figure counted the whole month for a child who joined on the
-	* 19th: a Sunday+Thursday schedule in a past month was billed all 9 occurrences instead of the
-	* 3 that fall after registration, and the Dashboard's "invoiced" KPI inherited the same
-	* overstatement because it shares this calculator.
-	*/
-	const billableFromDay = (p) => {
-		const reg = parseIsoDate(p.reg_date);
-		if (!reg || monthIndex === -1) return 1;
-		if (reg.year > payYear || reg.year === payYear && reg.month > monthIndex) return null;
-		if (reg.year < payYear || reg.month < monthIndex) return 1;
-		return Math.min(Math.max(reg.day, 1), daysInMonth);
-	};
-	const parseLessonDays = (p) => {
-		try {
-			const parsed = JSON.parse(p.service_lesson_days || "[]");
-			return Array.isArray(parsed) ? parsed.map(Number).filter((n) => Number.isInteger(n)) : [];
-		} catch {
-			return [];
-		}
-	};
-	/**
-	* How a mid-month monthly subscription is split, and on what basis.
-	*
-	* A monthly enrollment with a weekday schedule ("fitness, 3 days a week") is not sold by the
-	* calendar day — it is sold as a number of sessions per week. Splitting it on calendar days
-	* charged the wrong fraction whenever the selected days are not spread evenly: joining before
-	* the last week of a Mon/Wed/Sat service can leave most of the month's sessions still to come
-	* even though few calendar days remain. So when the enrollment HAS selected days, the split is
-	* "sessions still to come ÷ sessions in the whole month". Without a schedule there is nothing
-	* to count and it falls back to calendar days.
-	*/
-	const monthlyProrateBasis = (p, fromDay) => {
-		const lessonDays = parseLessonDays(p);
-		if (lessonDays.length > 0 && monthIndex !== -1) {
-			const total = countLessonDayOccurrences(lessonDays, 1);
-			if (total > 0) return {
-				basis: "sessions",
-				remaining: countLessonDayOccurrences(lessonDays, fromDay),
-				total,
-				lessonDays
-			};
-		}
-		return {
-			basis: "days",
-			remaining: Math.max(0, daysInMonth - Math.min(fromDay, daysInMonth) + 1),
-			total: daysInMonth,
-			lessonDays
-		};
-	};
-	const expectedQuantity = (p) => {
-		const from = billableFromDay(p);
-		if (from === null) return 0;
-		if (p.unit === "شهر") return p.quantity || 1;
-		if (p.service === "حصص إضافية") return p.quantity;
-		const lessonDays = parseLessonDays(p);
-		if (lessonDays.length === 0 || monthIndex === -1) return p.quantity;
-		const scheduled = countLessonDayOccurrences(lessonDays, Math.max(from, startDay));
-		return isCurrentMonth ? p.quantity + scheduled : scheduled;
-	};
-	/**
-	* The per-unit rate to bill at. Only monthly enrollments can differ from `price`: a child who
-	* joined mid-month owes a pro-rated month.
-	*
-	* `prorated_calculated` (written by `payments:generate`) wins when present, so an amount an
-	* admin already settled against is never rewritten. When it is absent the rate is derived from
-	* `reg_date` instead of falling back to the full price — rows created before pro-rating
-	* existed, imported from Excel, or regenerated after the fact carry no stored discount, and
-	* defaulting those to a whole month is exactly what billed a 19th-of-the-month enrollment the
-	* full 550 instead of 231.
-	*/
-	const expectedRate = (p) => {
-		if (p.unit !== "شهر") return Number(p.price) || 0;
-		if (p.prorated_calculated != null) return Number(p.prorated_calculated);
-		const from = billableFromDay(p);
-		if (from === null) return 0;
-		return monthlyRate(Number(p.price) || 0, from, p);
-	};
-	/**
-	* The month rate to charge a subscription starting on `fromDay`: the full price from the 1st,
-	* otherwise the price scaled by whichever basis applies (see `monthlyProrateBasis`).
-	*/
-	const monthlyRate = (price, fromDay, p) => {
-		if (!(fromDay > 1)) return price;
-		const { remaining, total } = monthlyProrateBasis(p, fromDay);
-		if (total <= 0) return price;
-		return Math.round(price * remaining / total);
-	};
-	const expectedTotal = (p, qty) => Number((qty * expectedRate(p)).toFixed(2));
-	return {
-		expectedQuantity,
-		expectedRate,
-		expectedTotal,
-		billableFromDay,
-		monthlyRate,
-		monthlyProrateBasis,
-		monthIndex,
-		daysInMonth,
-		isCurrentMonth
-	};
-}
-/** Annotates rows in place with `expected_quantity` / `expected_total`. */
-function attachExpectedTotals(rows, month, year) {
-	const { expectedQuantity, expectedRate, expectedTotal, billableFromDay } = createExpectedTotalCalculator(month, year);
-	for (const row of rows) {
-		row.expected_quantity = expectedQuantity(row);
-		row.expected_rate = expectedRate(row);
-		row.expected_total = expectedTotal(row, row.expected_quantity);
-		row.expected_from_day = billableFromDay(row);
-	}
-	return rows;
-}
-/**
-* Loads the month's payment rows with the columns the expected-total maths needs, already
-* annotated. Used by the Dashboard; the Payments screen selects more columns and calls
-* `attachExpectedTotals` on its own result set.
-*/
-function getMonthBillableRows(db, month, year) {
-	return attachExpectedTotals(db.prepare(`
-    SELECT p.service, p.unit, p.quantity, p.price, p.total, p.paid, p.balance, p.prorated_calculated,
-      c.reg_date,
-      COALESCE(NULLIF(cs.lesson_days, '[]'), c.lesson_days) as service_lesson_days
-    FROM payments p
-    JOIN children c ON p.child_id = c.id
-    LEFT JOIN child_services cs ON cs.id = p.service_id
-    WHERE p.month = ? AND p.year = ?
-  `).all(month, year), month, year);
-}
-//#endregion
 //#region electron/ipc/paymentsIPC.ts
 function calculatePayment(quantity, price, paid) {
 	const total = Number((quantity * price).toFixed(2));
@@ -2052,27 +2199,13 @@ ipcMain.handle("payments:generate", async (_event, { month, year }) => {
         AND ss.session_date >= ? AND ss.session_date <= ?
         AND (ss.service_id IS NULL OR sd.name = ?)
     `);
+		const { monthIndex, daysInMonth, monthlyRate } = createExpectedTotalCalculator(month, year);
+		const payYear = Number(year);
+		const monthPad2 = monthIndex !== -1 ? String(monthIndex + 1).padStart(2, "0") : "01";
+		const monthStartStr = `${payYear}-${monthPad2}-01`;
+		const monthEndStr = `${payYear}-${monthPad2}-${String(daysInMonth).padStart(2, "0")}`;
 		db.transaction(() => {
 			for (const enrollment of activeEnrollments) {
-				const monthIndex = [
-					"يناير",
-					"فبراير",
-					"مارس",
-					"أبريل",
-					"مايو",
-					"يونيو",
-					"يوليو",
-					"أغسطس",
-					"سبتمبر",
-					"أكتوبر",
-					"نوفمبر",
-					"ديسمبر"
-				].indexOf(month);
-				const payYear = Number(year);
-				const daysInMonth = monthIndex !== -1 ? new Date(payYear, monthIndex + 1, 0).getDate() : 30;
-				const monthPad2 = monthIndex !== -1 ? String(monthIndex + 1).padStart(2, "0") : "01";
-				const monthStartStr = `${payYear}-${monthPad2}-01`;
-				const monthEndStr = `${payYear}-${monthPad2}-${String(daysInMonth).padStart(2, "0")}`;
 				const regParts = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(enrollment.reg_date ?? "").trim());
 				if (regParts && monthIndex !== -1) {
 					const regYear = Number(regParts[1]);
@@ -2114,7 +2247,13 @@ ipcMain.handle("payments:generate", async (_event, { month, year }) => {
 						const regMonth = regParts ? Number(regParts[2]) - 1 : NaN;
 						const regDay = regParts ? Number(regParts[3]) : NaN;
 						if (regYear === payYear && regMonth === monthIndex && regDay > 1) {
-							if (enrollment.unit === "شهر") proratedCalc = monthlyProratedAmount(enrollment.price, regDay, daysInMonth);
+							if (enrollment.unit === "شهر") proratedCalc = monthlyRate(enrollment.price, regDay, {
+								service: enrollment.service,
+								unit: enrollment.unit,
+								quantity: 1,
+								price: enrollment.price,
+								service_lesson_days: enrollment.lesson_days ?? null
+							});
 							else if (enrollment.unit === "يوم" || enrollment.unit === "ساعة") {} else if (enrollment.unit === "جلسة") {
 								quantity = countScheduledSessions(enrollment.reg_date);
 								proratedCalc = Math.round(enrollment.price * quantity);
@@ -2145,9 +2284,17 @@ ipcMain.handle("payments:generate", async (_event, { month, year }) => {
 				}
 			}
 		})();
+		const { fixed: reconciled, skipped: needsReview } = reconcileMonthlyProrates(db, {
+			month,
+			year
+		});
 		return {
 			created: createdCount,
-			updated: updatedCount
+			updated: updatedCount,
+			/** Monthly rows whose stored pro-rate was corrected to match the current rules. */
+			reconciled,
+			/** Mismatched rows left alone because payments had already been taken against them. */
+			needsReview: needsReview.length
 		};
 	} catch (error) {
 		console.error("Failed to generate payments:", error);
@@ -9789,6 +9936,8 @@ ipcMain.handle("dashboard:breakdown", async (_event, { month, year }) => {
 				* claiming the whole month for a child who joined on the 19th.
 				*/
 				billableFromDay: p.expected_from_day ?? null,
+				/** How a mid-month monthly split was worked out: by selected lesson days, or calendar days. */
+				prorateBasis: p.expected_prorate_basis ?? null,
 				/** quantity × price so far. */
 				billedTotal: Number(p.total ?? 0),
 				/** expectedQuantity × (proratedRate ?? price) — the month-end figure. */
@@ -10004,6 +10153,21 @@ ipcMain.handle("dashboard:get", async (_event, { month, year }) => {
 				type: "danger",
 				messageAr: `التزامات مستحقة بقيمة ${kpi.arrears} ج.م هذا الشهر (متأخرات الأطفال ${b.children} + رواتب غير مدفوعة ${b.salaries} + مصروفات ${b.expenses})`,
 				messageEn: `Outstanding obligations of ${kpi.arrears} EGP this month (children ${b.children} + unpaid salaries ${b.salaries} + expenses ${b.expenses})`
+			});
+		}
+		const prorateMismatches = findMonthlyProrateMismatches(db, {
+			month,
+			year
+		});
+		if (prorateMismatches.length > 0) {
+			const net = Number(prorateMismatches.reduce((s, m) => s + m.difference, 0).toFixed(2));
+			const names = [...new Set(prorateMismatches.map((m) => m.child_name).filter(Boolean))];
+			const sample = names.slice(0, 3).join("، ");
+			const more = names.length > 3 ? ` +${names.length - 3}` : "";
+			alerts.push({
+				type: "warning",
+				messageAr: `${prorateMismatches.length} اشتراك شهري مدفوع جزئياً أو كلياً لا تتطابق قيمته مع حساب الاشتراك النسبي (فرق ${net} ج.م): ${sample}${more}. لم يتم تعديلها تلقائياً لأنه تم تحصيل مبالغ عليها.`,
+				messageEn: `${prorateMismatches.length} monthly subscription(s) with money collected no longer match the pro-rate rules (net ${net} EGP): ${sample}${more}. Left unchanged because payments were already taken against them.`
 			});
 		}
 		if (kpi.collectionRate < .8 && kpi.invoiced > 0) {
