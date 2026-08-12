@@ -93,6 +93,12 @@ export interface Payment {
   // attendance-driven units only counts days/hours attended or absent-unexcused so far)
   expected_quantity?: number
   expected_total?: number
+  // The per-unit rate `expected_total` was built from: `price` for a full month, or the
+  // pro-rated month rate for a child who registered mid-month.
+  expected_rate?: number
+  // The child's registration date, joined in so the billing maths can tell whether the child
+  // was actually enrolled for the whole month.
+  reg_date?: string | null
   // Pro-rating audit (feature 005)
   prorated_calculated?: number | null
   // Payment method (feature 005 extension)

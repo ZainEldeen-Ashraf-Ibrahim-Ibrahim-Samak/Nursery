@@ -1,4 +1,5 @@
 import type { Db } from '../connection.js'
+import { reconcileMonthlyProrates } from '../../services/prorateReconcile.js'
 
 interface Migration {
   name: string
@@ -1139,6 +1140,31 @@ const migrations: Migration[] = [
         try {
           db.exec(`UPDATE ${table} SET synced = 0;`)
         } catch { /* table not present in this database — nothing to re-flag */ }
+      }
+    }
+  },
+  {
+    name: '044_reconcile_monthly_prorate',
+    up: (db) => {
+      // Bring every monthly subscription row in line with the current pro-rating rules: no day
+      // before the child's registration date is charged, and a mid-month start is split by the
+      // enrollment's selected lesson days rather than by calendar days.
+      //
+      // Only rows with nothing collected against them are rewritten — see reconcileMonthlyProrates.
+      // Rows that have been paid are deliberately left alone and surfaced as a Dashboard alert
+      // instead, so a balance the nursery has already acted on is never moved behind their back.
+      try {
+        const { fixed, skipped } = reconcileMonthlyProrates(db)
+        if (fixed > 0 || skipped.length > 0) {
+          console.log(
+            `Pro-rate reconciliation: corrected ${fixed} unpaid monthly row(s), ` +
+            `left ${skipped.length} paid row(s) for review.`
+          )
+        }
+      } catch (error) {
+        // A data-repair pass must never block startup: the app is still correct without it
+        // (every read path derives the right figure anyway), it just leaves stored rows stale.
+        console.error('Pro-rate reconciliation skipped:', error)
       }
     }
   }

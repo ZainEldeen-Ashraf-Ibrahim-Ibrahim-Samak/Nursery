@@ -3,6 +3,7 @@ import { getDb } from '../db/connection.js'
 import { getCurrentUser } from './authIPC.js'
 import { computeBaseSalary } from './salariesIPC.js'
 import { ARABIC_MONTH_NAMES, getMonthBillableRows, attachExpectedTotals } from '../services/monthlyTotals.js'
+import { findMonthlyProrateMismatches } from '../services/prorateReconcile.js'
 
 const arabicMonths = ARABIC_MONTH_NAMES
 
@@ -171,7 +172,7 @@ ipcMain.handle('dashboard:breakdown', async (_event, { month, year }) => {
       db.prepare(`
         SELECT p.id, p.child_id, p.service, p.unit, p.quantity, p.price, p.total, p.paid,
                p.balance, p.status, p.prorated_calculated, p.notes,
-               c.name as child_name, c.guardian,
+               c.name as child_name, c.guardian, c.reg_date,
                COALESCE(NULLIF(cs.lesson_days, '[]'), c.lesson_days) as service_lesson_days
         FROM payments p
         JOIN children c ON p.child_id = c.id
@@ -200,8 +201,23 @@ ipcMain.handle('dashboard:breakdown', async (_event, { month, year }) => {
         /** Full scheduled quantity for the month (billed + still-scheduled days). */
         expectedQuantity: Number(p.expected_quantity ?? 0),
         price: Number(p.price ?? 0),
-        /** Set only for mid-month enrollments: the pro-rated month rate that replaces `price`. */
-        proratedRate: p.prorated_calculated == null ? null : Number(p.prorated_calculated),
+        /**
+         * Set only for mid-month enrollments: the pro-rated month rate that replaces `price`.
+         * Derived from `reg_date` when no discount was stored on the row, so the drill-down
+         * explains the same rate the KPI was actually built from.
+         */
+        proratedRate: Number(p.expected_rate ?? 0) === Number(p.price ?? 0) ? null : Number(p.expected_rate ?? 0),
+        /** The child's registration date — why a rate or day count may be less than a full month. */
+        regDate: p.reg_date ?? null,
+        /**
+         * First day of the month this line is billable from: 1 when the child was already
+         * enrolled, their registration day for a mid-month start, `null` when they had not
+         * registered yet. Lets the drill-down state the real counting window instead of
+         * claiming the whole month for a child who joined on the 19th.
+         */
+        billableFromDay: p.expected_from_day ?? null,
+        /** How a mid-month monthly split was worked out: by selected lesson days, or calendar days. */
+        prorateBasis: p.expected_prorate_basis ?? null,
         /** quantity × price so far. */
         billedTotal: Number(p.total ?? 0),
         /** expectedQuantity × (proratedRate ?? price) — the month-end figure. */
@@ -482,6 +498,28 @@ ipcMain.handle('dashboard:get', async (_event, { month, year }) => {
       })
     }
     
+    // Monthly rows whose stored amount no longer matches the pro-rating rules. The startup
+    // reconciliation corrects every such row that has had nothing collected against it, so
+    // anything left here has money against it and needs a human decision — surfacing it beats
+    // silently moving a balance the nursery has already acted on.
+    const prorateMismatches = findMonthlyProrateMismatches(db, { month, year })
+    if (prorateMismatches.length > 0) {
+      const net = Number(prorateMismatches.reduce((s, m) => s + m.difference, 0).toFixed(2))
+      const names = [...new Set(prorateMismatches.map((m) => m.child_name).filter(Boolean))]
+      const sample = names.slice(0, 3).join('، ')
+      const more = names.length > 3 ? ` +${names.length - 3}` : ''
+      // A positive net means those children were under-billed; negative means over-billed.
+      alerts.push({
+        type: 'warning',
+        messageAr:
+          `${prorateMismatches.length} اشتراك شهري مدفوع جزئياً أو كلياً لا تتطابق قيمته مع حساب الاشتراك النسبي ` +
+          `(فرق ${net} ج.م): ${sample}${more}. لم يتم تعديلها تلقائياً لأنه تم تحصيل مبالغ عليها.`,
+        messageEn:
+          `${prorateMismatches.length} monthly subscription(s) with money collected no longer match the ` +
+          `pro-rate rules (net ${net} EGP): ${sample}${more}. Left unchanged because payments were already taken against them.`,
+      })
+    }
+
     if (kpi.collectionRate < 0.80 && kpi.invoiced > 0) {
       const pct = Math.round(kpi.collectionRate * 100)
       alerts.push({

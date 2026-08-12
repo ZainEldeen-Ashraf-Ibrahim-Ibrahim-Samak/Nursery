@@ -198,9 +198,28 @@ export default function MonthlyPayments() {
 
   // Generate payments for this period
   const [isGenerating, setIsGenerating] = useState(false)
+  // Result of the last generate run. Generating also repairs monthly rows whose stored pro-rate
+  // no longer matches the rules, so the admin is told what changed rather than having amounts
+  // move underneath them with no explanation.
+  const [generateNotice, setGenerateNotice] = useState<string | null>(null)
   const handleGenerate = async () => {
     setIsGenerating(true)
-    await generatePayments()
+    setGenerateNotice(null)
+    const result = await generatePayments()
+    const parts = isAr
+      ? [
+          `تم إنشاء ${result.created} سجل`,
+          result.updated > 0 ? `تحديث ${result.updated}` : null,
+          result.reconciled > 0 ? `تصحيح الاشتراك النسبي لـ ${result.reconciled} سجل` : null,
+          result.needsReview > 0 ? `${result.needsReview} سجل مدفوع يحتاج مراجعة يدوية` : null,
+        ]
+      : [
+          `${result.created} row(s) created`,
+          result.updated > 0 ? `${result.updated} updated` : null,
+          result.reconciled > 0 ? `${result.reconciled} pro-rate(s) corrected` : null,
+          result.needsReview > 0 ? `${result.needsReview} paid row(s) need manual review` : null,
+        ]
+    setGenerateNotice(parts.filter(Boolean).join(isAr ? '، ' : ', '))
     setIsGenerating(false)
   }
 
@@ -284,6 +303,16 @@ export default function MonthlyPayments() {
       {error && (
         <Alert variant="danger" title={t('error')} onClose={clearError}>
           {error}
+        </Alert>
+      )}
+
+      {generateNotice && (
+        <Alert
+          variant="info"
+          title={isAr ? 'نتيجة إنشاء المطالبات' : 'Generate result'}
+          onClose={() => setGenerateNotice(null)}
+        >
+          {generateNotice}
         </Alert>
       )}
 
@@ -605,11 +634,28 @@ export default function MonthlyPayments() {
                                   className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-600 flex items-center gap-2"
                                 >
                                   <span className="font-semibold text-slate-500">{payment.service}</span>
-                                  <span>
-                                    {i18n.language === 'ar'
-                                      ? `${payment.expected_quantity ?? payment.quantity} ${payment.unit} × ${payment.price} ج.م`
-                                      : `${payment.expected_quantity ?? payment.quantity} ${payment.unit} × ${payment.price} EGP`}
-                                  </span>
+                                  {/* Rate, not `price`: a child who joined mid-month is billed a
+                                      pro-rated month, so printing the full monthly price here
+                                      contradicted the pro-rated amount shown right next to it. */}
+                                  {(() => {
+                                    const rate = payment.expected_rate ?? payment.price
+                                    const qty = payment.expected_quantity ?? payment.quantity
+                                    const isProrated = Number(rate) !== Number(payment.price)
+                                    return (
+                                      <span>
+                                        {isAr
+                                          ? `${qty} ${payment.unit} × ${rate} ج.م`
+                                          : `${qty} ${payment.unit} × ${rate} EGP`}
+                                        {isProrated && (
+                                          <span className="ms-1 text-amber-600 font-semibold">
+                                            {isAr
+                                              ? `(محسوب بالتناسب من ${payment.price})`
+                                              : `(pro-rated from ${payment.price})`}
+                                          </span>
+                                        )}
+                                      </span>
+                                    )
+                                  })()}
                                   <span className="font-bold text-slate-800">{formatCurrency(payment.expected_total ?? payment.total)}</span>
                                 </div>
                               ))}

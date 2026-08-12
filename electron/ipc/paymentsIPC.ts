@@ -2,8 +2,9 @@ import { ipcMain } from 'electron'
 import { getDb } from '../db/connection.js'
 import { getCurrentUser } from './authIPC.js'
 import { requireAdmin } from './_guard.js'
-import { attachExpectedTotals } from '../services/monthlyTotals.js'
+import { attachExpectedTotals, createExpectedTotalCalculator } from '../services/monthlyTotals.js'
 import { recordLocalTombstone } from '../services/tombstones.js'
+import { reconcileMonthlyProrates } from '../services/prorateReconcile.js'
 import type { Payment, PaymentStatus } from '../../src/types/index.js'
 
 // Pure function for payment calculations (exported for unit testing)
@@ -88,6 +89,7 @@ ipcMain.handle('payments:get', async (_event, { month, year }) => {
     // read-only Transactions view, day/hour services are billed here from attendance counts.
     const payments = db.prepare(`
       SELECT p.*, c.name as child_name, c.guardian as child_guardian, c.guardian_phone as child_guardian_phone, c.is_active as child_is_active,
+        c.reg_date,
         COALESCE(NULLIF(cs.lesson_days, '[]'), c.lesson_days) as service_lesson_days,
         (SELECT COUNT(*) FROM payment_transactions pt WHERE pt.payment_id = p.id) as transaction_count
       FROM payments p
@@ -279,15 +281,27 @@ ipcMain.handle('payments:generate', async (_event, { month, year }) => {
         AND (ss.service_id IS NULL OR sd.name = ?)
     `)
 
+    // Calendar facts for the period, and the shared pro-rate calculator. Hoisted out of the
+    // enrollment loop: they depend only on month/year, so rebuilding them per enrollment was
+    // pure repetition.
+    const { monthIndex, daysInMonth, monthlyRate } = createExpectedTotalCalculator(month, year)
+    const payYear = Number(year)
+    const monthPad2 = monthIndex !== -1 ? String(monthIndex + 1).padStart(2, '0') : '01'
+    const monthStartStr = `${payYear}-${monthPad2}-01`
+    const monthEndStr = `${payYear}-${monthPad2}-${String(daysInMonth).padStart(2, '0')}`
+
     const transaction = db.transaction(() => {
       for (const enrollment of activeEnrollments) {
-        const arabicMonthNames = ['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر']
-        const monthIndex = arabicMonthNames.indexOf(month)
-        const payYear = Number(year)
-        const daysInMonth = monthIndex !== -1 ? new Date(payYear, monthIndex + 1, 0).getDate() : 30
-        const monthPad2 = monthIndex !== -1 ? String(monthIndex + 1).padStart(2, '0') : '01'
-        const monthStartStr = `${payYear}-${monthPad2}-01`
-        const monthEndStr = `${payYear}-${monthPad2}-${String(daysInMonth).padStart(2, '0')}`
+        // A child registered after this month ended was not enrolled during it. Generating a
+        // row anyway invoiced them a full month they never attended — the monthly pro-rate
+        // below only fires when reg_date falls INSIDE the month, so a later registration fell
+        // through to the undiscounted full price.
+        const regParts = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(enrollment.reg_date ?? '').trim())
+        if (regParts && monthIndex !== -1) {
+          const regYear = Number(regParts[1])
+          const regMonth = Number(regParts[2]) - 1
+          if (regYear > payYear || (regYear === payYear && regMonth > monthIndex)) continue
+        }
 
         const countBillableAttendance = () => {
           const row = billableAttendanceStmt.get(enrollment.child_id, monthStartStr, monthEndStr, enrollment.service) as any
@@ -342,14 +356,26 @@ ipcMain.handle('payments:generate', async (_event, { month, year }) => {
           // Pro-rate: if child registered mid-month, scale quantity to days remaining
           let proratedCalc: number | null = null
           if (enrollment.reg_date && monthIndex !== -1) {
-            const regDate = new Date(enrollment.reg_date)
-            const regYear = regDate.getFullYear()
-            const regMonth = regDate.getMonth()
-            if (regYear === payYear && regMonth === monthIndex && regDate.getDate() > 1) {
-              const daysRemaining = daysInMonth - regDate.getDate() + 1
+            // Parsed off the string rather than via `new Date(...)`, which reads a date-only
+            // value as UTC midnight and then reports LOCAL components — shifting the day (and
+            // possibly the month) in any timezone behind UTC.
+            const regParts = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(enrollment.reg_date).trim())
+            const regYear = regParts ? Number(regParts[1]) : NaN
+            const regMonth = regParts ? Number(regParts[2]) - 1 : NaN
+            const regDay = regParts ? Number(regParts[3]) : NaN
+            if (regYear === payYear && regMonth === monthIndex && regDay > 1) {
               if (enrollment.unit === 'شهر') {
-                // pro-rate price for monthly service
-                proratedCalc = Math.round((enrollment.price * daysRemaining) / daysInMonth)
+                // Pro-rate the month through the same calculator the Payments/Dashboard read-time
+                // maths uses, so the stored and derived amounts always agree. It splits by the
+                // enrollment's selected lesson days when it has them, and by calendar days when
+                // it does not.
+                proratedCalc = monthlyRate(enrollment.price, regDay, {
+                  service: enrollment.service,
+                  unit: enrollment.unit,
+                  quantity: 1,
+                  price: enrollment.price,
+                  service_lesson_days: enrollment.lesson_days ?? null,
+                })
               } else if (enrollment.unit === 'يوم' || enrollment.unit === 'ساعة') {
                 // attendance-driven units: quantity already counts only billable attendance,
                 // which cannot predate registration — no extra pro-rating needed
@@ -426,7 +452,22 @@ ipcMain.handle('payments:generate', async (_event, { month, year }) => {
     })
 
     transaction()
-    return { created: createdCount, updated: updatedCount }
+
+    // Bring existing monthly rows for this period back in line with the current pro-rating
+    // rules. The startup migration does this once across the whole book; doing it here too makes
+    // the repair ongoing, so a reg_date corrected after the row was generated is picked up the
+    // next time the admin regenerates rather than drifting until the next release. Only rows
+    // with nothing collected against them are touched — the rest are reported, never rewritten.
+    const { fixed: reconciled, skipped: needsReview } = reconcileMonthlyProrates(db, { month, year })
+
+    return {
+      created: createdCount,
+      updated: updatedCount,
+      /** Monthly rows whose stored pro-rate was corrected to match the current rules. */
+      reconciled,
+      /** Mismatched rows left alone because payments had already been taken against them. */
+      needsReview: needsReview.length,
+    }
   } catch (error: any) {
     console.error('Failed to generate payments:', error)
     throw new Error(error.message || 'Failed to generate payments')

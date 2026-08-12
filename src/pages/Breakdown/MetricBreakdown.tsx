@@ -29,6 +29,10 @@ interface ChildLine {
   expectedQuantity: number
   price: number
   proratedRate: number | null
+  regDate: string | null
+  /** 1 = enrolled all month, N = joined on day N, null = not yet registered in this month. */
+  billableFromDay: number | null
+  prorateBasis: { basis: 'sessions' | 'days'; remaining: number; total: number } | null
   billedTotal: number
   expectedTotal: number
   paid: number
@@ -245,7 +249,44 @@ export default function MetricBreakdown() {
    * services count weekday occurrences — from today onward while the month is still running.
    */
   const quantitySource = (line: ChildLine, period: BreakdownData['period']) => {
+    // Registered after this month ended — the line contributes nothing, and saying so beats
+    // showing "0" with no reason next to it.
+    if (line.billableFromDay == null) {
+      return isAr
+        ? `الطفل لم يكن ملتحقاً خلال هذا الشهر (تاريخ التسجيل ${line.regDate ?? '—'}) — لا يُحتسب عليه شيء`
+        : `Child was not enrolled during this month (registered ${line.regDate ?? '—'}) — nothing is charged`
+    }
+    // Where counting actually starts: the later of the registration day and (in the month still
+    // running) today.
+    const startsMidMonth = line.billableFromDay > 1
+    const countFrom = Math.max(line.billableFromDay, period.countFromDay)
+    const joined = isAr
+      ? `التحق يوم ${line.billableFromDay} من الشهر (${line.regDate ?? '—'})`
+      : `joined on day ${line.billableFromDay} of the month (${line.regDate ?? '—'})`
+
     if (line.unit === 'شهر') {
+      // The quantity of a subscription is always 1 (you buy one month). The selected days are
+      // NOT ignored — they decide how much of that month is charged, so name them here rather
+      // than leaving a bare "= 1" that looks like the schedule was thrown away.
+      const dayNames = line.lessonDays.length > 0
+        ? line.lessonDays.map((d) => (isAr ? weekdaysAr[d] : weekdaysEn[d])).join(isAr ? '، ' : ', ')
+        : null
+      if (startsMidMonth && line.prorateBasis) {
+        const { basis, remaining, total } = line.prorateBasis
+        if (basis === 'sessions') {
+          return isAr
+            ? `اشتراك شهري — الكمية 1 شهر، والسعر مقسوم على الأيام المختارة (${dayNames}): ${remaining} حصة متبقية من ${total} حصة في الشهر، لأن الطفل ${joined}`
+            : `Monthly enrollment — quantity is 1 month; the rate is split by the selected days (${dayNames}): ${remaining} of the month’s ${total} sessions remain, because the child ${joined}`
+        }
+        return isAr
+          ? `اشتراك شهري — الكمية 1 شهر، ولا توجد أيام مختارة فيُقسَّم السعر بالأيام التقويمية: ${remaining} يوم من ${total}، لأن الطفل ${joined}`
+          : `Monthly enrollment — quantity is 1 month; no days are selected so the rate is split by calendar days: ${remaining} of ${total}, because the child ${joined}`
+      }
+      if (dayNames) {
+        return isAr
+          ? `اشتراك شهري — الكمية 1 شهر بالسعر الكامل (الأيام المختارة: ${dayNames}) لأن الطفل ملتحق طوال الشهر`
+          : `Monthly enrollment — quantity is 1 month at the full rate (selected days: ${dayNames}), since the child is enrolled for the whole month`
+      }
       return isAr ? 'اشتراك شهري — كمية ثابتة = 1' : 'Monthly enrollment — fixed quantity of 1'
     }
     if (line.service === 'حصص إضافية') {
@@ -259,11 +300,17 @@ export default function MetricBreakdown() {
         : 'No weekday schedule set — the recorded attendance quantity is used'
     }
     const names = line.lessonDays.map((d) => (isAr ? weekdaysAr[d] : weekdaysEn[d])).join(isAr ? '، ' : ', ')
+    const since = startsMidMonth ? (isAr ? ` — ${joined}` : ` — ${joined}`) : ''
     if (period.isCurrentMonth) {
       const remaining = line.expectedQuantity - line.billedQuantity
       return isAr
-        ? `${line.billedQuantity} يوم مسجل بالحضور + ${remaining} يوم مجدول متبقٍ (${names}) من يوم ${period.countFromDay} حتى ${period.daysInMonth}`
-        : `${line.billedQuantity} day(s) already attended + ${remaining} scheduled day(s) left (${names}) from day ${period.countFromDay} to ${period.daysInMonth}`
+        ? `${line.billedQuantity} يوم مسجل بالحضور + ${remaining} يوم مجدول متبقٍ (${names}) من يوم ${countFrom} حتى ${period.daysInMonth}${since}`
+        : `${line.billedQuantity} day(s) already attended + ${remaining} scheduled day(s) left (${names}) from day ${countFrom} to ${period.daysInMonth}${since}`
+    }
+    if (startsMidMonth) {
+      return isAr
+        ? `عدد مرات تكرار الأيام المجدولة (${names}) من يوم ${countFrom} حتى ${period.daysInMonth} = ${line.expectedQuantity}${since}`
+        : `Occurrences of the scheduled weekdays (${names}) from day ${countFrom} to ${period.daysInMonth} = ${line.expectedQuantity}${since}`
     }
     return isAr
       ? `عدد مرات تكرار الأيام المجدولة (${names}) خلال الشهر كاملاً = ${line.expectedQuantity}`
@@ -271,11 +318,22 @@ export default function MetricBreakdown() {
   }
 
   /** The literal multiplication behind `expectedTotal`. */
-  const priceSource = (line: ChildLine) => {
+  const priceSource = (line: ChildLine, period: BreakdownData['period']) => {
+    if (line.billableFromDay == null) {
+      return isAr ? 'غير محتسب — خارج فترة الالتحاق' : 'Not charged — outside the enrollment period'
+    }
     if (line.unit === 'شهر' && line.proratedRate != null) {
+      const b = line.prorateBasis
+      const split = b
+        ? isAr
+          ? `${b.remaining} من ${b.total} ${b.basis === 'sessions' ? 'حصة' : 'يوم'}`
+          : `${b.remaining} of ${b.total} ${b.basis === 'sessions' ? 'sessions' : 'days'}`
+        : isAr
+          ? `${period.daysInMonth - line.billableFromDay! + 1} من ${period.daysInMonth} يوم`
+          : `${period.daysInMonth - line.billableFromDay! + 1} of ${period.daysInMonth} days`
       return isAr
-        ? `${line.expectedQuantity} × ${line.proratedRate.toFixed(2)} (سعر مُجزَّأ لالتحاق في منتصف الشهر بدلاً من ${line.price.toFixed(2)}) = ${line.expectedTotal.toFixed(2)}`
-        : `${line.expectedQuantity} × ${line.proratedRate.toFixed(2)} (pro-rated mid-month rate instead of ${line.price.toFixed(2)}) = ${line.expectedTotal.toFixed(2)}`
+        ? `${line.expectedQuantity} × ${line.proratedRate.toFixed(2)} (سعر مُجزَّأ: ${split} بدلاً من ${line.price.toFixed(2)}) = ${line.expectedTotal.toFixed(2)}`
+        : `${line.expectedQuantity} × ${line.proratedRate.toFixed(2)} (pro-rated: ${split}, instead of ${line.price.toFixed(2)}) = ${line.expectedTotal.toFixed(2)}`
     }
     return `${line.expectedQuantity} × ${line.price.toFixed(2)} = ${line.expectedTotal.toFixed(2)}`
   }
@@ -424,8 +482,8 @@ export default function MetricBreakdown() {
                 />
                 <p className="text-xs text-slate-500 text-start">
                   {isAr
-                    ? 'المستحق = مجموع (الكمية المتوقعة × السعر) لكل سطر اشتراك في الشهر. الكمية المتوقعة للخدمات المرتبطة بالحضور تُحسب من أيام الجدول، وللشهر الجاري تُحسب الأيام المتبقية من اليوم الحالي فقط.'
-                    : 'Invoiced = the sum of (expected quantity × price) over every enrollment line in the month. For attendance-driven services the expected quantity comes from the weekday schedule; in the current month only days from today onward are added to what has already been attended.'}
+                    ? 'المستحق = مجموع (الكمية المتوقعة × السعر المُطبَّق) لكل سطر اشتراك في الشهر. الكمية المتوقعة للخدمات المرتبطة بالحضور تُحسب من أيام الجدول، وللشهر الجاري تُحسب الأيام المتبقية من اليوم الحالي فقط. ولا تُحتسب أي أيام قبل تاريخ التحاق الطفل: من التحق في منتصف الشهر تُحسب له الأيام التالية لتاريخه فقط، والاشتراك الشهري يُخصم بالتناسب.'
+                    : 'Invoiced = the sum of (expected quantity × the applied rate) over every enrollment line in the month. For attendance-driven services the expected quantity comes from the weekday schedule; in the current month only days from today onward are added to what has already been attended. No day before the child’s registration date is ever counted: a mid-month joiner is charged only for the days after they started, and a monthly subscription is pro-rated.'}
                 </p>
               </>
             )}
@@ -569,7 +627,7 @@ export default function MetricBreakdown() {
                             {quantitySource(line, data.period)}
                           </td>
                           <td className="px-3 py-2.5 text-start text-xs font-mono text-slate-600 whitespace-nowrap">
-                            {priceSource(line)}
+                            {priceSource(line, data.period)}
                           </td>
                           <td className="px-3 py-2.5 text-end font-mono font-semibold text-slate-800 whitespace-nowrap">
                             {money2(line.expectedTotal)}

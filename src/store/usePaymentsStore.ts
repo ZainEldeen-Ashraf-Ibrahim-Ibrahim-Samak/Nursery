@@ -2,6 +2,16 @@ import { create } from 'zustand'
 import { friendlyError } from '../utils/errors.js'
 import type { Payment } from '../types/index.js'
 
+/** Outcome of a generate run, including the automatic pro-rate repair it performs. */
+export interface GenerateResult {
+  created: number
+  updated: number
+  /** Monthly rows whose stored pro-rate was corrected to match the current rules. */
+  reconciled: number
+  /** Mismatched rows left untouched because payments had already been collected against them. */
+  needsReview: number
+}
+
 interface PaymentSummary {
   totalInvoiced: number
   totalCollected: number
@@ -18,7 +28,7 @@ interface PaymentsState {
   currentYear: number
   setPeriod: (month: string, year: number) => void
   fetchPayments: () => Promise<void>
-  generatePayments: () => Promise<number>
+  generatePayments: () => Promise<GenerateResult>
   updatePayment: (args: {
     id: number
     quantity?: number
@@ -91,11 +101,16 @@ export const usePaymentsStore = create<PaymentsState>((set, get) => ({
       const year = get().currentYear
       const result = await window.api.payments.generate({ month, year })
       await get().fetchPayments()
-      return result.created
+      return {
+        created: result?.created ?? 0,
+        updated: result?.updated ?? 0,
+        reconciled: result?.reconciled ?? 0,
+        needsReview: result?.needsReview ?? 0,
+      }
     } catch (err: any) {
       const errorMsg = friendlyError(err, 'Failed to generate payments')
       set({ error: errorMsg, isLoading: false })
-      return 0
+      return { created: 0, updated: 0, reconciled: 0, needsReview: 0 }
     }
   },
 
