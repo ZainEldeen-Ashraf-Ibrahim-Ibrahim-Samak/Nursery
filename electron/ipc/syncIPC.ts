@@ -1,4 +1,5 @@
-import { ipcMain, BrowserWindow } from 'electron'
+import { ipcMain, BrowserWindow, dialog } from 'electron'
+import { writeFile } from 'node:fs/promises'
 import { getDb } from '../db/connection.js'
 import { applyCloudTombstones } from '../services/tombstones.js'
 import { requireAdmin, checkAuth } from './_guard.js'
@@ -631,6 +632,70 @@ ipcMain.handle('sync:pull', async (event) => {
   const res = await runPull(progressReporter(event, 'pull'))
   startupSyncCompleted = true
   return res
+})
+
+/**
+ * sync:export-json — Dump every synced collection from MongoDB into a single JSON file,
+ * so another project can consume the data without touching this app's SQLite database.
+ *
+ * The dump reads the raw collections (not the mongoose schemas), so any field written by an
+ * older version of the app — or by another app sharing the database — survives the export.
+ * Admin only: this writes the whole database, credentials-free but complete, to disk.
+ */
+ipcMain.handle('sync:export-json', async (_event, args?: { lang?: string }) => {
+  try {
+    requireAdmin()
+
+    const isAr = args?.lang === 'ar'
+
+    // Export must work even when the user never pressed Connect this session.
+    if (!getConnectionStatus().connected) {
+      const mongoUri = getMongoUri()
+      if (!mongoUri) throw new Error('No MongoDB URI configured. Connect first.')
+      await connectMongo(mongoUri)
+    }
+
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
+    const result = await dialog.showSaveDialog({
+      title: isAr ? 'حفظ نسخة JSON من قاعدة البيانات السحابية' : 'Save Cloud Database JSON Export',
+      defaultPath: `nursery-mongo-export-${stamp}.json`,
+      filters: [{ name: 'JSON (*.json)', extensions: ['json'] }]
+    })
+    if (result.canceled || !result.filePath) return { canceled: true }
+
+    const collections: Record<string, any[]> = {}
+    const counts: Record<string, number> = {}
+
+    for (const entity of SYNC_ENTITIES) {
+      const docs = await entity.model.collection.find({}).toArray()
+      // `_id` is a BSON ObjectId — JSON.stringify would emit an opaque object, so flatten it
+      // to its hex string for the consuming project.
+      const plain = docs.map((doc: any) =>
+        doc._id === undefined ? doc : { ...doc, _id: String(doc._id) }
+      )
+      collections[entity.name] = plain
+      counts[entity.name] = plain.length
+    }
+
+    const payload = {
+      exportedAt: new Date().toISOString(),
+      source: 'nursery-mongodb',
+      version: 1,
+      counts,
+      collections
+    }
+
+    await writeFile(result.filePath, JSON.stringify(payload, null, 2), 'utf-8')
+
+    const total = Object.values(counts).reduce((s, n) => s + n, 0)
+    logSync('export-json', 'all', 'batch', 'success')
+
+    return { canceled: false, filePath: result.filePath, counts, total }
+  } catch (error: any) {
+    logSync('export-json', 'all', 'batch', 'error', error.message)
+    console.error('sync:export-json error:', error)
+    throw new Error(error.message || 'JSON export failed')
+  }
 })
 
 // ── Auto-sync interval (T090) ─────────────────────────────────────────────────

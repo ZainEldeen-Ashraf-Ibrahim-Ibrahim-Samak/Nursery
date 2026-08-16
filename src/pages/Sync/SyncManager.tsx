@@ -58,6 +58,9 @@ export default function SyncManager() {
 
   const [mongoUri, setMongoUri] = useState('')
   const [autoInterval, setAutoInterval] = useState('30')
+  const [isExporting, setIsExporting] = useState(false)
+  const [exportResult, setExportResult] = useState<{ filePath: string; total: number } | null>(null)
+  const [exportError, setExportError] = useState<string | null>(null)
   const { get: getProgress, reset: resetProgress } = useProgress()
 
   const handlePush = () => { resetProgress('push'); push() }
@@ -84,6 +87,20 @@ export default function SyncManager() {
   const handleConnect = async () => {
     if (!mongoUri.trim()) return
     await connect(mongoUri.trim())
+  }
+
+  const handleExportJson = async () => {
+    setIsExporting(true)
+    setExportError(null)
+    setExportResult(null)
+    try {
+      const res: any = await window.api.sync.exportJson({ lang: i18n.language })
+      if (!res?.canceled) setExportResult({ filePath: res.filePath, total: res.total })
+    } catch (err: any) {
+      setExportError(err?.message || String(err))
+    } finally {
+      setIsExporting(false)
+    }
   }
 
   const handleToggleAutoSync = async () => {
@@ -451,6 +468,47 @@ export default function SyncManager() {
               : (isAr ? '▶ تشغيل' : '▶ Start Auto-Sync')}
           </Button>
         </div>
+      </Card>
+
+      {/* Export the whole cloud database as JSON for other projects */}
+      <Card className="p-6 space-y-4">
+        <div className="flex items-center gap-3">
+          <span className="text-3xl">📦</span>
+          <div>
+            <h2 className="font-bold text-slate-800">
+              {isAr ? 'تصدير كل البيانات كـ JSON' : 'Export All Data as JSON'}
+            </h2>
+            <p className="text-xs text-slate-400">
+              {isAr
+                ? 'ينزّل كل المجموعات من قاعدة البيانات السحابية (MongoDB) في ملف JSON واحد، لاستخدامه في مشروع آخر.'
+                : 'Dumps every collection from the MongoDB cloud database into a single JSON file for use in another project.'}
+            </p>
+          </div>
+        </div>
+
+        <Button
+          variant="primary"
+          onClick={handleExportJson}
+          isLoading={isExporting}
+          className="w-full md:w-auto"
+        >
+          📦 {isAr ? 'تصدير JSON' : 'Export JSON'}
+        </Button>
+
+        {exportError && (
+          <Alert variant="danger" title={isAr ? 'فشل التصدير' : 'Export Failed'} onClose={() => setExportError(null)}>
+            {exportError}
+          </Alert>
+        )}
+
+        {exportResult && (
+          <div className="bg-emerald-50 rounded-xl p-3 text-xs text-slate-600 space-y-1">
+            <p className="font-bold text-emerald-700">
+              ✅ {isAr ? `تم تصدير ${exportResult.total} سجل` : `Exported ${exportResult.total} records`}
+            </p>
+            <p className="font-mono break-all">{exportResult.filePath}</p>
+          </div>
+        )}
       </Card>
 
       {/* Force Refresh: full push+pull then status */}

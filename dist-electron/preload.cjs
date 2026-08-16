@@ -148,6 +148,7 @@ electron.contextBridge.exposeInMainWorld("api", {
 		status: () => electron.ipcRenderer.invoke("sync:status"),
 		autoSync: (args) => electron.ipcRenderer.invoke("sync:auto-sync", args),
 		autoSyncStatus: () => electron.ipcRenderer.invoke("sync:auto-status:get"),
+		exportJson: (args) => electron.ipcRenderer.invoke("sync:export-json", args ?? {}),
 		onAutoSyncStatus: (callback) => {
 			const handler = (_e, payload) => callback(payload);
 			electron.ipcRenderer.on("sync:auto-status", handler);

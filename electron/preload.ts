@@ -185,6 +185,7 @@ const api = {
     autoSync: (args: { enabled: boolean; intervalMinutes?: number }) =>
       ipcRenderer.invoke('sync:auto-sync', args),
     autoSyncStatus: () => ipcRenderer.invoke('sync:auto-status:get'),
+    exportJson: (args?: { lang?: string }) => ipcRenderer.invoke('sync:export-json', args ?? {}),
     onAutoSyncStatus: (
       callback: (payload: { state: 'connecting' | 'pushing' | 'pulling' | 'done' | 'error' }) => void
     ) => {

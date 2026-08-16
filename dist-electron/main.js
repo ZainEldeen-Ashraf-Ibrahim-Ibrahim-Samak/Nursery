@@ -11,6 +11,7 @@ import ExcelJS from "exceljs";
 import PdfPrinter from "pdfmake";
 import ArabicReshaper from "arabic-persian-reshaper";
 import crypto from "node:crypto";
+import { writeFile } from "node:fs/promises";
 import mongoose, { Schema } from "mongoose";
 import { promises } from "node:dns";
 //#region electron/env.ts
@@ -9675,6 +9676,65 @@ ipcMain.handle("sync:pull", async (event) => {
 	const res = await runPull(progressReporter(event, "pull"));
 	startupSyncCompleted = true;
 	return res;
+});
+/**
+* sync:export-json — Dump every synced collection from MongoDB into a single JSON file,
+* so another project can consume the data without touching this app's SQLite database.
+*
+* The dump reads the raw collections (not the mongoose schemas), so any field written by an
+* older version of the app — or by another app sharing the database — survives the export.
+* Admin only: this writes the whole database, credentials-free but complete, to disk.
+*/
+ipcMain.handle("sync:export-json", async (_event, args) => {
+	try {
+		requireAdmin();
+		const isAr = args?.lang === "ar";
+		if (!getConnectionStatus().connected) {
+			const mongoUri = getMongoUri();
+			if (!mongoUri) throw new Error("No MongoDB URI configured. Connect first.");
+			await connectMongo(mongoUri);
+		}
+		const stamp = (/* @__PURE__ */ new Date()).toISOString().slice(0, 19).replace(/[:T]/g, "-");
+		const result = await dialog.showSaveDialog({
+			title: isAr ? "حفظ نسخة JSON من قاعدة البيانات السحابية" : "Save Cloud Database JSON Export",
+			defaultPath: `nursery-mongo-export-${stamp}.json`,
+			filters: [{
+				name: "JSON (*.json)",
+				extensions: ["json"]
+			}]
+		});
+		if (result.canceled || !result.filePath) return { canceled: true };
+		const collections = {};
+		const counts = {};
+		for (const entity of SYNC_ENTITIES) {
+			const plain = (await entity.model.collection.find({}).toArray()).map((doc) => doc._id === void 0 ? doc : {
+				...doc,
+				_id: String(doc._id)
+			});
+			collections[entity.name] = plain;
+			counts[entity.name] = plain.length;
+		}
+		const payload = {
+			exportedAt: (/* @__PURE__ */ new Date()).toISOString(),
+			source: "nursery-mongodb",
+			version: 1,
+			counts,
+			collections
+		};
+		await writeFile(result.filePath, JSON.stringify(payload, null, 2), "utf-8");
+		const total = Object.values(counts).reduce((s, n) => s + n, 0);
+		logSync("export-json", "all", "batch", "success");
+		return {
+			canceled: false,
+			filePath: result.filePath,
+			counts,
+			total
+		};
+	} catch (error) {
+		logSync("export-json", "all", "batch", "error", error.message);
+		console.error("sync:export-json error:", error);
+		throw new Error(error.message || "JSON export failed");
+	}
 });
 var autoSyncTimer = null;
 var autoSyncRunning = false;
